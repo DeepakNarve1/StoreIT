@@ -1,0 +1,8 @@
+{
+  "name": "@folderit-clone/shared",
+  "version": "1.0.0",
+  "description": "Shared types and schemas for FolderIT Clone",
+  "main": "index.ts",
+  "types": "index.ts",
+  "private": true
+}

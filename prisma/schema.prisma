@@ -1,0 +1,196 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── TENANT (Organisation) ───────────────────────────────────────────────────
+model Tenant {
+  id           String     @id @default(uuid())
+  name         String
+  slug         String     @unique  // used in URLs e.g. acme.yourdomain.com
+  plan         String     @default("free") // free | starter | pro | enterprise
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  users        User[]
+  folders      Folder[]
+  files        File[]
+  categories   Category[]
+  invites      InviteToken[]
+  oneTimeLinks OneTimeLink[]
+}
+
+// ─── USER ────────────────────────────────────────────────────────────────────
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String
+  password     String    // bcrypt hashed
+  role         Role      @default(VIEWER)
+  departmentId String?   // optional department tag
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+
+  permissions  Permission[]
+  invites      InviteToken[]
+  uploadedFiles File[]   @relation("UploadedBy")
+
+  @@index([tenantId])
+  @@index([email])
+}
+
+// ─── ROLE ENUM ───────────────────────────────────────────────────────────────
+enum Role {
+  SUPERADMIN
+  ORG_ADMIN
+  MANAGER
+  EDITOR
+  VIEWER
+}
+
+// ─── CATEGORY (sidebar categories like Folderit) ─────────────────────────────
+model Category {
+  id           String     @id @default(uuid())
+  name         String
+  parentId     String?    // subcategory support
+  parent       Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children     Category[] @relation("CategoryTree")
+  tenantId     String
+  tenant       Tenant     @relation(fields: [tenantId], references: [id])
+  createdAt    DateTime   @default(now())
+
+  folders      Folder[]
+  files        File[]
+
+  @@index([tenantId])
+}
+
+// ─── FOLDER ──────────────────────────────────────────────────────────────────
+model Folder {
+  id           String    @id @default(uuid())
+  name         String
+  path         String?   // materialised path e.g. /uuid1/uuid2/uuid3 — for fast tree queries
+  isDeleted    Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+
+  parentId     String?
+  parent       Folder?   @relation("FolderTree", fields: [parentId], references: [id])
+  children     Folder[]  @relation("FolderTree")
+
+  categoryId   String?
+  category     Category? @relation(fields: [categoryId], references: [id])
+
+  files        File[]
+  permissions  Permission[]
+
+  @@index([tenantId])
+  @@index([tenantId, parentId])
+  @@index([tenantId, categoryId])
+}
+
+// ─── FILE ────────────────────────────────────────────────────────────────────
+model File {
+  id           String    @id @default(uuid())
+  name         String
+  storageKey   String    // S3/R2 key: {tenantId}/{folderId}/{uuid}_{filename}
+  mimeType     String
+  size         Int       // bytes
+  version      Int       @default(1)
+  isDeleted    Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+
+  folderId     String?
+  folder       Folder?   @relation(fields: [folderId], references: [id])
+
+  categoryId   String?
+  category     Category? @relation(fields: [categoryId], references: [id])
+
+  uploadedById String?
+  uploadedBy   User?     @relation("UploadedBy", fields: [uploadedById], references: [id])
+
+  permissions  Permission[]
+  oneTimeLinks OneTimeLink[]
+
+  @@index([tenantId])
+  @@index([tenantId, folderId])
+  @@index([tenantId, categoryId])
+}
+
+// ─── PERMISSION ──────────────────────────────────────────────────────────────
+model Permission {
+  id             String    @id @default(uuid())
+  action         String    // read | write | delete | admin
+  resourceType   String    // file | folder
+  resourceId     String    // fileId or folderId
+  grantedTo      String    // all | user | department
+  expiresAt      DateTime? // auto-expiry support
+  createdAt      DateTime  @default(now())
+
+  // optional link to a specific user (if grantedTo = user)
+  userId         String?
+  user           User?     @relation(fields: [userId], references: [id])
+
+  // optional link to folder or file directly
+  folderId       String?
+  folder         Folder?   @relation(fields: [folderId], references: [id])
+  fileId         String?
+  file           File?     @relation(fields: [fileId], references: [id])
+
+  @@index([resourceId, resourceType])
+  @@index([userId])
+}
+
+// ─── INVITE TOKEN (email invite system — no self-registration) ───────────────
+model InviteToken {
+  id         String    @id @default(uuid())
+  token      String    @unique @default(uuid())
+  email      String
+  role       Role      @default(VIEWER)
+  isUsed     Boolean   @default(false)
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+
+  tenantId   String
+  tenant     Tenant    @relation(fields: [tenantId], references: [id])
+
+  invitedById String?
+  invitedBy   User?   @relation(fields: [invitedById], references: [id])
+
+  @@index([token])
+  @@index([tenantId])
+}
+
+// ─── ONE TIME LINK ───────────────────────────────────────────────────────────
+model OneTimeLink {
+  id         String    @id @default(uuid())
+  token      String    @unique @default(uuid())
+  isUsed     Boolean   @default(false)
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+
+  tenantId   String
+  tenant     Tenant    @relation(fields: [tenantId], references: [id])
+
+  fileId     String
+  file       File      @relation(fields: [fileId], references: [id])
+
+  @@index([token])
+}
