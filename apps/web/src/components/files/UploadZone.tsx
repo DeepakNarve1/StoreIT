@@ -155,7 +155,7 @@ export default function UploadZone({
                          rounded-lg px-3 py-2.5"
             >
               {/* Status icon */}
-              <div className="flex-shrink-0">
+              <div className="shrink-0">
                 {upload.status === "done" && (
                   <CheckCircle size={16} className="text-green-500" />
                 )}
@@ -174,7 +174,7 @@ export default function UploadZone({
                   <span className="text-xs font-medium text-gray-800 truncate">
                     {upload.file.name}
                   </span>
-                  <span className="text-xs text-gray-400 flex-shrink-0">
+                  <span className="text-xs text-gray-400 shrink-0">
                     {formatBytes(upload.file.size)}
                   </span>
                 </div>

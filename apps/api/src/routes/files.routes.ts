@@ -134,6 +134,41 @@ router.post(
   },
 );
 
+// ─── GET /api/files/:id ───────────────────────────────────────────────────────
+router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const file = await prisma.file.findFirst({
+      where: {
+        id: req.params.id,
+        tenantId: req.user!.tenantId,
+        isDeleted: false,
+      },
+    });
+
+    if (!file) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+
+    // TODO: Replace with signed S3/R2 URL when storage is connected
+    // For now return metadata + a placeholder viewUrl
+    res.json({
+      file: {
+        id: file.id,
+        name: file.name,
+        mimeType: file.mimeType,
+        size: file.size,
+        storageKey: file.storageKey,
+        createdAt: file.createdAt,
+        // viewUrl will be a real signed URL once S3 is connected
+        viewUrl: null,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch file" });
+  }
+});
+
 // ─── DELETE /api/files/:id ────────────────────────────────────────────────────
 router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {

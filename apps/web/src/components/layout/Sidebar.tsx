@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   FolderOpen,
   Folder,
@@ -9,15 +9,20 @@ import {
   LayoutDashboard,
   Users,
   Settings,
+  Shield,
   Star,
   Trash2,
   Clock,
   Tag,
   Plus,
   Loader,
+  Hash,
+  X,
+  Check,
 } from "lucide-react";
 import clsx from "clsx";
 import api from "../../api/axios";
+import { useAuthStore } from "../../store/authStore";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -27,8 +32,14 @@ interface FolderItem {
   id: string;
   name: string;
   parentId: string | null;
-  createdAt: string;
   _count: { files: number; children: number };
+}
+
+interface CategoryItem {
+  id: string;
+  name: string;
+  parentId: string | null;
+  _count: { folders: number; files: number; children: number };
 }
 
 const NAV_ITEMS = [
@@ -40,7 +51,7 @@ const NAV_ITEMS = [
   { label: "Trash", icon: Trash2, path: "/trash" },
 ];
 
-// ─── Recursive folder tree node ───────────────────────────────────────────────
+// ─── Folder node (recursive) ──────────────────────────────────────────────────
 function FolderNode({
   folder,
   allFolders,
@@ -68,11 +79,10 @@ function FolderNode({
         )}
         style={{ paddingLeft: `${12 + depth * 12}px`, paddingRight: 8 }}
       >
-        {/* Expand toggle */}
         <button
           onClick={() => setExpanded((e) => !e)}
           className={clsx(
-            "p-0.5 rounded transition-colors shrink-0",
+            "p-0.5 rounded shrink-0",
             hasChildren ? "opacity-100" : "opacity-0 pointer-events-none",
           )}
         >
@@ -82,8 +92,6 @@ function FolderNode({
             <ChevronRight size={12} className="text-gray-400" />
           )}
         </button>
-
-        {/* Folder name — navigates on click */}
         <button
           onClick={() => navigate(`/browse/${folder.id}`)}
           className="flex items-center gap-2 flex-1 py-1.5 text-left min-w-0"
@@ -91,7 +99,10 @@ function FolderNode({
           {isActive ? (
             <FolderOpen size={14} className="shrink-0 text-blue-500" />
           ) : (
-            <Folder size={14} className="shrink-0 text-gray-400 group-hover:text-gray-600" />
+            <Folder
+              size={14}
+              className="shrink-0 text-gray-400 group-hover:text-gray-600"
+            />
           )}
           <span className="truncate">{folder.name}</span>
           {folder._count.files > 0 && (
@@ -101,8 +112,6 @@ function FolderNode({
           )}
         </button>
       </div>
-
-      {/* Children */}
       {expanded && children.length > 0 && (
         <div>
           {children.map((child) => (
@@ -119,25 +128,114 @@ function FolderNode({
   );
 }
 
+// ─── Category node ────────────────────────────────────────────────────────────
+function CategoryNode({ category }: { category: CategoryItem }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [expanded, setExpanded] = useState(false);
+  const isActive = location.pathname === `/category/${category.id}`;
+  const totalItems = category._count.folders + category._count.files;
+
+  return (
+    <div>
+      <div
+        className={clsx(
+          "flex items-center gap-1 rounded-lg text-sm transition-colors group",
+          isActive
+            ? "bg-blue-50 text-blue-700 font-medium"
+            : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
+        )}
+      >
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          className={clsx(
+            "p-0.5 rounded shrink-0 ml-3",
+            totalItems > 0 ? "opacity-100" : "opacity-0 pointer-events-none",
+          )}
+        >
+          {expanded ? (
+            <ChevronDown size={12} className="text-gray-400" />
+          ) : (
+            <ChevronRight size={12} className="text-gray-400" />
+          )}
+        </button>
+        <button
+          onClick={() => navigate(`/category/${category.id}`)}
+          className="flex items-center gap-2 flex-1 py-1.5 pr-2 text-left min-w-0"
+        >
+          <Hash
+            size={14}
+            className={clsx(
+              "shrink-0",
+              isActive
+                ? "text-blue-500"
+                : "text-gray-400 group-hover:text-gray-600",
+            )}
+          />
+          <span className="truncate font-medium">{category.name}</span>
+          {totalItems > 0 && (
+            <span
+              className="ml-auto text-xs text-gray-400 bg-gray-100
+                             px-1.5 py-0.5 rounded-full shrink-0"
+            >
+              {totalItems}
+            </span>
+          )}
+        </button>
+      </div>
+      {expanded && category._count.children > 0 && (
+        <div>{/* render child categories here when API supports it */}</div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Sidebar ─────────────────────────────────────────────────────────────
 export default function Sidebar({ isOpen }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
+  const { user } = useAuthStore();
+  const [showNewCategory, setShowNewCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
 
-  // Fetch ALL root folders for this tenant
-  const { data, isLoading } = useQuery({
+  // Fetch folders
+  const { data: foldersData, isLoading: foldersLoading } = useQuery({
     queryKey: ["folders", "root"],
     queryFn: async () => {
       const res = await api.get("/folders");
       return res.data as { folders: FolderItem[] };
     },
-    // Refetch when navigate to sidebar (folder created)
     staleTime: 10 * 1000,
   });
 
-  const folders = data?.folders ?? [];
-  // Root folders (no parent)
+  // Fetch categories
+  const { data: categoriesData, isLoading: categoriesLoading } = useQuery({
+    queryKey: ["categories"],
+    queryFn: async () => {
+      const res = await api.get("/categories");
+      return res.data as { categories: CategoryItem[] };
+    },
+    staleTime: 30 * 1000,
+  });
+
+  // Create category mutation
+  const createCategory = useMutation({
+    mutationFn: async (name: string) => {
+      const res = await api.post("/categories", { name, parentId: null });
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["categories"] });
+      setNewCategoryName("");
+      setShowNewCategory(false);
+    },
+  });
+
+  const folders = foldersData?.folders ?? [];
+  const categories = categoriesData?.categories ?? [];
   const rootFolders = folders.filter((f) => f.parentId === null);
+  const rootCategories = categories.filter((c) => c.parentId === null);
 
   if (!isOpen) return null;
 
@@ -180,7 +278,95 @@ export default function Sidebar({ isOpen }: SidebarProps) {
           })}
         </div>
 
-        {/* Folders section */}
+        {/* ── CATEGORIES ─────────────────────────────────────────────── */}
+        <div className="px-4 mb-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+              Categories
+            </span>
+            <button
+              onClick={() => setShowNewCategory(true)}
+              className="text-gray-400 hover:text-blue-600 transition-colors p-0.5 rounded"
+              title="Add category"
+            >
+              <Plus size={14} />
+            </button>
+          </div>
+        </div>
+
+        {/* New category input */}
+        {showNewCategory && (
+          <div className="px-2 mb-2">
+            <div
+              className="flex items-center gap-1 bg-blue-50 border border-blue-200
+                            rounded-lg px-2 py-1.5"
+            >
+              <Hash size={12} className="text-blue-400 shrink-0" />
+              <input
+                autoFocus
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newCategoryName.trim()) {
+                    createCategory.mutate(newCategoryName.trim());
+                  }
+                  if (e.key === "Escape") {
+                    setShowNewCategory(false);
+                    setNewCategoryName("");
+                  }
+                }}
+                placeholder="Category name…"
+                className="flex-1 bg-transparent text-xs outline-none text-gray-700
+                           placeholder-gray-400 min-w-0"
+              />
+              <button
+                onClick={() => {
+                  if (newCategoryName.trim())
+                    createCategory.mutate(newCategoryName.trim());
+                }}
+                disabled={!newCategoryName.trim() || createCategory.isPending}
+                className="text-blue-500 hover:text-blue-700 disabled:opacity-50 shrink-0"
+              >
+                <Check size={13} />
+              </button>
+              <button
+                onClick={() => {
+                  setShowNewCategory(false);
+                  setNewCategoryName("");
+                }}
+                className="text-gray-400 hover:text-gray-600 shrink-0"
+              >
+                <X size={13} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Category list */}
+        <div className="px-2 mb-4">
+          {categoriesLoading ? (
+            <div className="flex items-center gap-2 px-3 py-2 text-gray-400">
+              <Loader size={13} className="animate-spin" />
+              <span className="text-xs">Loading…</span>
+            </div>
+          ) : rootCategories.length === 0 ? (
+            <div className="px-3 py-2">
+              <p className="text-xs text-gray-400 italic">No categories yet</p>
+              <button
+                onClick={() => setShowNewCategory(true)}
+                className="text-xs text-blue-600 hover:text-blue-700 mt-1 font-medium"
+              >
+                + Add first category
+              </button>
+            </div>
+          ) : (
+            rootCategories.map((cat) => (
+              <CategoryNode key={cat.id} category={cat} />
+            ))
+          )}
+        </div>
+
+        {/* ── FOLDERS ────────────────────────────────────────────────── */}
         <div className="px-4 mb-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">
@@ -189,7 +375,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
             <button
               onClick={() => navigate("/browse")}
               className="text-gray-400 hover:text-blue-600 transition-colors p-0.5 rounded"
-              title="Create folder"
+              title="Browse all folders"
             >
               <Plus size={14} />
             </button>
@@ -198,7 +384,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
 
         {/* Folder tree */}
         <div className="px-2">
-          {isLoading ? (
+          {foldersLoading ? (
             <div className="flex items-center gap-2 px-3 py-2 text-gray-400">
               <Loader size={13} className="animate-spin" />
               <span className="text-xs">Loading folders…</span>
@@ -208,7 +394,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
               <p className="text-xs text-gray-400 italic">No folders yet</p>
               <button
                 onClick={() => navigate("/browse")}
-                className="text-xs text-blue-600 hover:text-blue-700 mt-1 transition-colors font-medium"
+                className="text-xs text-blue-600 hover:text-blue-700 mt-1 font-medium"
               >
                 + Create your first folder
               </button>
@@ -225,24 +411,38 @@ export default function Sidebar({ isOpen }: SidebarProps) {
         </div>
       </div>
 
-      {/* Bottom — Admin links */}
+      {/* Bottom */}
       <div className="border-t border-gray-200 p-2 shrink-0">
-        <button
-          onClick={() => navigate("/admin/users")}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
+        {user?.role === "SUPERADMIN" && (
+          <button
+            onClick={() => navigate("/superadmin/orgs")}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
+               text-purple-600 hover:bg-purple-50 transition-colors font-medium"
+          >
+            <Shield size={16} />
+            <span>Superadmin</span>
+          </button>
+        )}
+        {(user?.role === "ORG_ADMIN" || user?.role === "SUPERADMIN") && (
+          <button
+            onClick={() => navigate("/admin/users")}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
                      text-gray-600 hover:bg-gray-100 transition-colors"
-        >
-          <Users size={16} />
-          <span>Admin Panel</span>
-        </button>
-        <button
-          onClick={() => navigate("/admin/settings")}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
+          >
+            <Users size={16} />
+            <span>Admin Panel</span>
+          </button>
+        )}
+        {(user?.role === "ORG_ADMIN" || user?.role === "SUPERADMIN") && (
+          <button
+            onClick={() => navigate("/admin/settings")}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
                      text-gray-600 hover:bg-gray-100 transition-colors"
-        >
-          <Settings size={16} />
-          <span>Settings</span>
-        </button>
+          >
+            <Settings size={16} />
+            <span>Settings</span>
+          </button>
+        )}
       </div>
     </aside>
   );

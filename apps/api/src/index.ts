@@ -10,6 +10,9 @@ import cookieParser from "cookie-parser";
 import authRoutes from "./routes/auth.routes";
 import fileRoutes from "./routes/files.routes";
 import folderRoutes from "./routes/folders.routes";
+import categoryRoutes from "./routes/categories.routes";
+import userRoutes from "./routes/users.routes";
+import superadminRoutes from "./routes/superadmin.routes";
 
 import path from "path";
 dotenv.config({ path: path.join(__dirname, "../../.env") });
@@ -53,6 +56,9 @@ app.get("/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/files", fileRoutes);
 app.use("/api/folders", folderRoutes);
+app.use("/api/categories", categoryRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/superadmin", superadminRoutes);
 
 // ─── 404 HANDLER ─────────────────────────────────────────────────────────────
 app.use("*", (req, res) => {

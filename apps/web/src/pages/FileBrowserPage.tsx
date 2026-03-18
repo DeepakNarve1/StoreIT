@@ -16,6 +16,8 @@ import FileList from "../components/files/FileList";
 import UploadZone from "../components/files/UploadZone";
 import clsx from "clsx";
 import api from "../api/axios";
+import { useNavigate } from "react-router-dom";
+import FilePreviewModal from "../components/files/FilePreviewModal";
 
 type ViewMode = "grid" | "list";
 
@@ -33,6 +35,8 @@ export default function FileBrowserPage() {
   const [showUpload, setShowUpload] = useState(false);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
+  const [previewFile, setPreviewFile] = useState<any>(null);
+  const navigate = useNavigate();
 
   // Fetch files for current folder
   const { data: filesData, isLoading: filesLoading } = useQuery({
@@ -66,7 +70,9 @@ export default function FileBrowserPage() {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["folders", folderId ?? "root"] });
+      queryClient.invalidateQueries({
+        queryKey: ["folders", folderId ?? "root"],
+      });
       queryClient.invalidateQueries({ queryKey: ["folders", "root"] }); // Refresh sidebar
       setNewFolderName("");
       setShowNewFolder(false);
@@ -83,15 +89,16 @@ export default function FileBrowserPage() {
   };
 
   const handleFileClick = (file: any) => {
-    console.log("Preview file:", file);
-    // Preview modal — coming next
+    setPreviewFile(file);
   };
 
   const handleDelete = async (file: any) => {
     if (!confirm(`Delete "${file.name}"?`)) return;
     try {
       await api.delete(`/files/${file.id}`);
-      queryClient.invalidateQueries({ queryKey: ["files", folderId ?? "root"] });
+      queryClient.invalidateQueries({
+        queryKey: ["files", folderId ?? "root"],
+      });
     } catch {
       alert("Failed to delete file");
     }
@@ -209,7 +216,10 @@ export default function FileBrowserPage() {
             </button>
             <button
               type="button"
-              onClick={() => { setShowNewFolder(false); setNewFolderName(""); }}
+              onClick={() => {
+                setShowNewFolder(false);
+                setNewFolderName("");
+              }}
               className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 transition-colors"
             >
               Cancel
@@ -274,7 +284,7 @@ export default function FileBrowserPage() {
                   {folders.map((folder) => (
                     <button
                       key={folder.id}
-                      onClick={() => window.location.assign(`/browse/${folder.id}`)}
+                      onClick={() => navigate(`/browse/${folder.id}`)}
                       className="flex flex-col items-center p-4 bg-white border border-gray-200
                                  rounded-xl hover:border-blue-300 hover:shadow-sm transition-all text-center group"
                     >
@@ -285,7 +295,8 @@ export default function FileBrowserPage() {
                         {folder.name}
                       </span>
                       <span className="text-xs text-gray-400 mt-1">
-                        {folder._count.files} file{folder._count.files !== 1 ? "s" : ""}
+                        {folder._count.files} file
+                        {folder._count.files !== 1 ? "s" : ""}
                       </span>
                     </button>
                   ))}
@@ -315,6 +326,13 @@ export default function FileBrowserPage() {
           </div>
         )}
       </div>
+      {/* File Preview Modal */}
+      {previewFile && (
+        <FilePreviewModal
+          file={previewFile}
+          onClose={() => setPreviewFile(null)}
+        />
+      )}
     </AppShell>
   );
 }
