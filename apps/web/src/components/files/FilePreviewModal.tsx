@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   X,
   Download,
@@ -9,6 +9,7 @@ import {
   File,
   ExternalLink,
 } from "lucide-react";
+import api from "../../api/axios";
 
 interface FileItem {
   id: string;
@@ -96,7 +97,21 @@ export default function FilePreviewModal({
 
   const fileType = getFileType(file.mimeType);
   const { icon: Icon, color, bg } = getFileIcon(file.mimeType);
-  const viewUrl = file.viewUrl;
+  const [viewUrl, setViewUrl] = useState<string | null>(file?.viewUrl || null);
+  const [loadingUrl, setLoadingUrl] = useState(false);
+
+  useEffect(() => {
+    if (!file?.id) return;
+    // Fetch fresh signed URL from API
+    setLoadingUrl(true);
+    api
+      .get(`/files/${file.id}`)
+      .then((res) => {
+        setViewUrl(res.data.file.viewUrl);
+      })
+      .catch(console.error)
+      .finally(() => setLoadingUrl(false));
+  }, [file?.id]);
 
   const renderPreview = () => {
     // No URL yet (S3 not connected) — show placeholder

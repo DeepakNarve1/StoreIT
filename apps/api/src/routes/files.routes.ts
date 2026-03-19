@@ -3,16 +3,21 @@ import multer from "multer";
 import { v4 as uuid } from "uuid";
 import { verifyAuth, AuthRequest } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
+import {
+  uploadFile,
+  getFileViewUrl,
+  deleteFile,
+} from "../services/storage.service";
 
 const router = Router();
 
-// Store in memory — we'll send directly to S3/R2
+// Store in memory — upload directly to storage
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit
 });
 
-// ─── UUID validation helper ──────────────────────────────────────────────────
+// ─── UUID validation helper ───────────────────────────────────────────────────
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -27,7 +32,6 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
     const files = await prisma.file.findMany({
       where: {
         tenantId: req.user!.tenantId,
-        // Only filter by folderId if it is a valid UUID — otherwise show root files
         folderId: isValidUUID(folderId) ? folderId : null,
         isDeleted: false,
       },
@@ -50,6 +54,39 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// ─── GET /api/files/:id/download ──────────────────────────────────────────────
+router.get(
+  "/:id/download",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const file = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+      });
+
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      // Get download URL from storage (local or R2)
+      const downloadUrl = await getFileViewUrl(file.storageKey, 300);
+
+      res.json({
+        downloadUrl,
+        name: file.name,
+        mimeType: file.mimeType,
+      });
+    } catch (err) {
+      res.status(500).json({ error: "Download failed" });
+    }
+  },
+);
+
 // ─── POST /api/files/upload ───────────────────────────────────────────────────
 router.post(
   "/upload",
@@ -65,7 +102,7 @@ router.post(
         return;
       }
 
-      // ── Validate folderId is a real UUID that exists in this tenant ──────────
+      // ── Validate folderId ─────────────────────────────────────────────────
       let resolvedFolderId: string | null = null;
       if (isValidUUID(folderId)) {
         const folder = await prisma.folder.findFirst({
@@ -82,10 +119,8 @@ router.post(
         }
         resolvedFolderId = folder.id;
       }
-      // If folderId is not a valid UUID (e.g. "f1", "undefined", null),
-      // we silently treat it as root (null) — no FK violation
 
-      // ── Validate categoryId similarly ─────────────────────────────────────
+      // ── Validate categoryId ───────────────────────────────────────────────
       let resolvedCategoryId: string | null = null;
       if (isValidUUID(categoryId)) {
         const cat = await prisma.category.findFirst({
@@ -101,8 +136,8 @@ router.post(
         const fileUuid = uuid();
         const storageKey = `${req.user!.tenantId}/${resolvedFolderId || "root"}/${fileUuid}_${file.originalname}`;
 
-        // TODO: Upload to S3/R2 here
-        // await storageService.upload(storageKey, file.buffer, file.mimetype)
+        // ── Upload to local disk or R2 (handled by storage service) ──────────
+        await uploadFile(storageKey, file.buffer, file.mimetype);
 
         const saved = await prisma.file.create({
           data: {
@@ -127,9 +162,9 @@ router.post(
       }
 
       res.json({ files: savedFiles, message: "Files uploaded successfully" });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: "Upload failed" });
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      res.status(500).json({ error: err.message || "Upload failed" });
     }
   },
 );
@@ -150,8 +185,9 @@ router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // TODO: Replace with signed S3/R2 URL when storage is connected
-    // For now return metadata + a placeholder viewUrl
+    // Get view URL — local path in dev, signed R2 URL in production
+    const viewUrl = await getFileViewUrl(file.storageKey, 3600);
+
     res.json({
       file: {
         id: file.id,
@@ -160,8 +196,7 @@ router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
         size: file.size,
         storageKey: file.storageKey,
         createdAt: file.createdAt,
-        // viewUrl will be a real signed URL once S3 is connected
-        viewUrl: null,
+        viewUrl,
       },
     });
   } catch (err) {
@@ -184,11 +219,19 @@ router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Soft delete
+    // Soft delete in DB first
     await prisma.file.update({
       where: { id: req.params.id },
       data: { isDeleted: true },
     });
+
+    // Delete from storage (local or R2)
+    try {
+      await deleteFile(file.storageKey);
+    } catch (storageErr) {
+      // Log but don't fail — DB record is already soft deleted
+      console.error("Storage delete error:", storageErr);
+    }
 
     res.json({ message: "File deleted successfully" });
   } catch (err) {

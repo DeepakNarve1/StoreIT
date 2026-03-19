@@ -59,7 +59,7 @@ export default function FileList({
   if (files.length === 0) return null;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+    <div className="bg-white border border-gray-200 rounded-xl overflow-visible">
       {/* Header */}
       <div className="grid grid-cols-12 gap-4 px-4 py-2.5 border-b border-gray-100 bg-gray-50">
         <div className="col-span-6 text-xs font-medium text-gray-500">Name</div>
@@ -139,7 +139,7 @@ export default function FileList({
                       onClick={() => setActiveMenu(null)}
                     />
                     <div
-                      className="absolute right-0 top-full mt-1 w-40 bg-white
+                      className="absolute right-0 bottom-full mb-1 w-40 bg-white
                                     border border-gray-200 rounded-xl shadow-lg z-20 p-1"
                     >
                       <button
@@ -153,8 +153,31 @@ export default function FileList({
                         <Eye size={14} /> Preview
                       </button>
                       <button
+                        onClick={async () => {
+                          try {
+                            const res = await fetch(
+                              `/api/files/${file.id}/download`,
+                            );
+                            if (!res.ok) {
+                              alert(
+                                "Download not available yet — storage not connected",
+                              );
+                              return;
+                            }
+                            const blob = await res.blob();
+                            const url = URL.createObjectURL(blob);
+                            const link = document.createElement("a");
+                            link.href = url;
+                            link.download = file.name;
+                            link.click();
+                            URL.revokeObjectURL(url); // ✅ clean up memory
+                          } catch {
+                            alert("Download failed");
+                          }
+                          setActiveMenu(null);
+                        }}
                         className="w-full flex items-center gap-2 px-3 py-2 text-sm
-                                   text-gray-700 hover:bg-gray-100 rounded-lg"
+             text-gray-700 hover:bg-gray-100 rounded-lg"
                       >
                         <Download size={14} /> Download
                       </button>

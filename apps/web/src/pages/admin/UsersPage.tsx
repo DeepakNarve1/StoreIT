@@ -14,16 +14,33 @@ import {
 import AppShell from "../../components/layout/AppShell";
 import api from "../../api/axios";
 
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+interface Invite {
+  id: string;
+  email: string;
+  role: string;
+  expiresAt: string;
+  invitedBy?: { name: string };
+}
+
 const ROLES = ["VIEWER", "EDITOR", "MANAGER", "ORG_ADMIN"] as const;
 type Role = (typeof ROLES)[number];
 
-const roleColors: Record<Role, string> = {
+const roleColors: Record<string, string> = {
   SUPERADMIN: "bg-purple-100 text-purple-700",
   ORG_ADMIN: "bg-blue-100 text-blue-700",
   MANAGER: "bg-green-100 text-green-700",
   EDITOR: "bg-yellow-100 text-yellow-700",
   VIEWER: "bg-gray-100 text-gray-600",
-} as any;
+};
 
 export default function UsersPage() {
   const queryClient = useQueryClient();
@@ -39,7 +56,7 @@ export default function UsersPage() {
     queryKey: ["users"],
     queryFn: async () => {
       const res = await api.get("/users");
-      return res.data as { users: any[] };
+      return res.data as { users: User[] };
     },
   });
 
@@ -48,7 +65,7 @@ export default function UsersPage() {
     queryKey: ["invites"],
     queryFn: async () => {
       const res = await api.get("/users/invites");
-      return res.data as { invites: any[] };
+      return res.data as { invites: Invite[] };
     },
   });
 
@@ -69,8 +86,9 @@ export default function UsersPage() {
       queryClient.invalidateQueries({ queryKey: ["invites"] });
       setTimeout(() => setInviteSuccess(""), 4000);
     },
-    onError: (err: any) => {
-      setInviteError(err.response?.data?.error || "Failed to send invite");
+    onError: (err: unknown) => {
+      const error = err as { response?: { data?: { error?: string } } };
+      setInviteError(error.response?.data?.error || "Failed to send invite");
     },
   });
 
