@@ -4,6 +4,7 @@ import { verifyAuth, AuthRequest } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import { v4 as uuid } from "uuid";
 import { getFileViewUrl } from "../services/storage.service";
+import { createAuditLog } from "../services/audit.service";
 
 const router = Router();
 
@@ -154,6 +155,16 @@ router.post("/", verifyAuth, async (req: AuthRequest, res: Response) => {
       },
     });
 
+    await createAuditLog({
+      action: "permission.grant",
+      userId: req.user!.userId,
+      tenantId: req.user!.tenantId,
+      resourceType: data.resourceType,
+      resourceId: data.resourceId,
+      metadata: { grantedTo: data.grantedTo, action: data.action },
+      req,
+    });
+
     res.status(201).json({ permission });
   } catch (err: any) {
     if (err.name === "ZodError") {
@@ -218,6 +229,17 @@ router.post(
           expiresAt,
           tenantId: req.user!.tenantId,
         },
+      });
+
+      await createAuditLog({
+        action: "link.generate",
+        userId: req.user!.userId,
+        tenantId: req.user!.tenantId,
+        resourceType: "file",
+        resourceId: fileId,
+        resourceName: file.name,
+        metadata: { expiresInHours },
+        req,
       });
 
       const link = `${process.env.APP_URL}/view/${token}`;

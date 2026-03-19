@@ -8,6 +8,7 @@ import {
   validateInviteToken,
 } from "../services/auth.service";
 import { verifyAuth, AuthRequest } from "../middleware/auth";
+import { createAuditLog } from "../services/audit.service";
 
 const router = Router();
 
@@ -35,6 +36,16 @@ router.post("/login", async (req: Request, res: Response) => {
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    await createAuditLog({
+      action: "user.login",
+      userId: result.user.id,
+      tenantId: result.user.tenantId,
+      resourceType: "user",
+      resourceId: result.user.id,
+      resourceName: result.user.email,
+      req,
     });
 
     res.json({

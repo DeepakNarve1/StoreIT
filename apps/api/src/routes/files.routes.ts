@@ -8,16 +8,15 @@ import {
   getFileViewUrl,
   deleteFile,
 } from "../services/storage.service";
+import { createAuditLog } from "../services/audit.service";
 
 const router = Router();
 
-// Store in memory — upload directly to storage
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit
+  limits: { fileSize: 100 * 1024 * 1024 },
 });
 
-// ─── UUID validation helper ───────────────────────────────────────────────────
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -59,7 +58,6 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
         },
       });
     } else {
-      // VIEWER — only files with explicit permission or uploaded by them
       const permissions = await prisma.permission.findMany({
         where: {
           resourceType: "file",
@@ -67,10 +65,7 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
           OR: [{ grantedTo: "all" }, { grantedTo: "user", userId }],
           AND: [
             {
-              OR: [
-                { expiresAt: null }, // ✅ fixed
-                { expiresAt: { gt: new Date() } },
-              ],
+              OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
             },
           ],
         },
@@ -154,7 +149,6 @@ router.post(
         return;
       }
 
-      // ── Validate folderId ─────────────────────────────────────────────────
       let resolvedFolderId: string | null = null;
       if (isValidUUID(folderId)) {
         const folder = await prisma.folder.findFirst({
@@ -172,7 +166,6 @@ router.post(
         resolvedFolderId = folder.id;
       }
 
-      // ── Validate categoryId ───────────────────────────────────────────────
       let resolvedCategoryId: string | null = null;
       if (isValidUUID(categoryId)) {
         const cat = await prisma.category.findFirst({
@@ -197,10 +190,10 @@ router.post(
           },
         });
 
-        // Upload to storage
         await uploadFile(storageKey, file.buffer, file.mimetype);
 
         if (existingFile) {
+          // ── New version ───────────────────────────────────────────────────
           const newVersion = existingFile.version + 1;
 
           await prisma.fileVersion.create({
@@ -237,7 +230,22 @@ router.post(
             createdAt: updated.createdAt,
             isNewVersion: true,
           });
+
+          await createAuditLog({
+            action: "file.upload.version",
+            userId: req.user!.userId,
+            tenantId: req.user!.tenantId,
+            resourceType: "file",
+            resourceId: existingFile.id,
+            resourceName: file.originalname,
+            metadata: {
+              version: newVersion,
+              previousVersion: existingFile.version,
+            },
+            req,
+          });
         } else {
+          // ── Brand new file ────────────────────────────────────────────────
           const saved = await prisma.file.create({
             data: {
               name: file.originalname,
@@ -260,6 +268,17 @@ router.post(
             version: saved.version,
             createdAt: saved.createdAt,
             isNewVersion: false,
+          });
+
+          await createAuditLog({
+            action: "file.upload",
+            userId: req.user!.userId,
+            tenantId: req.user!.tenantId,
+            resourceType: "file",
+            resourceId: saved.id,
+            resourceName: file.originalname,
+            metadata: { size: file.size, mimeType: file.mimetype },
+            req,
           });
         }
       }
@@ -306,10 +325,7 @@ router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
           OR: [{ grantedTo: "all" }, { grantedTo: "user", userId }],
           AND: [
             {
-              OR: [
-                { expiresAt: null }, // ✅ fixed
-                { expiresAt: { gt: new Date() } },
-              ],
+              OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
             },
           ],
         },
@@ -323,13 +339,23 @@ router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
 
     const viewUrl = await getFileViewUrl(file.storageKey, 3600);
 
+    await createAuditLog({
+      action: "file.view",
+      userId: req.user!.userId,
+      tenantId: req.user!.tenantId,
+      resourceType: "file",
+      resourceId: file.id,
+      resourceName: file.name,
+      req,
+    });
+
     res.json({
       file: {
         id: file.id,
         name: file.name,
         mimeType: file.mimeType,
         size: file.size,
-        version: file.version, // ✅ added
+        version: file.version,
         storageKey: file.storageKey,
         createdAt: file.createdAt,
         viewUrl,
@@ -339,6 +365,111 @@ router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: "Failed to fetch file" });
   }
 });
+
+// ─── PATCH /api/files/:id/move ────────────────────────────────────────────────
+router.patch(
+  "/:id/move",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { folderId } = req.body;
+
+      const file = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+      });
+
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      // Validate destination folder
+      let resolvedFolderId: string | null = null;
+      if (isValidUUID(folderId)) {
+        const folder = await prisma.folder.findFirst({
+          where: {
+            id: folderId,
+            tenantId: req.user!.tenantId,
+            isDeleted: false,
+          },
+        });
+        if (!folder) {
+          res.status(400).json({ error: "Destination folder not found" });
+          return;
+        }
+        resolvedFolderId = folder.id;
+      }
+
+      const updated = await prisma.file.update({
+        where: { id: req.params.id },
+        data: { folderId: resolvedFolderId },
+      });
+
+      await createAuditLog({
+        action: "file.upload",
+        userId: req.user!.userId,
+        tenantId: req.user!.tenantId,
+        resourceType: "file",
+        resourceId: file.id,
+        resourceName: file.name,
+        metadata: {
+          movedFrom: file.folderId,
+          movedTo: resolvedFolderId,
+        },
+        req,
+      });
+
+      res.json({ file: updated });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to move file" });
+    }
+  },
+);
+
+// ─── PATCH /api/files/:id/category ───────────────────────────────────────────
+router.patch(
+  "/:id/category",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { categoryId } = req.body;
+
+      const file = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+      });
+
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      let resolvedCategoryId: string | null = null;
+      if (isValidUUID(categoryId)) {
+        const cat = await prisma.category.findFirst({
+          where: { id: categoryId, tenantId: req.user!.tenantId },
+        });
+        if (cat) resolvedCategoryId = cat.id;
+      }
+
+      const updated = await prisma.file.update({
+        where: { id: req.params.id },
+        data: { categoryId: resolvedCategoryId },
+      });
+
+      res.json({ file: updated });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to assign category" });
+    }
+  },
+);
 
 // ─── DELETE /api/files/:id ────────────────────────────────────────────────────
 router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
@@ -358,7 +489,7 @@ router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
     await prisma.file.update({
       where: {
         id: req.params.id,
-        tenantId: req.user!.tenantId, // ✅ tenant isolation added
+        tenantId: req.user!.tenantId,
       },
       data: { isDeleted: true },
     });
@@ -368,6 +499,16 @@ router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
     } catch (storageErr) {
       console.error("Storage delete error:", storageErr);
     }
+
+    await createAuditLog({
+      action: "file.delete",
+      userId: req.user!.userId,
+      tenantId: req.user!.tenantId,
+      resourceType: "file",
+      resourceId: req.params.id,
+      resourceName: file.name,
+      req,
+    });
 
     res.json({ message: "File deleted successfully" });
   } catch (err) {
@@ -473,6 +614,17 @@ router.post(
           version: newVersion,
           updatedAt: new Date(),
         },
+      });
+
+      await createAuditLog({
+        action: "file.restore",
+        userId: req.user!.userId,
+        tenantId: req.user!.tenantId,
+        resourceType: "file",
+        resourceId: file.id,
+        resourceName: file.name,
+        metadata: { restoredVersion: versionRecord.version, newVersion },
+        req,
       });
 
       res.json({ message: `Restored to version ${versionRecord.version}` });

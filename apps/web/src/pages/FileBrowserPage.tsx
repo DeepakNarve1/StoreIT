@@ -9,6 +9,8 @@ import {
   Folder,
   ChevronRight,
   Home,
+  Trash2,
+  Hash,
 } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import FileGrid from "../components/files/FileGrid";
@@ -19,6 +21,8 @@ import PermissionsPanel from "../components/permissions/PermissionsPanel";
 import clsx from "clsx";
 import api from "../api/axios";
 import FileVersionsModal from "../components/files/FileVersionsModal";
+import MoveFileModal from "../components/files/MoveFileModal";
+import AssignCategoryModal from "../components/files/AssignCategoryModal";
 
 type ViewMode = "grid" | "list";
 
@@ -46,6 +50,15 @@ export default function FileBrowserPage() {
   } | null>(null);
   const [versionsFile, setVersionsFile] = useState<any>(null);
   const handleVersions = (file: any) => setVersionsFile(file);
+  const [moveFiles, setMoveFiles] = useState<any[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [newFolderCategoryId, setNewFolderCategoryId] = useState<string>("");
+  const [categoryResource, setCategoryResource] = useState<{
+    id: string;
+    type: "file" | "folder";
+    name: string;
+    currentCategoryId?: string | null;
+  } | null>(null);
 
   // ── Fetch files ─────────────────────────────────────────────────────────────
   const { data: filesData, isLoading: filesLoading } = useQuery({
@@ -67,12 +80,22 @@ export default function FileBrowserPage() {
     },
   });
 
-  // ── Create folder ────────────────────────────────────────────────────────────
+  // Fetch categories for selector
+  const { data: categoriesData } = useQuery({
+    queryKey: ["categories"],
+    queryFn: async () => {
+      const res = await api.get("/categories");
+      return res.data as { categories: any[] };
+    },
+  });
+  const categories = categoriesData?.categories ?? [];
+
   const createFolder = useMutation({
     mutationFn: async (name: string) => {
       const res = await api.post("/folders", {
         name,
         parentId: folderId ?? null,
+        categoryId: newFolderCategoryId || null,
       });
       return res.data;
     },
@@ -82,6 +105,7 @@ export default function FileBrowserPage() {
       });
       queryClient.invalidateQueries({ queryKey: ["folders", "root"] });
       setNewFolderName("");
+      setNewFolderCategoryId("");
       setShowNewFolder(false);
     },
   });
@@ -126,6 +150,22 @@ export default function FileBrowserPage() {
     if (!newFolderName.trim()) return;
     createFolder.mutate(newFolderName.trim());
   };
+
+  const handleMove = (file: any) => setMoveFiles([file]);
+  const handleAssignCategory = (file: any) =>
+    setCategoryResource({
+      id: file.id,
+      type: "file",
+      name: file.name,
+      currentCategoryId: file.categoryId,
+    });
+  const handleFolderAssignCategory = (folder: any) =>
+    setCategoryResource({
+      id: folder.id,
+      type: "folder",
+      name: folder.name,
+      currentCategoryId: folder.categoryId,
+    });
 
   return (
     <AppShell>
@@ -211,7 +251,7 @@ export default function FileBrowserPage() {
           <form
             onSubmit={handleCreateFolder}
             className="flex items-center gap-2 mb-4 p-3 bg-blue-50
-                       border border-blue-200 rounded-xl"
+               border border-blue-200 rounded-xl flex-wrap"
           >
             <Folder size={16} className="text-blue-500 shrink-0" />
             <input
@@ -219,16 +259,27 @@ export default function FileBrowserPage() {
               value={newFolderName}
               onChange={(e) => setNewFolderName(e.target.value)}
               placeholder="Folder name…"
-              className="flex-1 bg-white border border-blue-200 rounded-lg
-                         px-3 py-1.5 text-sm focus:outline-none
-                         focus:ring-2 focus:ring-blue-400"
+              className="flex-1 min-w-32 bg-white border border-blue-200 rounded-lg
+                 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
+            <select
+              value={newFolderCategoryId}
+              onChange={(e) => setNewFolderCategoryId(e.target.value)}
+              className="px-3 py-1.5 bg-white border border-blue-200 rounded-lg
+                 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            >
+              <option value="">No category</option>
+              {categories.map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
             <button
               type="submit"
               disabled={!newFolderName.trim() || createFolder.isPending}
               className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg
-                         hover:bg-blue-700 disabled:opacity-50 transition-colors
-                         font-medium"
+                 hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
             >
               {createFolder.isPending ? "Creating…" : "Create"}
             </button>
@@ -237,9 +288,9 @@ export default function FileBrowserPage() {
               onClick={() => {
                 setShowNewFolder(false);
                 setNewFolderName("");
+                setNewFolderCategoryId("");
               }}
-              className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800
-                         transition-colors"
+              className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 transition-colors"
             >
               Cancel
             </button>
@@ -318,21 +369,16 @@ export default function FileBrowserPage() {
                       <button
                         onClick={() => navigate(`/browse/${folder.id}`)}
                         className="w-full flex flex-col items-center p-4 bg-white
-                                   border border-gray-200 rounded-xl
-                                   hover:border-blue-300 hover:shadow-sm
-                                   transition-all text-center"
+                 border border-gray-200 rounded-xl hover:border-blue-300
+                 hover:shadow-sm transition-all text-center"
                       >
                         <div
-                          className="w-12 h-12 bg-blue-50 rounded-xl flex
-                                        items-center justify-center mb-3
-                                        group-hover:bg-blue-100 transition-colors"
+                          className="w-12 h-12 bg-blue-50 rounded-xl flex items-center
+                      justify-center mb-3 group-hover:bg-blue-100 transition-colors"
                         >
                           <Folder size={22} className="text-blue-500" />
                         </div>
-                        <span
-                          className="text-xs font-medium text-gray-800
-                                         truncate w-full text-center"
-                        >
+                        <span className="text-xs font-medium text-gray-800 truncate w-full text-center">
                           {folder.name}
                         </span>
                         <span className="text-xs text-gray-400 mt-1">
@@ -340,6 +386,47 @@ export default function FileBrowserPage() {
                           {folder._count.files !== 1 ? "s" : ""}
                         </span>
                       </button>
+
+                      {/* Folder action buttons — show on hover */}
+                      <div className="absolute top-2 right-2 hidden group-hover:flex items-center gap-1">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleFolderAssignCategory(folder);
+                          }}
+                          className="p-1.5 bg-white border border-gray-200 rounded-lg
+                   text-gray-400 hover:text-purple-600 hover:border-purple-300
+                   shadow-sm transition-colors"
+                          title="Assign category"
+                        >
+                          <Hash size={12} />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (
+                              confirm(
+                                `Delete folder "${folder.name}" and all its contents?`,
+                              )
+                            ) {
+                              api.delete(`/folders/${folder.id}`).then(() => {
+                                queryClient.invalidateQueries({
+                                  queryKey: ["folders", folderId ?? "root"],
+                                });
+                                queryClient.invalidateQueries({
+                                  queryKey: ["folders", "root"],
+                                });
+                              });
+                            }
+                          }}
+                          className="p-1.5 bg-white border border-gray-200 rounded-lg
+                   text-gray-400 hover:text-red-600 hover:border-red-300
+                   shadow-sm transition-colors"
+                          title="Delete folder"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -366,6 +453,8 @@ export default function FileBrowserPage() {
                     onDelete={handleDelete}
                     onShare={handleShare}
                     onVersions={handleVersions}
+                    onMove={handleMove}
+                    onAssignCategory={handleAssignCategory}
                   />
                 )}
               </div>
@@ -396,6 +485,29 @@ export default function FileBrowserPage() {
         <FileVersionsModal
           file={versionsFile}
           onClose={() => setVersionsFile(null)}
+        />
+      )}
+
+      {moveFiles.length > 0 && (
+        <MoveFileModal
+          files={moveFiles}
+          onClose={() => setMoveFiles([])}
+          onSuccess={() => {
+            queryClient.invalidateQueries({
+              queryKey: ["files", folderId ?? "root"],
+            });
+            setSelectedFiles([]);
+          }}
+        />
+      )}
+
+      {categoryResource && (
+        <AssignCategoryModal
+          resourceId={categoryResource.id}
+          resourceType={categoryResource.type}
+          resourceName={categoryResource.name}
+          currentCategoryId={categoryResource.currentCategoryId}
+          onClose={() => setCategoryResource(null)}
         />
       )}
     </AppShell>

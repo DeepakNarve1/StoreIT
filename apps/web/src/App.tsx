@@ -14,6 +14,8 @@ import TrashPage from "./pages/TrashPage";
 import SettingsPage from "./pages/admin/SettingsPage";
 import OrgsPage from "./pages/superadmin/OrgsPage";
 import OneTimeViewPage from "./pages/OneTimeViewPage";
+import AuditLogPage from "./pages/admin/AuditLogPage";
+import SearchPage from "./pages/SearchPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -142,6 +144,22 @@ export default function App() {
             }
           />
           <Route path="/view/:token" element={<OneTimeViewPage />} />
+          <Route
+            path="/admin/audit"
+            element={
+              <AdminRoute>
+                <AuditLogPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/search"
+            element={
+              <ProtectedRoute>
+                <SearchPage />
+              </ProtectedRoute>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

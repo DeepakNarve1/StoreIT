@@ -2,6 +2,7 @@ import { Router, Response } from "express";
 import { z } from "zod";
 import { verifyAuth, AuthRequest } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
+import { createAuditLog } from "../services/audit.service";
 
 const router = Router();
 
@@ -28,7 +29,10 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
         parentId: true,
         createdAt: true,
         _count: {
-          select: { files: { where: { isDeleted: false } }, children: { where: { isDeleted: false } } },
+          select: {
+            files: { where: { isDeleted: false } },
+            children: { where: { isDeleted: false } },
+          },
         },
       },
     });
@@ -44,11 +48,12 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
 const createFolderSchema = z.object({
   name: z.string().min(1).max(255),
   parentId: z.string().uuid().optional().nullable(),
+  categoryId: z.string().uuid().optional().nullable(),
 });
 
 router.post("/", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
-    const { name, parentId } = createFolderSchema.parse(req.body);
+    const { name, parentId, categoryId } = createFolderSchema.parse(req.body);
 
     // If parentId provided, verify it belongs to this tenant
     if (parentId) {
@@ -65,14 +70,26 @@ router.post("/", verifyAuth, async (req: AuthRequest, res: Response) => {
       data: {
         name,
         parentId: parentId ?? null,
+        categoryId: categoryId ?? null,
         tenantId: req.user!.tenantId,
       },
       select: {
         id: true,
         name: true,
         parentId: true,
+        categoryId: true,
         createdAt: true,
       },
+    });
+
+    await createAuditLog({
+      action: "folder.create",
+      userId: req.user!.userId,
+      tenantId: req.user!.tenantId,
+      resourceType: "folder",
+      resourceId: folder.id,
+      resourceName: folder.name,
+      req,
     });
 
     res.status(201).json({ folder });
@@ -89,10 +106,19 @@ router.post("/", verifyAuth, async (req: AuthRequest, res: Response) => {
 // ─── PATCH /api/folders/:id — rename folder ───────────────────────────────────
 router.patch("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
-    const { name } = z.object({ name: z.string().min(1).max(255) }).parse(req.body);
+    const { name, categoryId } = z
+      .object({
+        name: z.string().min(1).max(255).optional(),
+        categoryId: z.string().uuid().optional().nullable(),
+      })
+      .parse(req.body);
 
     const folder = await prisma.folder.findFirst({
-      where: { id: req.params.id, tenantId: req.user!.tenantId, isDeleted: false },
+      where: {
+        id: req.params.id,
+        tenantId: req.user!.tenantId,
+        isDeleted: false,
+      },
     });
 
     if (!folder) {
@@ -102,8 +128,28 @@ router.patch("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
 
     const updated = await prisma.folder.update({
       where: { id: req.params.id },
-      data: { name },
-      select: { id: true, name: true, parentId: true, updatedAt: true },
+      data: {
+        ...(name !== undefined && { name }),
+        ...(categoryId !== undefined && { categoryId }),
+      },
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+        categoryId: true,
+        updatedAt: true,
+      },
+    });
+
+    await createAuditLog({
+      action: "folder.rename",
+      userId: req.user!.userId,
+      tenantId: req.user!.tenantId,
+      resourceType: "folder",
+      resourceId: req.params.id,
+      resourceName: name,
+      metadata: { oldName: folder.name, newName: name },
+      req,
     });
 
     res.json({ folder: updated });
@@ -120,7 +166,11 @@ router.patch("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
 router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
     const folder = await prisma.folder.findFirst({
-      where: { id: req.params.id, tenantId: req.user!.tenantId, isDeleted: false },
+      where: {
+        id: req.params.id,
+        tenantId: req.user!.tenantId,
+        isDeleted: false,
+      },
     });
 
     if (!folder) {
@@ -139,6 +189,16 @@ router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
         data: { isDeleted: true },
       }),
     ]);
+
+    await createAuditLog({
+      action: "folder.delete",
+      userId: req.user!.userId,
+      tenantId: req.user!.tenantId,
+      resourceType: "folder",
+      resourceId: req.params.id,
+      resourceName: folder.name,
+      req,
+    });
 
     res.json({ message: "Folder deleted successfully" });
   } catch (err) {

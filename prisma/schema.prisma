@@ -16,6 +16,7 @@ model Tenant {
   isActive     Boolean    @default(true)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
+  
 
   users        User[]
   folders      Folder[]
@@ -23,6 +24,7 @@ model Tenant {
   categories   Category[]
   invites      InviteToken[]
   oneTimeLinks OneTimeLink[]
+  auditLogs    AuditLog[]
 }
 
 // ─── USER ────────────────────────────────────────────────────────────────────
@@ -44,6 +46,7 @@ model User {
   invites      InviteToken[]
   uploadedFiles File[]   @relation("UploadedBy")
   uploadedVersions FileVersion[] @relation("VersionUploadedBy")
+  auditLogs    AuditLog[]
 
   @@index([tenantId])
   @@index([email])
@@ -211,4 +214,28 @@ model OneTimeLink {
   file       File      @relation(fields: [fileId], references: [id])
 
   @@index([token])
+}
+
+// ─── AUDIT LOG ────────────────────────────────────────────────────────────────
+model AuditLog {
+  id           String   @id @default(uuid())
+  action       String   // file.upload | file.delete | file.download | folder.create | permission.grant | user.invite etc
+  resourceType String?  // file | folder | user | permission
+  resourceId   String?  // ID of the affected resource
+  resourceName String?  // human readable name
+  metadata     Json?    // extra info like old/new values
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id])
+
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+  @@index([userId])
+  @@index([action])
 }

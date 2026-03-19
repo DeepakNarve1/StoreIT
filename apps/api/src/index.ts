@@ -15,6 +15,8 @@ import userRoutes from "./routes/users.routes";
 import superadminRoutes from "./routes/superadmin.routes";
 import dashboardRoutes from "./routes/dashboard.routes";
 import permissionRoutes from "./routes/permissions.routes";
+import auditRoutes from "./routes/audit.routes";
+import searchRoutes from "./routes/search.routes";
 
 import path from "path";
 dotenv.config({ path: path.join(__dirname, "../../.env") });
@@ -63,6 +65,8 @@ app.use("/api/users", userRoutes);
 app.use("/api/superadmin", superadminRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/permissions", permissionRoutes);
+app.use("/api/audit", auditRoutes);
+app.use("/api/search", searchRoutes);
 
 // ─── 404 HANDLER ─────────────────────────────────────────────────────────────
 app.use("*", (req, res) => {

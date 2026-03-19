@@ -23,6 +23,7 @@ import {
 import clsx from "clsx";
 import api from "../../api/axios";
 import { useAuthStore } from "../../store/authStore";
+import { Activity } from "lucide-react";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -431,6 +432,16 @@ export default function Sidebar({ isOpen }: SidebarProps) {
           >
             <Users size={16} />
             <span>Admin Panel</span>
+          </button>
+        )}
+        {(user?.role === "ORG_ADMIN" || user?.role === "SUPERADMIN") && (
+          <button
+            onClick={() => navigate("/admin/audit")}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
+               text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            <Activity size={16} />
+            <span>Audit Log</span>
           </button>
         )}
         {(user?.role === "ORG_ADMIN" || user?.role === "SUPERADMIN") && (

@@ -11,6 +11,8 @@ import {
   Eye,
   Shield,
   History,
+  FolderInput,
+  Hash,
 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
@@ -30,6 +32,8 @@ interface FileListProps {
   onDelete: (file: FileItem) => void;
   onShare?: (file: FileItem) => void;
   onVersions?: (file: FileItem) => void;
+  onMove?: (file: FileItem) => void;
+  onAssignCategory?: (file: FileItem) => void;
 }
 
 const getFileIcon = (mimeType: string) => {
@@ -60,6 +64,8 @@ export default function FileList({
   onDelete,
   onShare,
   onVersions,
+  onMove,
+  onAssignCategory,
 }: FileListProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
 
@@ -154,7 +160,7 @@ export default function FileList({
                       onClick={() => setActiveMenu(null)}
                     />
                     <div
-                      className="absolute right-0 bottom-full mb-1 w-40 bg-white
+                      className="absolute right-0 top-full mb-1 w-40 bg-white
                                     border border-gray-200 rounded-xl shadow-lg z-20 p-1"
                     >
                       <button
@@ -218,6 +224,30 @@ export default function FileList({
                text-gray-700 hover:bg-gray-100 rounded-lg"
                         >
                           <History size={14} /> Version History
+                        </button>
+                      )}
+                      {onMove && (
+                        <button
+                          onClick={() => {
+                            onMove(file);
+                            setActiveMenu(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm
+               text-gray-700 hover:bg-gray-100 rounded-lg"
+                        >
+                          <FolderInput size={14} /> Move to folder
+                        </button>
+                      )}
+                      {onAssignCategory && (
+                        <button
+                          onClick={() => {
+                            onAssignCategory(file);
+                            setActiveMenu(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm
+               text-gray-700 hover:bg-gray-100 rounded-lg"
+                        >
+                          <Hash size={14} /> Assign category
                         </button>
                       )}
                       <div className="border-t border-gray-100 mt-1 pt-1">
