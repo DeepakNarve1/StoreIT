@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   LayoutGrid,
@@ -14,10 +14,11 @@ import AppShell from "../components/layout/AppShell";
 import FileGrid from "../components/files/FileGrid";
 import FileList from "../components/files/FileList";
 import UploadZone from "../components/files/UploadZone";
+import FilePreviewModal from "../components/files/FilePreviewModal";
+import PermissionsPanel from "../components/permissions/PermissionsPanel";
 import clsx from "clsx";
 import api from "../api/axios";
-import { useNavigate } from "react-router-dom";
-import FilePreviewModal from "../components/files/FilePreviewModal";
+import FileVersionsModal from "../components/files/FileVersionsModal";
 
 type ViewMode = "grid" | "list";
 
@@ -30,26 +31,32 @@ interface FolderItem {
 
 export default function FileBrowserPage() {
   const { folderId } = useParams();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
+
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [showUpload, setShowUpload] = useState(false);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [previewFile, setPreviewFile] = useState<any>(null);
-  const navigate = useNavigate();
+  const [permissionsResource, setPermissionsResource] = useState<{
+    id: string;
+    type: "file" | "folder";
+    name: string;
+  } | null>(null);
+  const [versionsFile, setVersionsFile] = useState<any>(null);
+  const handleVersions = (file: any) => setVersionsFile(file);
 
-  // Fetch files for current folder
+  // ── Fetch files ─────────────────────────────────────────────────────────────
   const { data: filesData, isLoading: filesLoading } = useQuery({
     queryKey: ["files", folderId ?? "root"],
     queryFn: async () => {
-      const res = await api.get("/files", {
-        params: { folderId },
-      });
+      const res = await api.get("/files", { params: { folderId } });
       return res.data as { files: any[] };
     },
   });
 
-  // Fetch subfolders for current folder
+  // ── Fetch subfolders ─────────────────────────────────────────────────────────
   const { data: foldersData, isLoading: foldersLoading } = useQuery({
     queryKey: ["folders", folderId ?? "root"],
     queryFn: async () => {
@@ -60,7 +67,7 @@ export default function FileBrowserPage() {
     },
   });
 
-  // Create folder mutation
+  // ── Create folder ────────────────────────────────────────────────────────────
   const createFolder = useMutation({
     mutationFn: async (name: string) => {
       const res = await api.post("/folders", {
@@ -73,7 +80,7 @@ export default function FileBrowserPage() {
       queryClient.invalidateQueries({
         queryKey: ["folders", folderId ?? "root"],
       });
-      queryClient.invalidateQueries({ queryKey: ["folders", "root"] }); // Refresh sidebar
+      queryClient.invalidateQueries({ queryKey: ["folders", "root"] });
       setNewFolderName("");
       setShowNewFolder(false);
     },
@@ -88,8 +95,18 @@ export default function FileBrowserPage() {
     queryClient.invalidateQueries({ queryKey: ["files", folderId ?? "root"] });
   };
 
-  const handleFileClick = (file: any) => {
-    setPreviewFile(file);
+  const handleFileClick = (file: any) => setPreviewFile(file);
+
+  const handleShare = (file: any) => {
+    setPermissionsResource({ id: file.id, type: "file", name: file.name });
+  };
+
+  const handleFolderShare = (folder: FolderItem) => {
+    setPermissionsResource({
+      id: folder.id,
+      type: "folder",
+      name: folder.name,
+    });
   };
 
   const handleDelete = async (file: any) => {
@@ -117,7 +134,7 @@ export default function FileBrowserPage() {
         <div className="flex items-center gap-1.5 text-sm text-gray-500 mb-4">
           <Home size={14} />
           <span
-            onClick={() => window.history.back()}
+            onClick={() => navigate("/browse")}
             className={clsx(
               "cursor-pointer hover:text-gray-800 transition-colors",
               !folderId && "text-gray-800 font-medium pointer-events-none",
@@ -138,7 +155,6 @@ export default function FileBrowserPage() {
           <h1 className="text-base font-semibold text-gray-900">
             {folderId ? "Folder contents" : "All Files"}
           </h1>
-
           <div className="flex items-center gap-2">
             {/* View toggle */}
             <div className="flex items-center bg-gray-100 rounded-lg p-1 gap-0.5">
@@ -194,8 +210,8 @@ export default function FileBrowserPage() {
         {showNewFolder && (
           <form
             onSubmit={handleCreateFolder}
-            className="flex items-center gap-2 mb-4 p-3 bg-blue-50 border border-blue-200
-                       rounded-xl"
+            className="flex items-center gap-2 mb-4 p-3 bg-blue-50
+                       border border-blue-200 rounded-xl"
           >
             <Folder size={16} className="text-blue-500 shrink-0" />
             <input
@@ -203,14 +219,16 @@ export default function FileBrowserPage() {
               value={newFolderName}
               onChange={(e) => setNewFolderName(e.target.value)}
               placeholder="Folder name…"
-              className="flex-1 bg-white border border-blue-200 rounded-lg px-3 py-1.5
-                         text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className="flex-1 bg-white border border-blue-200 rounded-lg
+                         px-3 py-1.5 text-sm focus:outline-none
+                         focus:ring-2 focus:ring-blue-400"
             />
             <button
               type="submit"
               disabled={!newFolderName.trim() || createFolder.isPending}
               className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg
-                         hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
+                         hover:bg-blue-700 disabled:opacity-50 transition-colors
+                         font-medium"
             >
               {createFolder.isPending ? "Creating…" : "Create"}
             </button>
@@ -220,7 +238,8 @@ export default function FileBrowserPage() {
                 setShowNewFolder(false);
                 setNewFolderName("");
               }}
-              className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+              className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800
+                         transition-colors"
             >
               Cancel
             </button>
@@ -240,12 +259,18 @@ export default function FileBrowserPage() {
         {/* Main content */}
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
-            <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+            <div
+              className="w-6 h-6 border-2 border-blue-600 border-t-transparent
+                            rounded-full animate-spin"
+            />
           </div>
         ) : isEmpty ? (
           <div className="bg-white border border-gray-200 rounded-xl">
             <div className="flex flex-col items-center justify-center py-20 text-center">
-              <div className="w-14 h-14 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+              <div
+                className="w-14 h-14 bg-gray-100 rounded-full flex items-center
+                              justify-center mb-4"
+              >
                 <Upload size={22} className="text-gray-400" />
               </div>
               <p className="text-sm font-medium text-gray-700">
@@ -257,15 +282,16 @@ export default function FileBrowserPage() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setShowNewFolder(true)}
-                  className="text-sm text-gray-600 border border-gray-300 hover:bg-gray-50
-                             px-3 py-1.5 rounded-lg transition-colors font-medium"
+                  className="text-sm text-gray-600 border border-gray-300
+                             hover:bg-gray-50 px-3 py-1.5 rounded-lg
+                             transition-colors font-medium"
                 >
                   New Folder
                 </button>
                 <button
                   onClick={() => setShowUpload(true)}
-                  className="text-sm text-blue-600 hover:text-blue-700 font-medium
-                             transition-colors px-3 py-1.5"
+                  className="text-sm text-blue-600 hover:text-blue-700
+                             font-medium transition-colors px-3 py-1.5"
                 >
                   Upload files →
                 </button>
@@ -277,28 +303,44 @@ export default function FileBrowserPage() {
             {/* Subfolders */}
             {folders.length > 0 && (
               <div>
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">
+                <p
+                  className="text-xs font-medium text-gray-400 uppercase
+                               tracking-wider mb-3"
+                >
                   Folders ({folders.length})
                 </p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                <div
+                  className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4
+                                lg:grid-cols-5 gap-3"
+                >
                   {folders.map((folder) => (
-                    <button
-                      key={folder.id}
-                      onClick={() => navigate(`/browse/${folder.id}`)}
-                      className="flex flex-col items-center p-4 bg-white border border-gray-200
-                                 rounded-xl hover:border-blue-300 hover:shadow-sm transition-all text-center group"
-                    >
-                      <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center mb-3 group-hover:bg-blue-100 transition-colors">
-                        <Folder size={22} className="text-blue-500" />
-                      </div>
-                      <span className="text-xs font-medium text-gray-800 truncate w-full text-center">
-                        {folder.name}
-                      </span>
-                      <span className="text-xs text-gray-400 mt-1">
-                        {folder._count.files} file
-                        {folder._count.files !== 1 ? "s" : ""}
-                      </span>
-                    </button>
+                    <div key={folder.id} className="relative group">
+                      <button
+                        onClick={() => navigate(`/browse/${folder.id}`)}
+                        className="w-full flex flex-col items-center p-4 bg-white
+                                   border border-gray-200 rounded-xl
+                                   hover:border-blue-300 hover:shadow-sm
+                                   transition-all text-center"
+                      >
+                        <div
+                          className="w-12 h-12 bg-blue-50 rounded-xl flex
+                                        items-center justify-center mb-3
+                                        group-hover:bg-blue-100 transition-colors"
+                        >
+                          <Folder size={22} className="text-blue-500" />
+                        </div>
+                        <span
+                          className="text-xs font-medium text-gray-800
+                                         truncate w-full text-center"
+                        >
+                          {folder.name}
+                        </span>
+                        <span className="text-xs text-gray-400 mt-1">
+                          {folder._count.files} file
+                          {folder._count.files !== 1 ? "s" : ""}
+                        </span>
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -308,7 +350,10 @@ export default function FileBrowserPage() {
             {files.length > 0 && (
               <div>
                 {folders.length > 0 && (
-                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">
+                  <p
+                    className="text-xs font-medium text-gray-400 uppercase
+                                 tracking-wider mb-3"
+                  >
                     Files ({files.length})
                   </p>
                 )}
@@ -319,6 +364,8 @@ export default function FileBrowserPage() {
                     files={files}
                     onFileClick={handleFileClick}
                     onDelete={handleDelete}
+                    onShare={handleShare}
+                    onVersions={handleVersions}
                   />
                 )}
               </div>
@@ -326,11 +373,29 @@ export default function FileBrowserPage() {
           </div>
         )}
       </div>
+
       {/* File Preview Modal */}
       {previewFile && (
         <FilePreviewModal
           file={previewFile}
           onClose={() => setPreviewFile(null)}
+        />
+      )}
+
+      {/* Permissions Panel */}
+      {permissionsResource && (
+        <PermissionsPanel
+          resourceId={permissionsResource.id}
+          resourceType={permissionsResource.type}
+          resourceName={permissionsResource.name}
+          onClose={() => setPermissionsResource(null)}
+        />
+      )}
+
+      {versionsFile && (
+        <FileVersionsModal
+          file={versionsFile}
+          onClose={() => setVersionsFile(null)}
         />
       )}
     </AppShell>

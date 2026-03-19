@@ -28,24 +28,77 @@ const isValidUUID = (val: unknown): val is string =>
 router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
     const { folderId } = req.query;
+    const { userId, tenantId, role } = req.user!;
 
-    const files = await prisma.file.findMany({
-      where: {
-        tenantId: req.user!.tenantId,
-        folderId: isValidUUID(folderId) ? folderId : null,
-        isDeleted: false,
-      },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        name: true,
-        mimeType: true,
-        size: true,
-        storageKey: true,
-        createdAt: true,
-        folderId: true,
-      },
-    });
+    const isPrivileged = [
+      "SUPERADMIN",
+      "ORG_ADMIN",
+      "MANAGER",
+      "EDITOR",
+    ].includes(role);
+
+    let files;
+
+    if (isPrivileged) {
+      files = await prisma.file.findMany({
+        where: {
+          tenantId,
+          folderId: isValidUUID(folderId) ? folderId : null,
+          isDeleted: false,
+        },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          name: true,
+          mimeType: true,
+          size: true,
+          storageKey: true,
+          createdAt: true,
+          folderId: true,
+          version: true,
+        },
+      });
+    } else {
+      // VIEWER — only files with explicit permission or uploaded by them
+      const permissions = await prisma.permission.findMany({
+        where: {
+          resourceType: "file",
+          action: { in: ["read", "write", "delete", "admin"] },
+          OR: [{ grantedTo: "all" }, { grantedTo: "user", userId }],
+          AND: [
+            {
+              OR: [
+                { expiresAt: null }, // ✅ fixed
+                { expiresAt: { gt: new Date() } },
+              ],
+            },
+          ],
+        },
+        select: { resourceId: true },
+      });
+
+      const allowedFileIds = permissions.map((p) => p.resourceId);
+
+      files = await prisma.file.findMany({
+        where: {
+          tenantId,
+          folderId: isValidUUID(folderId) ? folderId : null,
+          isDeleted: false,
+          OR: [{ id: { in: allowedFileIds } }, { uploadedById: userId }],
+        },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          name: true,
+          mimeType: true,
+          size: true,
+          storageKey: true,
+          createdAt: true,
+          folderId: true,
+          version: true,
+        },
+      });
+    }
 
     res.json({ files });
   } catch (err) {
@@ -73,7 +126,6 @@ router.get(
         return;
       }
 
-      // Get download URL from storage (local or R2)
       const downloadUrl = await getFileViewUrl(file.storageKey, 300);
 
       res.json({
@@ -136,35 +188,87 @@ router.post(
         const fileUuid = uuid();
         const storageKey = `${req.user!.tenantId}/${resolvedFolderId || "root"}/${fileUuid}_${file.originalname}`;
 
-        // ── Upload to local disk or R2 (handled by storage service) ──────────
-        await uploadFile(storageKey, file.buffer, file.mimetype);
-
-        const saved = await prisma.file.create({
-          data: {
+        const existingFile = await prisma.file.findFirst({
+          where: {
             name: file.originalname,
-            storageKey,
-            mimeType: file.mimetype,
-            size: file.size,
             tenantId: req.user!.tenantId,
             folderId: resolvedFolderId,
-            categoryId: resolvedCategoryId,
-            uploadedById: req.user!.userId,
+            isDeleted: false,
           },
         });
 
-        savedFiles.push({
-          id: saved.id,
-          name: saved.name,
-          mimeType: saved.mimeType,
-          size: saved.size,
-          createdAt: saved.createdAt,
-        });
+        // Upload to storage
+        await uploadFile(storageKey, file.buffer, file.mimetype);
+
+        if (existingFile) {
+          const newVersion = existingFile.version + 1;
+
+          await prisma.fileVersion.create({
+            data: {
+              version: existingFile.version,
+              storageKey: existingFile.storageKey,
+              size: existingFile.size,
+              fileId: existingFile.id,
+              uploadedById: existingFile.uploadedById,
+            },
+          });
+
+          const updated = await prisma.file.update({
+            where: { id: existingFile.id },
+            data: {
+              storageKey,
+              size: file.size,
+              version: newVersion,
+              uploadedById: req.user!.userId,
+              updatedAt: new Date(),
+            },
+          });
+
+          console.log(
+            `📝 New version v${newVersion} for: ${file.originalname}`,
+          );
+
+          savedFiles.push({
+            id: updated.id,
+            name: updated.name,
+            mimeType: updated.mimeType,
+            size: updated.size,
+            version: updated.version,
+            createdAt: updated.createdAt,
+            isNewVersion: true,
+          });
+        } else {
+          const saved = await prisma.file.create({
+            data: {
+              name: file.originalname,
+              storageKey,
+              mimeType: file.mimetype,
+              size: file.size,
+              version: 1,
+              tenantId: req.user!.tenantId,
+              folderId: resolvedFolderId,
+              categoryId: resolvedCategoryId,
+              uploadedById: req.user!.userId,
+            },
+          });
+
+          savedFiles.push({
+            id: saved.id,
+            name: saved.name,
+            mimeType: saved.mimeType,
+            size: saved.size,
+            version: saved.version,
+            createdAt: saved.createdAt,
+            isNewVersion: false,
+          });
+        }
       }
 
       res.json({ files: savedFiles, message: "Files uploaded successfully" });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Upload error:", err);
-      res.status(500).json({ error: err.message || "Upload failed" });
+      const message = err instanceof Error ? err.message : "Upload failed";
+      res.status(500).json({ error: message });
     }
   },
 );
@@ -172,10 +276,12 @@ router.post(
 // ─── GET /api/files/:id ───────────────────────────────────────────────────────
 router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
+    const { userId, tenantId, role } = req.user!;
+
     const file = await prisma.file.findFirst({
       where: {
         id: req.params.id,
-        tenantId: req.user!.tenantId,
+        tenantId,
         isDeleted: false,
       },
     });
@@ -185,7 +291,36 @@ router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Get view URL — local path in dev, signed R2 URL in production
+    const isPrivileged = [
+      "SUPERADMIN",
+      "ORG_ADMIN",
+      "MANAGER",
+      "EDITOR",
+    ].includes(role);
+
+    if (!isPrivileged && file.uploadedById !== userId) {
+      const permission = await prisma.permission.findFirst({
+        where: {
+          resourceType: "file",
+          resourceId: file.id,
+          OR: [{ grantedTo: "all" }, { grantedTo: "user", userId }],
+          AND: [
+            {
+              OR: [
+                { expiresAt: null }, // ✅ fixed
+                { expiresAt: { gt: new Date() } },
+              ],
+            },
+          ],
+        },
+      });
+
+      if (!permission) {
+        res.status(403).json({ error: "Access denied" });
+        return;
+      }
+    }
+
     const viewUrl = await getFileViewUrl(file.storageKey, 3600);
 
     res.json({
@@ -194,6 +329,7 @@ router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
         name: file.name,
         mimeType: file.mimeType,
         size: file.size,
+        version: file.version, // ✅ added
         storageKey: file.storageKey,
         createdAt: file.createdAt,
         viewUrl,
@@ -219,17 +355,17 @@ router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Soft delete in DB first
     await prisma.file.update({
-      where: { id: req.params.id },
+      where: {
+        id: req.params.id,
+        tenantId: req.user!.tenantId, // ✅ tenant isolation added
+      },
       data: { isDeleted: true },
     });
 
-    // Delete from storage (local or R2)
     try {
       await deleteFile(file.storageKey);
     } catch (storageErr) {
-      // Log but don't fail — DB record is already soft deleted
       console.error("Storage delete error:", storageErr);
     }
 
@@ -238,5 +374,112 @@ router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: "Failed to delete file" });
   }
 });
+
+// ─── GET /api/files/:id/versions ─────────────────────────────────────────────
+router.get(
+  "/:id/versions",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const file = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+        include: {
+          uploadedBy: { select: { name: true } },
+          versions: {
+            orderBy: { version: "desc" },
+            include: {
+              uploadedBy: { select: { name: true } },
+            },
+          },
+        },
+      });
+
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      const allVersions = [
+        {
+          id: "current",
+          version: file.version,
+          storageKey: file.storageKey,
+          size: file.size,
+          createdAt: file.updatedAt,
+          uploadedBy: file.uploadedBy,
+          isCurrent: true,
+        },
+        ...file.versions.map((v) => ({ ...v, isCurrent: false })),
+      ];
+
+      res.json({ versions: allVersions, currentVersion: file.version });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch versions" });
+    }
+  },
+);
+
+// ─── POST /api/files/:id/versions/:versionId/restore ─────────────────────────
+router.post(
+  "/:id/versions/:versionId/restore",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const file = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+      });
+
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      const versionRecord = await prisma.fileVersion.findFirst({
+        where: {
+          id: req.params.versionId,
+          fileId: file.id,
+        },
+      });
+
+      if (!versionRecord) {
+        res.status(404).json({ error: "Version not found" });
+        return;
+      }
+
+      await prisma.fileVersion.create({
+        data: {
+          version: file.version,
+          storageKey: file.storageKey,
+          size: file.size,
+          fileId: file.id,
+          uploadedById: file.uploadedById,
+        },
+      });
+
+      const newVersion = file.version + 1;
+      await prisma.file.update({
+        where: { id: file.id },
+        data: {
+          storageKey: versionRecord.storageKey,
+          size: versionRecord.size,
+          version: newVersion,
+          updatedAt: new Date(),
+        },
+      });
+
+      res.json({ message: `Restored to version ${versionRecord.version}` });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to restore version" });
+    }
+  },
+);
 
 export default router;

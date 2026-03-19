@@ -13,6 +13,7 @@ import TagsPage from "./pages/TagsPage";
 import TrashPage from "./pages/TrashPage";
 import SettingsPage from "./pages/admin/SettingsPage";
 import OrgsPage from "./pages/superadmin/OrgsPage";
+import OneTimeViewPage from "./pages/OneTimeViewPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -135,11 +136,12 @@ export default function App() {
           <Route
             path="/superadmin/orgs"
             element={
-              <ProtectedRoute>
+              <SuperadminRoute>
                 <OrgsPage />
-              </ProtectedRoute>
+              </SuperadminRoute>
             }
           />
+          <Route path="/view/:token" element={<OneTimeViewPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

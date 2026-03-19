@@ -5,7 +5,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ─── TENANT (Organisation) ───────────────────────────────────────────────────
@@ -44,6 +43,7 @@ model User {
   permissions  Permission[]
   invites      InviteToken[]
   uploadedFiles File[]   @relation("UploadedBy")
+  uploadedVersions FileVersion[] @relation("VersionUploadedBy")
 
   @@index([tenantId])
   @@index([email])
@@ -110,6 +110,7 @@ model File {
   mimeType     String
   size         Int       // bytes
   version      Int       @default(1)
+  versions     FileVersion[] 
   isDeleted    Boolean   @default(false)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -132,6 +133,23 @@ model File {
   @@index([tenantId])
   @@index([tenantId, folderId])
   @@index([tenantId, categoryId])
+}
+
+// ─── FILE VERSION ─────────────────────────────────────────────────────────────
+model FileVersion {
+  id         String   @id @default(uuid())
+  version    Int
+  storageKey String
+  size       Int
+  createdAt  DateTime @default(now())
+
+  fileId     String
+  file       File     @relation(fields: [fileId], references: [id])
+
+  uploadedById String?
+  uploadedBy   User?   @relation("VersionUploadedBy", fields: [uploadedById], references: [id])
+
+  @@index([fileId])
 }
 
 // ─── PERMISSION ──────────────────────────────────────────────────────────────

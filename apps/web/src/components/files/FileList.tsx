@@ -9,6 +9,8 @@ import {
   Download,
   Trash2,
   Eye,
+  Shield,
+  History,
 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
@@ -19,12 +21,15 @@ interface FileItem {
   mimeType: string;
   size: number;
   createdAt: string;
+  version?: number;
 }
 
 interface FileListProps {
   files: FileItem[];
   onFileClick: (file: FileItem) => void;
   onDelete: (file: FileItem) => void;
+  onShare?: (file: FileItem) => void;
+  onVersions?: (file: FileItem) => void;
 }
 
 const getFileIcon = (mimeType: string) => {
@@ -53,6 +58,8 @@ export default function FileList({
   files,
   onFileClick,
   onDelete,
+  onShare,
+  onVersions,
 }: FileListProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
 
@@ -93,6 +100,14 @@ export default function FileList({
               >
                 {file.name}
               </span>
+              {(file.version ?? 0) > 1 && (
+                <span
+                  className="text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5
+                   rounded-full font-medium ml-1 shrink-0"
+                >
+                  v{file.version}
+                </span>
+              )}
             </button>
 
             {/* Type */}
@@ -181,6 +196,30 @@ export default function FileList({
                       >
                         <Download size={14} /> Download
                       </button>
+                      {onShare && (
+                        <button
+                          onClick={() => {
+                            onShare(file);
+                            setActiveMenu(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm
+               text-gray-700 hover:bg-gray-100 rounded-lg"
+                        >
+                          <Shield size={14} /> Permissions
+                        </button>
+                      )}
+                      {onVersions && (
+                        <button
+                          onClick={() => {
+                            onVersions(file);
+                            setActiveMenu(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm
+               text-gray-700 hover:bg-gray-100 rounded-lg"
+                        >
+                          <History size={14} /> Version History
+                        </button>
+                      )}
                       <div className="border-t border-gray-100 mt-1 pt-1">
                         <button
                           onClick={() => {
