@@ -15,6 +15,8 @@ import {
   Star,
   Tag,
   Pencil,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
@@ -41,6 +43,9 @@ interface FileListProps {
   onRename?: (file: FileItem) => void;
   selectedIds?: string[];
   onSelectChange?: (ids: string[]) => void;
+  sortBy?: "name" | "size" | "createdAt" | "mimeType";
+  sortDir?: "asc" | "desc";
+  onSort?: (col: "name" | "size" | "createdAt" | "mimeType") => void;
 }
 
 const getFileIcon = (mimeType: string) => {
@@ -65,6 +70,24 @@ const formatBytes = (bytes: number) => {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 };
 
+function SortIcon({
+  col,
+  sortBy,
+  sortDir,
+}: {
+  col: string;
+  sortBy?: string;
+  sortDir?: string;
+}) {
+  if (sortBy !== col)
+    return <ChevronUp size={11} className="text-gray-300 ml-0.5" />;
+  return sortDir === "asc" ? (
+    <ChevronUp size={11} className="text-blue-500 ml-0.5" />
+  ) : (
+    <ChevronDown size={11} className="text-blue-500 ml-0.5" />
+  );
+}
+
 export default function FileList({
   files,
   onFileClick,
@@ -77,8 +100,29 @@ export default function FileList({
   onRename,
   selectedIds = [],
   onSelectChange,
+  sortBy,
+  sortDir,
+  onSort,
 }: FileListProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
+
+  const sorted = [...files].sort((a, b) => {
+    const dir = sortDir === "desc" ? -1 : 1;
+    switch (sortBy) {
+      case "size":
+        return (a.size - b.size) * dir;
+      case "mimeType":
+        return a.mimeType.localeCompare(b.mimeType) * dir;
+      case "createdAt":
+        return (
+          (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) *
+          dir
+        );
+      case "name":
+      default:
+        return a.name.localeCompare(b.name) * dir;
+    }
+  });
 
   if (files.length === 0) return null;
 
@@ -91,7 +135,7 @@ export default function FileList({
               type="checkbox"
               checked={files.length > 0 && selectedIds.length === files.length}
               onChange={(e) =>
-                onSelectChange(e.target.checked ? files.map((f) => f.id) : [])
+                onSelectChange(e.target.checked ? sorted.map((f) => f.id) : [])
               }
               className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 cursor-pointer"
             />
@@ -100,25 +144,58 @@ export default function FileList({
         <div
           className={`${onSelectChange ? "col-span-5" : "col-span-6"} text-xs font-medium text-gray-500`}
         >
-          Name
+          {onSort ? (
+            <button
+              onClick={() => onSort("name")}
+              className="flex items-center hover:text-gray-700"
+            >
+              Name <SortIcon col="name" sortBy={sortBy} sortDir={sortDir} />
+            </button>
+          ) : (
+            "Name"
+          )}
         </div>
-        <div className="col-span-2 text-xs font-medium text-gray-500">Type</div>
-        <div className="col-span-2 text-xs font-medium text-gray-500">Size</div>
         <div className="col-span-2 text-xs font-medium text-gray-500">
-          Modified
+          {onSort ? (
+            <button
+              onClick={() => onSort("mimeType")}
+              className="flex items-center hover:text-gray-700"
+            >
+              Type <SortIcon col="mimeType" sortBy={sortBy} sortDir={sortDir} />
+            </button>
+          ) : (
+            "Type"
+          )}
         </div>
-      </div>
-      <div className="grid grid-cols-12 gap-4 px-4 py-2.5 border-b border-gray-100 bg-gray-50">
-        <div className="col-span-6 text-xs font-medium text-gray-500">Name</div>
-        <div className="col-span-2 text-xs font-medium text-gray-500">Type</div>
-        <div className="col-span-2 text-xs font-medium text-gray-500">Size</div>
         <div className="col-span-2 text-xs font-medium text-gray-500">
-          Modified
+          {onSort ? (
+            <button
+              onClick={() => onSort("size")}
+              className="flex items-center hover:text-gray-700"
+            >
+              Size <SortIcon col="size" sortBy={sortBy} sortDir={sortDir} />
+            </button>
+          ) : (
+            "Size"
+          )}
+        </div>
+        <div className="col-span-2 text-xs font-medium text-gray-500">
+          {onSort ? (
+            <button
+              onClick={() => onSort("createdAt")}
+              className="flex items-center hover:text-gray-700"
+            >
+              Modified{" "}
+              <SortIcon col="createdAt" sortBy={sortBy} sortDir={sortDir} />
+            </button>
+          ) : (
+            "Modified"
+          )}
         </div>
       </div>
 
       {/* Rows */}
-      {files.map((file) => {
+      {sorted.map((file) => {
         const { icon: Icon, color } = getFileIcon(file.mimeType);
         const ext = file.name.split(".").pop()?.toUpperCase() || "FILE";
 

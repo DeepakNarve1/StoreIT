@@ -1,15 +1,16 @@
 import { Router, Response } from "express";
 import { verifyAuth, AuthRequest } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
+import { getPlanLimits } from "../utils/plans";
 
 const router = Router();
 
-// ─── GET /api/dashboard/stats ─────────────────────────────────────────────────
 router.get("/stats", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
     const tenantId = req.user!.tenantId;
 
     const [
+      tenantData,
       fileCount,
       folderCount,
       userCount,
@@ -17,24 +18,17 @@ router.get("/stats", verifyAuth, async (req: AuthRequest, res: Response) => {
       recentFiles,
       categoryCount,
     ] = await Promise.all([
-      // Total files
-      prisma.file.count({
-        where: { tenantId, isDeleted: false },
+      prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { plan: true },
       }),
-      // Total folders
-      prisma.folder.count({
-        where: { tenantId, isDeleted: false },
-      }),
-      // Total active users
-      prisma.user.count({
-        where: { tenantId, isActive: true },
-      }),
-      // Total storage used
+      prisma.file.count({ where: { tenantId, isDeleted: false } }),
+      prisma.folder.count({ where: { tenantId, isDeleted: false } }),
+      prisma.user.count({ where: { tenantId, isActive: true } }),
       prisma.file.aggregate({
         where: { tenantId, isDeleted: false },
         _sum: { size: true },
       }),
-      // Recent files (last 5)
       prisma.file.findMany({
         where: { tenantId, isDeleted: false },
         orderBy: { createdAt: "desc" },
@@ -49,13 +43,13 @@ router.get("/stats", verifyAuth, async (req: AuthRequest, res: Response) => {
           uploadedBy: { select: { name: true } },
         },
       }),
-      // Total categories
-      prisma.category.count({
-        where: { tenantId },
-      }),
+      prisma.category.count({ where: { tenantId } }),
     ]);
 
     const storageBytes = storageResult._sum.size || 0;
+    const { storageBytes: storageLimit } = getPlanLimits(
+      tenantData?.plan ?? "free",
+    );
 
     res.json({
       stats: {
@@ -65,6 +59,8 @@ router.get("/stats", verifyAuth, async (req: AuthRequest, res: Response) => {
         categories: categoryCount,
         storageBytes,
         storageMB: Math.round((storageBytes / 1024 / 1024) * 10) / 10,
+        storageLimit,
+        plan: tenantData?.plan ?? "free",
       },
       recentFiles,
     });

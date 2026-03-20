@@ -233,6 +233,17 @@ export default function Sidebar({ isOpen }: SidebarProps) {
     },
   });
 
+  // Fetch storage stats
+  const { data: statsData } = useQuery({
+    queryKey: ["dashboard-stats"],
+    queryFn: async () => {
+      const res = await api.get("/dashboard/stats");
+      return res.data as { stats: any };
+    },
+    staleTime: 60 * 1000,
+  });
+  const stats = statsData?.stats;
+
   const folders = foldersData?.folders ?? [];
   const categories = categoriesData?.categories ?? [];
   const rootFolders = folders.filter((f) => f.parentId === null);
@@ -451,6 +462,43 @@ export default function Sidebar({ isOpen }: SidebarProps) {
             <Settings size={16} />
             <span>Settings</span>
           </button>
+        )}
+        {/* Storage quota */}
+        {stats && (
+          <div className="mx-2 mb-2 p-3 bg-gray-50 rounded-xl border border-gray-200">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-medium text-gray-600">Storage</span>
+              <span className="text-xs text-gray-400 capitalize">
+                {stats.plan}
+              </span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-1.5 mb-1.5">
+              <div
+                className={`h-1.5 rounded-full transition-all ${
+                  stats.storageLimit === null || stats.storageLimit > 1e15
+                    ? "bg-blue-500"
+                    : stats.storageBytes / stats.storageLimit > 0.9
+                      ? "bg-red-500"
+                      : stats.storageBytes / stats.storageLimit > 0.75
+                        ? "bg-amber-500"
+                        : "bg-blue-500"
+                }`}
+                style={{
+                  width:
+                    stats.storageLimit > 1e15
+                      ? "5%"
+                      : `${Math.min(100, Math.round((stats.storageBytes / stats.storageLimit) * 100))}%`,
+                }}
+              />
+            </div>
+            <p className="text-xs text-gray-400">
+              {stats.storageMB < 1024
+                ? `${stats.storageMB} MB`
+                : `${(stats.storageMB / 1024).toFixed(1)} GB`}
+              {stats.storageLimit <= 1e15 &&
+                ` of ${Math.round(stats.storageLimit / 1024 / 1024 / 1024)} GB used`}
+            </p>
+          </div>
         )}
       </div>
     </aside>

@@ -12,6 +12,7 @@ import {
   deleteFile,
 } from "../services/storage.service";
 import { createAuditLog } from "../services/audit.service";
+import { getPlanLimits } from "../utils/plans";
 
 const router = Router();
 
@@ -196,6 +197,30 @@ router.post(
       }
 
       const savedFiles = [];
+
+      // ── Quota check ──────────────────────────────────────────────────────────────
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: req.user!.tenantId },
+        select: { plan: true },
+      });
+      const { storageBytes: limit } = getPlanLimits(tenant?.plan ?? "free");
+      const usageResult = await prisma.file.aggregate({
+        where: { tenantId: req.user!.tenantId, isDeleted: false },
+        _sum: { size: true },
+      });
+      const usedBytes = usageResult._sum.size ?? 0;
+      const incomingBytes = (req.files as Express.Multer.File[]).reduce(
+        (s, f) => s + f.size,
+        0,
+      );
+
+      if (limit !== Infinity && usedBytes + incomingBytes > limit) {
+        res.status(400).json({
+          error: "Storage quota exceeded. Please upgrade your plan.",
+          code: "QUOTA_EXCEEDED",
+        });
+        return;
+      }
 
       for (const file of files) {
         const safeName = sanitizeFilename(file.originalname);

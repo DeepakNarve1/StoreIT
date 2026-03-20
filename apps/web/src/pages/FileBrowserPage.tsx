@@ -55,6 +55,10 @@ export default function FileBrowserPage() {
   const [moveFiles, setMoveFiles] = useState<any[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [newFolderCategoryId, setNewFolderCategoryId] = useState<string>("");
+  const [sortBy, setSortBy] = useState<
+    "name" | "size" | "createdAt" | "mimeType"
+  >("createdAt");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [categoryResource, setCategoryResource] = useState<{
     id: string;
     type: "file" | "folder";
@@ -173,6 +177,13 @@ export default function FileBrowserPage() {
       type: "folder",
       name: folder.name,
     });
+  };
+  const handleSort = (col: "name" | "size" | "createdAt" | "mimeType") => {
+    if (sortBy === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortBy(col);
+      setSortDir("asc");
+    }
   };
 
   const handleDelete = async (file: any) => {
@@ -569,6 +580,9 @@ export default function FileBrowserPage() {
                     }}
                     selectedIds={selectedFiles}
                     onSelectChange={setSelectedFiles}
+                    sortBy={sortBy}
+                    sortDir={sortDir}
+                    onSort={handleSort}
                   />
                 )}
               </div>
