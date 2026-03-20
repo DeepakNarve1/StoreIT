@@ -12,7 +12,9 @@ import {
   Shield,
   History,
   FolderInput,
-  Hash,
+  Star,
+  Tag,
+  Pencil,
 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
@@ -24,6 +26,7 @@ interface FileItem {
   size: number;
   createdAt: string;
   version?: number;
+  isStarred?: boolean;
 }
 
 interface FileListProps {
@@ -33,7 +36,11 @@ interface FileListProps {
   onShare?: (file: FileItem) => void;
   onVersions?: (file: FileItem) => void;
   onMove?: (file: FileItem) => void;
-  onAssignCategory?: (file: FileItem) => void;
+  onStar?: (file: FileItem) => void;
+  onAssignTag?: (file: FileItem) => void;
+  onRename?: (file: FileItem) => void;
+  selectedIds?: string[];
+  onSelectChange?: (ids: string[]) => void;
 }
 
 const getFileIcon = (mimeType: string) => {
@@ -65,7 +72,11 @@ export default function FileList({
   onShare,
   onVersions,
   onMove,
-  onAssignCategory,
+  onStar,
+  onAssignTag,
+  onRename,
+  selectedIds = [],
+  onSelectChange,
 }: FileListProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
 
@@ -73,7 +84,30 @@ export default function FileList({
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl overflow-visible">
-      {/* Header */}
+      <div className="grid grid-cols-12 gap-4 px-4 py-2.5 border-b border-gray-100 bg-gray-50 items-center">
+        {onSelectChange && (
+          <div className="col-span-1 flex items-center">
+            <input
+              type="checkbox"
+              checked={files.length > 0 && selectedIds.length === files.length}
+              onChange={(e) =>
+                onSelectChange(e.target.checked ? files.map((f) => f.id) : [])
+              }
+              className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 cursor-pointer"
+            />
+          </div>
+        )}
+        <div
+          className={`${onSelectChange ? "col-span-5" : "col-span-6"} text-xs font-medium text-gray-500`}
+        >
+          Name
+        </div>
+        <div className="col-span-2 text-xs font-medium text-gray-500">Type</div>
+        <div className="col-span-2 text-xs font-medium text-gray-500">Size</div>
+        <div className="col-span-2 text-xs font-medium text-gray-500">
+          Modified
+        </div>
+      </div>
       <div className="grid grid-cols-12 gap-4 px-4 py-2.5 border-b border-gray-100 bg-gray-50">
         <div className="col-span-6 text-xs font-medium text-gray-500">Name</div>
         <div className="col-span-2 text-xs font-medium text-gray-500">Type</div>
@@ -91,13 +125,34 @@ export default function FileList({
         return (
           <div
             key={file.id}
-            className="grid grid-cols-12 gap-4 px-4 py-3 border-b border-gray-100
-                       last:border-b-0 hover:bg-gray-50 transition-colors group items-center"
+            className={clsx(
+              "grid grid-cols-12 gap-4 px-4 py-3 border-b border-gray-100",
+              "last:border-b-0 transition-colors group items-center",
+              selectedIds.includes(file.id) ? "bg-blue-50" : "hover:bg-gray-50",
+            )}
           >
+            {onSelectChange && (
+              <div
+                className="col-span-1 flex items-center"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(file.id)}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                      ? [...selectedIds, file.id]
+                      : selectedIds.filter((id) => id !== file.id);
+                    onSelectChange(next);
+                  }}
+                  className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 cursor-pointer"
+                />
+              </div>
+            )}
             {/* Name */}
             <button
               onClick={() => onFileClick(file)}
-              className="col-span-6 flex items-center gap-3 text-left"
+              className={`${onSelectChange ? "col-span-5" : "col-span-6"} flex items-center gap-3 text-left`}
             >
               <Icon size={16} className={color} />
               <span
@@ -173,6 +228,30 @@ export default function FileList({
                       >
                         <Eye size={14} /> Preview
                       </button>
+                      {onStar && (
+                        <button
+                          onClick={() => {
+                            onStar(file);
+                            setActiveMenu(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm
+               text-gray-700 hover:bg-gray-100 rounded-lg"
+                        >
+                          <Star size={14} />{" "}
+                          {file.isStarred ? "Unstar" : "Star"}
+                        </button>
+                      )}
+                      {onRename && (
+                        <button
+                          onClick={() => {
+                            onRename(file);
+                            setActiveMenu(null);
+                          }}
+                          className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                        >
+                          <Pencil size={14} /> Rename
+                        </button>
+                      )}
                       <button
                         onClick={async () => {
                           try {
@@ -238,16 +317,16 @@ export default function FileList({
                           <FolderInput size={14} /> Move to folder
                         </button>
                       )}
-                      {onAssignCategory && (
+                      {onAssignTag && (
                         <button
                           onClick={() => {
-                            onAssignCategory(file);
+                            onAssignTag(file);
                             setActiveMenu(null);
                           }}
                           className="w-full flex items-center gap-2 px-3 py-2 text-sm
                text-gray-700 hover:bg-gray-100 rounded-lg"
                         >
-                          <Hash size={14} /> Assign category
+                          <Tag size={14} /> Assign tag
                         </button>
                       )}
                       <div className="border-t border-gray-100 mt-1 pt-1">

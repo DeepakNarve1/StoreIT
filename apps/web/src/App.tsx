@@ -16,6 +16,9 @@ import OrgsPage from "./pages/superadmin/OrgsPage";
 import OneTimeViewPage from "./pages/OneTimeViewPage";
 import AuditLogPage from "./pages/admin/AuditLogPage";
 import SearchPage from "./pages/SearchPage";
+import { ToastContainer } from "./components/ui/Toast";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -62,6 +65,12 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/invite/:token" element={<AcceptInvitePage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route
+            path="/reset-password/:token"
+            element={<ResetPasswordPage />}
+          />
           <Route
             path="/"
             element={
@@ -86,7 +95,6 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/invite/:token" element={<AcceptInvitePage />} />
           <Route
             path="/admin/users"
             element={
@@ -162,6 +170,7 @@ export default function App() {
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        <ToastContainer />
       </BrowserRouter>
     </QueryClientProvider>
   );

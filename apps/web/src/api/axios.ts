@@ -22,10 +22,16 @@ api.interceptors.response.use(
     ) {
       original._retry = true;
       try {
+        // SEC FIX #6: include X-Requested-With header so the backend
+        // CSRF check on /auth/refresh passes. Browsers cannot set this
+        // header on cross-origin requests, blocking CSRF attacks.
         const refresh = await axios.post(
           `${import.meta.env.VITE_API_URL || "http://localhost:5000/api"}/auth/refresh`,
           {},
-          { withCredentials: true },
+          {
+            withCredentials: true,
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+          },
         );
         const newToken = refresh.data.accessToken;
         localStorage.setItem("access_token", newToken);

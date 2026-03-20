@@ -11,6 +11,7 @@ import {
   Home,
   Trash2,
   Hash,
+  FolderInput,
 } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import FileGrid from "../components/files/FileGrid";
@@ -23,10 +24,11 @@ import api from "../api/axios";
 import FileVersionsModal from "../components/files/FileVersionsModal";
 import MoveFileModal from "../components/files/MoveFileModal";
 import AssignCategoryModal from "../components/files/AssignCategoryModal";
+import { useToast } from "../components/ui/Toast";
 
 type ViewMode = "grid" | "list";
 
-interface FolderItem {
+interface StoreITem {
   id: string;
   name: string;
   parentId: string | null;
@@ -38,7 +40,7 @@ export default function FileBrowserPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [showUpload, setShowUpload] = useState(false);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
@@ -59,6 +61,11 @@ export default function FileBrowserPage() {
     name: string;
     currentCategoryId?: string | null;
   } | null>(null);
+  const [renameFile, setRenameFile] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [renameName, setRenameName] = useState("");
 
   // ── Fetch files ─────────────────────────────────────────────────────────────
   const { data: filesData, isLoading: filesLoading } = useQuery({
@@ -76,8 +83,19 @@ export default function FileBrowserPage() {
       const res = await api.get("/folders", {
         params: { parentId: folderId ?? null },
       });
-      return res.data as { folders: FolderItem[] };
+      return res.data as { folders: StoreITem[] };
     },
+  });
+  const renameMutation = useMutation({
+    mutationFn: async ({ id, name }: { id: string; name: string }) => {
+      await api.patch(`/files/${id}/rename`, { name });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["files"] });
+      setRenameFile(null);
+      useToast.getState().add("File renamed");
+    },
+    onError: () => useToast.getState().add("Failed to rename file", "error"),
   });
 
   // Fetch categories for selector
@@ -89,6 +107,17 @@ export default function FileBrowserPage() {
     },
   });
   const categories = categoriesData?.categories ?? [];
+
+  const { data: ancestorsData } = useQuery({
+    queryKey: ["folder-ancestors", folderId],
+    queryFn: async () => {
+      if (!folderId) return { ancestors: [] };
+      const res = await api.get(`/folders/${folderId}/ancestors`);
+      return res.data as { ancestors: { id: string; name: string }[] };
+    },
+    enabled: !!folderId,
+  });
+  const ancestors = ancestorsData?.ancestors ?? [];
 
   const createFolder = useMutation({
     mutationFn: async (name: string) => {
@@ -110,6 +139,19 @@ export default function FileBrowserPage() {
     },
   });
 
+  const bulkDelete = useMutation({
+    mutationFn: async (ids: string[]) =>
+      api.post("/files/bulk-delete", { ids }),
+    onSuccess: (_, ids) => {
+      queryClient.invalidateQueries({
+        queryKey: ["files", folderId ?? "root"],
+      });
+      setSelectedFiles([]);
+      useToast.getState().add(`${ids.length} files deleted`);
+    },
+    onError: () => useToast.getState().add("Failed to delete files", "error"),
+  });
+
   const files = filesData?.files ?? [];
   const folders = foldersData?.folders ?? [];
   const isLoading = filesLoading || foldersLoading;
@@ -125,7 +167,7 @@ export default function FileBrowserPage() {
     setPermissionsResource({ id: file.id, type: "file", name: file.name });
   };
 
-  const handleFolderShare = (folder: FolderItem) => {
+  const handleFolderShare = (folder: StoreITem) => {
     setPermissionsResource({
       id: folder.id,
       type: "folder",
@@ -152,13 +194,6 @@ export default function FileBrowserPage() {
   };
 
   const handleMove = (file: any) => setMoveFiles([file]);
-  const handleAssignCategory = (file: any) =>
-    setCategoryResource({
-      id: file.id,
-      type: "file",
-      name: file.name,
-      currentCategoryId: file.categoryId,
-    });
   const handleFolderAssignCategory = (folder: any) =>
     setCategoryResource({
       id: folder.id,
@@ -171,29 +206,41 @@ export default function FileBrowserPage() {
     <AppShell>
       <div className="max-w-6xl mx-auto">
         {/* Breadcrumb */}
-        <div className="flex items-center gap-1.5 text-sm text-gray-500 mb-4">
-          <Home size={14} />
+        <div className="flex items-center gap-1 text-sm text-gray-500 mb-4 flex-wrap">
+          <Home size={14} className="shrink-0" />
           <span
             onClick={() => navigate("/browse")}
             className={clsx(
-              "cursor-pointer hover:text-gray-800 transition-colors",
+              "cursor-pointer hover:text-gray-800 transition-colors px-1",
               !folderId && "text-gray-800 font-medium pointer-events-none",
             )}
           >
             All Files
           </span>
-          {folderId && (
-            <>
-              <ChevronRight size={13} className="text-gray-400" />
-              <span className="text-gray-800 font-medium">Folder</span>
-            </>
-          )}
+          {ancestors.map((ancestor, i) => (
+            <span key={ancestor.id} className="flex items-center gap-1">
+              <ChevronRight size={13} className="text-gray-300 shrink-0" />
+              <span
+                onClick={() => navigate(`/browse/${ancestor.id}`)}
+                className={clsx(
+                  "cursor-pointer hover:text-gray-800 transition-colors px-1 truncate max-w-[140px]",
+                  i === ancestors.length - 1
+                    ? "text-gray-800 font-medium pointer-events-none"
+                    : "hover:text-gray-800",
+                )}
+              >
+                {ancestor.name}
+              </span>
+            </span>
+          ))}
         </div>
 
         {/* Toolbar */}
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <h1 className="text-base font-semibold text-gray-900">
-            {folderId ? "Folder contents" : "All Files"}
+            {ancestors.length > 0
+              ? ancestors[ancestors.length - 1].name
+              : "All Files"}
           </h1>
           <div className="flex items-center gap-2">
             {/* View toggle */}
@@ -307,6 +354,47 @@ export default function FileBrowserPage() {
           </div>
         )}
 
+        {/* Bulk action bar */}
+        {selectedFiles.length > 0 && (
+          <div
+            className="flex items-center gap-3 mb-4 px-4 py-2.5 bg-blue-50 border
+                  border-blue-200 rounded-xl"
+          >
+            <span className="text-sm font-medium text-blue-700">
+              {selectedFiles.length} selected
+            </span>
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                onClick={() =>
+                  setMoveFiles(
+                    files.filter((f) => selectedFiles.includes(f.id)),
+                  )
+                }
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-blue-700
+                   bg-white border border-blue-200 rounded-lg hover:bg-blue-50 font-medium"
+              >
+                <FolderInput size={14} /> Move
+              </button>
+              <button
+                onClick={() => {
+                  if (!confirm(`Delete ${selectedFiles.length} files?`)) return;
+                  bulkDelete.mutate(selectedFiles);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600
+                   bg-white border border-red-200 rounded-lg hover:bg-red-50 font-medium"
+              >
+                <Trash2 size={14} /> Delete
+              </button>
+              <button
+                onClick={() => setSelectedFiles([])}
+                className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Main content */}
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
@@ -325,7 +413,28 @@ export default function FileBrowserPage() {
                 <Upload size={22} className="text-gray-400" />
               </div>
               <p className="text-sm font-medium text-gray-700">
-                This folder is empty
+                {!filesLoading &&
+                  !foldersLoading &&
+                  (filesData?.files?.length ?? 0) === 0 &&
+                  (foldersData?.folders?.length ?? 0) === 0 && (
+                    <div className="flex flex-col items-center justify-center py-20 text-center">
+                      <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-4">
+                        <Upload size={28} className="text-blue-400" />
+                      </div>
+                      <h3 className="text-gray-700 font-medium mb-1">
+                        This folder is empty
+                      </h3>
+                      <p className="text-gray-400 text-sm mb-4">
+                        Upload files or create a folder to get started
+                      </p>
+                      <button
+                        onClick={() => setShowUpload(true)}
+                        className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+                      >
+                        Upload files
+                      </button>
+                    </div>
+                  )}
               </p>
               <p className="text-xs text-gray-400 mt-1 mb-4">
                 Create a folder or upload files to get started
@@ -454,11 +563,52 @@ export default function FileBrowserPage() {
                     onShare={handleShare}
                     onVersions={handleVersions}
                     onMove={handleMove}
-                    onAssignCategory={handleAssignCategory}
+                    onRename={(file) => {
+                      setRenameFile(file);
+                      setRenameName(file.name);
+                    }}
+                    selectedIds={selectedFiles}
+                    onSelectChange={setSelectedFiles}
                   />
                 )}
               </div>
             )}
+          </div>
+        )}
+        {renameFile && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 w-96 shadow-xl">
+              <h3 className="font-semibold mb-4">Rename file</h3>
+              <input
+                autoFocus
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
+                value={renameName}
+                onChange={(e) => setRenameName(e.target.value)}
+                onKeyDown={(e) =>
+                  e.key === "Enter" &&
+                  renameMutation.mutate({ id: renameFile.id, name: renameName })
+                }
+              />
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setRenameFile(null)}
+                  className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() =>
+                    renameMutation.mutate({
+                      id: renameFile.id,
+                      name: renameName,
+                    })
+                  }
+                  className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  Rename
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

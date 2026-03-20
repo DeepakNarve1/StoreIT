@@ -29,7 +29,7 @@ interface SidebarProps {
   isOpen: boolean;
 }
 
-interface FolderItem {
+interface StoreITem {
   id: string;
   name: string;
   parentId: string | null;
@@ -58,8 +58,8 @@ function FolderNode({
   allFolders,
   depth = 0,
 }: {
-  folder: FolderItem;
-  allFolders: FolderItem[];
+  folder: StoreITem;
+  allFolders: StoreITem[];
   depth?: number;
 }) {
   const navigate = useNavigate();
@@ -205,7 +205,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
     queryKey: ["folders", "root"],
     queryFn: async () => {
       const res = await api.get("/folders");
-      return res.data as { folders: FolderItem[] };
+      return res.data as { folders: StoreITem[] };
     },
     staleTime: 10 * 1000,
   });
@@ -247,9 +247,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
         <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
           <span className="text-white text-xs font-bold">F</span>
         </div>
-        <span className="font-semibold text-gray-900 text-sm">
-          FolderIT Clone
-        </span>
+        <span className="font-semibold text-gray-900 text-sm">StoreIT</span>
       </div>
 
       <div className="flex-1 overflow-y-auto py-3">
@@ -283,7 +281,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
         <div className="px-4 mb-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-              Categories
+              By Department
             </span>
             <button
               onClick={() => setShowNewCategory(true)}

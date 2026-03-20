@@ -18,7 +18,7 @@ interface MoveFileModalProps {
   onSuccess: () => void;
 }
 
-interface FolderItem {
+interface StoreITem {
   id: string;
   name: string;
   parentId: string | null;
@@ -46,7 +46,7 @@ export default function MoveFileModal({
       const res = await api.get("/folders", {
         params: { parentId: currentFolderId ?? null },
       });
-      return res.data as { folders: FolderItem[] };
+      return res.data as { folders: StoreITem[] };
     },
   });
 
@@ -65,7 +65,7 @@ export default function MoveFileModal({
     },
   });
 
-  const navigateInto = (folder: FolderItem) => {
+  const navigateInto = (folder: StoreITem) => {
     setCurrentFolderId(folder.id);
     setBreadcrumb((prev) => [...prev, { id: folder.id, name: folder.name }]);
     setSelectedFolderId(folder.id);

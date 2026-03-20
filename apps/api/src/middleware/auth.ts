@@ -7,6 +7,7 @@ export interface AuthRequest extends Request {
     tenantId: string;
     role: string;
     email: string;
+    impersonatedBy?: string; // SEC FIX #5: track impersonation in every request
   };
 }
 
@@ -36,6 +37,7 @@ export const verifyAuth = (
       tenantId: decoded.tenantId,
       role: decoded.role,
       email: decoded.email,
+      impersonatedBy: decoded.impersonatedBy, // SEC FIX #5
     };
     next();
   } catch (err: any) {
@@ -60,4 +62,16 @@ export const requireRole = (...roles: string[]) => {
     }
     next();
   };
+};
+
+// SEC FIX #6: CSRF protection for cookie-based refresh token endpoint.
+// Checks that the request comes with a custom header that browsers
+// cannot set on cross-origin requests (CORS blocks it automatically).
+export const verifyCsrf = (req: Request, res: Response, next: NextFunction) => {
+  const csrfHeader = req.headers["x-requested-with"];
+  if (csrfHeader !== "XMLHttpRequest") {
+    res.status(403).json({ error: "CSRF check failed" });
+    return;
+  }
+  next();
 };

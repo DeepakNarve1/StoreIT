@@ -25,6 +25,7 @@ model Tenant {
   invites      InviteToken[]
   oneTimeLinks OneTimeLink[]
   auditLogs    AuditLog[]
+  tags    Tag[] 
 }
 
 // ─── USER ────────────────────────────────────────────────────────────────────
@@ -46,6 +47,7 @@ model User {
   invites      InviteToken[]
   uploadedFiles File[]   @relation("UploadedBy")
   uploadedVersions FileVersion[] @relation("VersionUploadedBy")
+  passwordResetTokens PasswordResetToken[]
   auditLogs    AuditLog[]
 
   @@index([tenantId])
@@ -61,7 +63,7 @@ enum Role {
   VIEWER
 }
 
-// ─── CATEGORY (sidebar categories like Folderit) ─────────────────────────────
+// ─── CATEGORY (sidebar categories like StoreIT) ─────────────────────────────
 model Category {
   id           String     @id @default(uuid())
   name         String
@@ -97,6 +99,8 @@ model Folder {
   categoryId   String?
   category     Category? @relation(fields: [categoryId], references: [id])
 
+  isStarred    Boolean   @default(false)  
+
   files        File[]
   permissions  Permission[]
 
@@ -127,6 +131,9 @@ model File {
   categoryId   String?
   category     Category? @relation(fields: [categoryId], references: [id])
 
+  isStarred    Boolean   @default(false)  
+  tags         FileTag[]                  
+
   uploadedById String?
   uploadedBy   User?     @relation("UploadedBy", fields: [uploadedById], references: [id])
 
@@ -153,6 +160,30 @@ model FileVersion {
   uploadedBy   User?   @relation("VersionUploadedBy", fields: [uploadedById], references: [id])
 
   @@index([fileId])
+}
+
+// ─── TAG ──────────────────────────────────────────────────────────────────────
+model Tag {
+  id        String    @id @default(uuid())
+  name      String
+  color     String    @default("#3B8BD4")
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  createdAt DateTime  @default(now())
+  files     FileTag[]
+
+  @@unique([name, tenantId])
+  @@index([tenantId])
+}
+
+// ─── FILE TAG (junction) ──────────────────────────────────────────────────────
+model FileTag {
+  fileId String
+  file   File   @relation(fields: [fileId], references: [id])
+  tagId  String
+  tag    Tag    @relation(fields: [tagId], references: [id])
+
+  @@id([fileId, tagId])
 }
 
 // ─── PERMISSION ──────────────────────────────────────────────────────────────
@@ -197,6 +228,21 @@ model InviteToken {
 
   @@index([token])
   @@index([tenantId])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  email     String
+  isUsed    Boolean   @default(false) 
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
 }
 
 // ─── ONE TIME LINK ───────────────────────────────────────────────────────────

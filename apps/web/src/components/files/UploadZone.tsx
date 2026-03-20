@@ -10,6 +10,7 @@ interface UploadFile {
   status: "pending" | "uploading" | "done" | "error";
   progress: number;
   error?: string;
+  relativePath?: string;
 }
 
 interface UploadZoneProps {
@@ -30,45 +31,46 @@ export default function UploadZone({
     );
   };
 
-  const uploadFile = async (uploadItem: UploadFile) => {
-    updateUpload(uploadItem.id, { status: "uploading", progress: 0 });
-
-    try {
-      const formData = new FormData();
-      formData.append("file", uploadItem.file);
-      if (folderId && folderId !== "undefined") {
-        formData.append("folderId", folderId);
+  const uploadFile = useCallback(
+    async (uploadItem: UploadFile) => {
+      updateUpload(uploadItem.id, { status: "uploading", progress: 0 });
+      try {
+        const formData = new FormData();
+        formData.append("file", uploadItem.file);
+        if (folderId && folderId !== "undefined") {
+          formData.append("folderId", folderId);
+        }
+        await api.post("/files/upload", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+          onUploadProgress: (e) => {
+            const progress = Math.round((e.loaded * 100) / (e.total || 1));
+            updateUpload(uploadItem.id, { progress });
+          },
+        });
+        updateUpload(uploadItem.id, { status: "done", progress: 100 });
+        onUploadComplete();
+      } catch (err: any) {
+        updateUpload(uploadItem.id, {
+          status: "error",
+          error: err.response?.data?.error || "Upload failed",
+        });
       }
-      await api.post("/files/upload", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-        onUploadProgress: (e) => {
-          const progress = Math.round((e.loaded * 100) / (e.total || 1));
-          updateUpload(uploadItem.id, { progress });
-        },
-      });
-
-      updateUpload(uploadItem.id, { status: "done", progress: 100 });
-      onUploadComplete();
-    } catch (err: any) {
-      updateUpload(uploadItem.id, {
-        status: "error",
-        error: err.response?.data?.error || "Upload failed",
-      });
-    }
-  };
-
+    },
+    [folderId, onUploadComplete],
+  );
   const onDrop = useCallback(
-    (acceptedFiles: File[]) => {
+    async (acceptedFiles: File[]) => {
+      // Group files by their relative path to preserve folder structure
       const newUploads: UploadFile[] = acceptedFiles.map((file) => ({
         id: `${file.name}-${Date.now()}-${Math.random()}`,
         file,
-        status: "pending",
+        status: "pending" as const,
         progress: 0,
+        // webkitRelativePath gives us the folder structure
+        relativePath: (file as any).webkitRelativePath || file.name,
       }));
 
       setUploads((prev) => [...prev, ...newUploads]);
-
-      // Upload all files (max 5 concurrent)
       newUploads.forEach((u) => uploadFile(u));
     },
     [folderId],
@@ -108,6 +110,7 @@ export default function UploadZone({
             : "border-gray-300 hover:border-gray-400 hover:bg-gray-50",
         )}
       >
+        {/* ✅ No webkitdirectory here — lets users pick individual files normally */}
         <input {...getInputProps()} />
         <div
           className={clsx(
@@ -123,11 +126,22 @@ export default function UploadZone({
         <p className="text-sm font-medium text-gray-700">
           {isDragActive ? "Drop files here" : "Drag & drop files here"}
         </p>
+        {/* ✅ Single, unified browse line */}
         <p className="text-xs text-gray-400 mt-1">
+          or <span className="text-blue-600 hover:underline">browse files</span>{" "}
           or{" "}
-          <span className="text-blue-600 hover:underline">
-            browse to upload
-          </span>
+          <label className="text-blue-600 hover:underline cursor-pointer">
+            upload a folder
+            <input
+              type="file"
+              className="hidden"
+              {...({ webkitdirectory: "", directory: "" } as any)}
+              onChange={(e) => {
+                const files = Array.from(e.target.files || []);
+                if (files.length > 0) onDrop(files);
+              }}
+            />
+          </label>
         </p>
         <p className="text-xs text-gray-400 mt-2">All file types supported</p>
       </div>

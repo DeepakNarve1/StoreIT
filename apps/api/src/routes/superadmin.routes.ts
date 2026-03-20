@@ -3,11 +3,11 @@ import { z } from "zod";
 import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import { hashPassword } from "../services/auth.service";
+import { createAuditLog } from "../services/audit.service";
 import jwt from "jsonwebtoken";
 
 const router = Router();
 
-// All superadmin routes require SUPERADMIN role
 router.use(verifyAuth);
 router.use(requireRole("SUPERADMIN"));
 
@@ -46,17 +46,13 @@ router.get("/orgs", async (req: AuthRequest, res: Response) => {
       },
     });
 
-    // Calculate storage per org
     const orgsWithStorage = await Promise.all(
       orgs.map(async (org) => {
         const storage = await prisma.file.aggregate({
           where: { tenantId: org.id, isDeleted: false },
           _sum: { size: true },
         });
-        return {
-          ...org,
-          storageBytes: storage._sum.size || 0,
-        };
+        return { ...org, storageBytes: storage._sum.size || 0 };
       }),
     );
 
@@ -72,14 +68,12 @@ router.post("/orgs", async (req: AuthRequest, res: Response) => {
     const { name, slug, plan, adminName, adminEmail, adminPassword } =
       createOrgSchema.parse(req.body);
 
-    // Check slug is unique
     const existing = await prisma.tenant.findUnique({ where: { slug } });
     if (existing) {
       res.status(400).json({ error: "Organisation slug already taken" });
       return;
     }
 
-    // Check admin email not already used
     const existingUser = await prisma.user.findUnique({
       where: { email: adminEmail },
     });
@@ -88,7 +82,6 @@ router.post("/orgs", async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Create tenant + admin user in one transaction
     const hashedPw = await hashPassword(adminPassword);
 
     const tenant = await prisma.tenant.create({
@@ -114,10 +107,19 @@ router.post("/orgs", async (req: AuthRequest, res: Response) => {
         plan: true,
         isActive: true,
         createdAt: true,
-        users: {
-          select: { id: true, name: true, email: true, role: true },
-        },
+        users: { select: { id: true, name: true, email: true, role: true } },
       },
+    });
+
+    await createAuditLog({
+      action: "superadmin.org.create",
+      userId: req.user!.userId,
+      tenantId: req.user!.tenantId,
+      resourceType: "tenant",
+      resourceId: tenant.id,
+      resourceName: tenant.name,
+      metadata: { slug, plan },
+      req,
     });
 
     res.status(201).json({ tenant });
@@ -155,13 +157,18 @@ router.patch("/orgs/:id", async (req: AuthRequest, res: Response) => {
         ...(plan !== undefined && { plan }),
         ...(isActive !== undefined && { isActive }),
       },
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        plan: true,
-        isActive: true,
-      },
+      select: { id: true, name: true, slug: true, plan: true, isActive: true },
+    });
+
+    await createAuditLog({
+      action: "superadmin.org.update",
+      userId: req.user!.userId,
+      tenantId: req.user!.tenantId,
+      resourceType: "tenant",
+      resourceId: req.params.id,
+      resourceName: tenant.name,
+      metadata: { plan, isActive },
+      req,
     });
 
     res.json({ tenant: updated });
@@ -185,10 +192,19 @@ router.delete("/orgs/:id", async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // Soft delete — deactivate instead of hard delete
     await prisma.tenant.update({
       where: { id: req.params.id },
       data: { isActive: false },
+    });
+
+    await createAuditLog({
+      action: "superadmin.org.suspend",
+      userId: req.user!.userId,
+      tenantId: req.user!.tenantId,
+      resourceType: "tenant",
+      resourceId: req.params.id,
+      resourceName: tenant.name,
+      req,
     });
 
     res.json({ message: "Organisation suspended successfully" });
@@ -253,17 +269,15 @@ router.get("/orgs/:id/stats", async (req: AuthRequest, res: Response) => {
 });
 
 // ─── POST /api/superadmin/orgs/:id/impersonate ────────────────────────────────
-// Login as the org admin — returns a short-lived token
+// SEC FIX #5: impersonation is now fully audit-logged with who did it,
+// which org, and when. Token also carries impersonatedBy so any
+// downstream action is traceable.
 router.post(
   "/orgs/:id/impersonate",
   async (req: AuthRequest, res: Response) => {
     try {
       const orgAdmin = await prisma.user.findFirst({
-        where: {
-          tenantId: req.params.id,
-          role: "ORG_ADMIN",
-          isActive: true,
-        },
+        where: { tenantId: req.params.id, role: "ORG_ADMIN", isActive: true },
       });
 
       if (!orgAdmin) {
@@ -273,18 +287,33 @@ router.post(
         return;
       }
 
-      // Issue a short-lived impersonation token (1 hour)
       const impersonateToken = jwt.sign(
         {
           userId: orgAdmin.id,
           tenantId: orgAdmin.tenantId,
           role: orgAdmin.role,
           email: orgAdmin.email,
-          impersonatedBy: req.user!.userId,
+          impersonatedBy: req.user!.userId, // SEC FIX #5: tracked in token
         },
         process.env.JWT_SECRET!,
         { expiresIn: "1h" },
       );
+
+      // SEC FIX #5: every impersonation session is now in the audit log
+      await createAuditLog({
+        action: "superadmin.impersonate",
+        userId: req.user!.userId,
+        tenantId: req.user!.tenantId,
+        resourceType: "user",
+        resourceId: orgAdmin.id,
+        resourceName: orgAdmin.email,
+        metadata: {
+          impersonatedUserId: orgAdmin.id,
+          impersonatedTenantId: orgAdmin.tenantId,
+          impersonatedTenantName: req.params.id,
+        },
+        req,
+      });
 
       res.json({
         accessToken: impersonateToken,

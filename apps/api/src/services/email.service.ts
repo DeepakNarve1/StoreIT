@@ -2,7 +2,7 @@ import { Resend } from "resend";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const FROM = process.env.FROM_EMAIL || "noreply@folderit-clone.com";
+const FROM = process.env.FROM_EMAIL || "noreply@StoreIT.com";
 const APP_URL = process.env.APP_URL || "http://localhost:5173";
 
 // ─── INVITE EMAIL ─────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ export const sendInviteEmail = async ({
                           display:flex;align-items:center;justify-content:center;">
                 <span style="color:#1d4ed8;font-weight:700;font-size:16px;">F</span>
               </div>
-              <span style="color:white;font-weight:600;font-size:16px;">FolderIT Clone</span>
+              <span style="color:white;font-weight:600;font-size:16px;">StoreIT  </span>
             </div>
           </div>
 
@@ -94,4 +94,47 @@ export const sendInviteEmail = async ({
   }
 
   return data;
+};
+
+export const sendPasswordResetEmail = async ({
+  email,
+  token,
+  name,
+}: {
+  email: string;
+  token: string;
+  name: string;
+}) => {
+  const resetUrl = `${APP_URL}/reset-password/${token}`;
+
+  const { error } = await resend.emails.send({
+    from: FROM,
+    to: email,
+    subject: "Reset your StoreIT password",
+    html: `
+      <body style="margin:0;padding:0;background:#f9fafb;font-family:system-ui,sans-serif;">
+        <div style="max-width:520px;margin:40px auto;background:white;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden;">
+          <div style="background:#1d4ed8;padding:24px 32px;">
+            <span style="color:white;font-weight:600;font-size:16px;">StoreIT</span>
+          </div>
+          <div style="padding:32px;">
+            <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#111827;">Reset your password</h1>
+            <p style="margin:0 0 24px;font-size:14px;color:#6b7280;line-height:1.6;">
+              Hi <strong>${name}</strong>, we received a request to reset your password.
+              This link expires in <strong>1 hour</strong>.
+            </p>
+            <a href="${resetUrl}"
+               style="display:inline-block;background:#1d4ed8;color:white;font-size:14px;
+                      font-weight:600;padding:12px 24px;border-radius:8px;text-decoration:none;margin-bottom:24px;">
+              Reset password →
+            </a>
+            <p style="margin:0;font-size:13px;color:#9ca3af;">
+              If you didn't request this, you can safely ignore this email.
+            </p>
+          </div>
+        </div>
+      </body>`,
+  });
+
+  if (error) throw new Error("Failed to send reset email");
 };

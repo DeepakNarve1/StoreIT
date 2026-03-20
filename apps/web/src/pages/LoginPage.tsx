@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/authStore";
 import api from "../api/axios";
 
@@ -34,9 +34,7 @@ export default function LoginPage() {
           <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
             <span className="text-white text-sm font-bold">F</span>
           </div>
-          <span className="text-lg font-semibold text-gray-900">
-            FolderIT Clone
-          </span>
+          <span className="text-lg font-semibold text-gray-900">StoreIT</span>
         </div>
 
         <h1 className="text-xl font-semibold text-gray-900 mb-1">Sign in</h1>
@@ -79,6 +77,15 @@ export default function LoginPage() {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm
                          focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             />
+          </div>
+
+          <div className="text-center mt-3">
+            <Link
+              to="/forgot-password"
+              className="text-xs text-gray-400 hover:text-blue-600 transition-colors"
+            >
+              Forgot your password?
+            </Link>
           </div>
 
           <button

@@ -145,9 +145,7 @@ export default function OneTimeViewPage() {
             <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
               <span className="text-white text-xs font-bold">F</span>
             </div>
-            <span className="font-semibold text-gray-900 text-sm">
-              FolderIT Clone
-            </span>
+            <span className="font-semibold text-gray-900 text-sm">StoreIT</span>
           </div>
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
             <Shield size={13} className="text-green-500" />

@@ -7,12 +7,13 @@ import {
   hashPassword,
   validateInviteToken,
 } from "../services/auth.service";
-import { verifyAuth, AuthRequest } from "../middleware/auth";
+import { verifyAuth, AuthRequest, verifyCsrf } from "../middleware/auth";
 import { createAuditLog } from "../services/audit.service";
+import { sendPasswordResetEmail } from "../services/email.service";
+import { v4 as uuid } from "uuid";
 
 const router = Router();
 
-// ─── VALIDATION SCHEMAS ───────────────────────────────────────────────────────
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
@@ -30,12 +31,11 @@ router.post("/login", async (req: Request, res: Response) => {
     const { email, password } = loginSchema.parse(req.body);
     const result = await loginUser(email, password);
 
-    // Send refresh token as httpOnly cookie
     res.cookie("refresh_token", result.refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
     await createAuditLog({
@@ -48,10 +48,7 @@ router.post("/login", async (req: Request, res: Response) => {
       req,
     });
 
-    res.json({
-      user: result.user,
-      accessToken: result.accessToken,
-    });
+    res.json({ user: result.user, accessToken: result.accessToken });
   } catch (err: any) {
     if (err.message === "INVALID_CREDENTIALS") {
       res.status(401).json({ error: "Invalid email or password" });
@@ -65,7 +62,6 @@ router.post("/login", async (req: Request, res: Response) => {
       res.status(403).json({ error: "Your organisation account is inactive" });
       return;
     }
-    // Zod validation error
     if (err.name === "ZodError") {
       res.status(400).json({ error: "Invalid input", details: err.errors });
       return;
@@ -76,7 +72,10 @@ router.post("/login", async (req: Request, res: Response) => {
 });
 
 // ─── POST /api/auth/refresh ───────────────────────────────────────────────────
-router.post("/refresh", async (req: Request, res: Response) => {
+// SEC FIX #6: verifyCsrf ensures this endpoint can't be hit by a cross-origin
+// form or img tag. The axios interceptor on the frontend must send the header:
+//   headers: { "X-Requested-With": "XMLHttpRequest" }
+router.post("/refresh", verifyCsrf, async (req: Request, res: Response) => {
   try {
     const refreshToken = req.cookies?.refresh_token;
 
@@ -111,9 +110,7 @@ router.get("/me", verifyAuth, async (req: AuthRequest, res: Response) => {
         tenantId: true,
         isActive: true,
         createdAt: true,
-        tenant: {
-          select: { id: true, name: true, plan: true },
-        },
+        tenant: { select: { id: true, name: true, plan: true } },
       },
     });
 
@@ -129,7 +126,6 @@ router.get("/me", verifyAuth, async (req: AuthRequest, res: Response) => {
 });
 
 // ─── GET /api/auth/invite/:token ──────────────────────────────────────────────
-// Frontend calls this to validate invite link before showing the form
 router.get("/invite/:token", async (req: Request, res: Response) => {
   try {
     const invite = await validateInviteToken(req.params.token);
@@ -144,14 +140,12 @@ router.get("/invite/:token", async (req: Request, res: Response) => {
 });
 
 // ─── POST /api/auth/invite/accept ─────────────────────────────────────────────
-// User fills in name + password from invite email link
 router.post("/invite/accept", async (req: Request, res: Response) => {
   try {
     const { token, name, password } = acceptInviteSchema.parse(req.body);
 
     const invite = await validateInviteToken(token);
 
-    // Check if email already registered
     const existing = await prisma.user.findUnique({
       where: { email: invite.email },
     });
@@ -160,7 +154,6 @@ router.post("/invite/accept", async (req: Request, res: Response) => {
       return;
     }
 
-    // Create user
     const hashedPassword = await hashPassword(password);
     const user = await prisma.user.create({
       data: {
@@ -173,7 +166,6 @@ router.post("/invite/accept", async (req: Request, res: Response) => {
       },
     });
 
-    // Mark invite as used
     await prisma.inviteToken.update({
       where: { token },
       data: { isUsed: true },
@@ -189,6 +181,88 @@ router.post("/invite/accept", async (req: Request, res: Response) => {
       return;
     }
     res.status(400).json({ error: err.message || "Something went wrong" });
+  }
+});
+
+// ─── POST /api/auth/forgot-password ──────────────────────────────────────────
+router.post("/forgot-password", async (req: Request, res: Response) => {
+  try {
+    const { email } = z.object({ email: z.string().email() }).parse(req.body);
+
+    // Always return 200 — never reveal if email exists (security)
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (user && user.isActive) {
+      // Invalidate any existing unused tokens for this email
+      await prisma.passwordResetToken.updateMany({
+        where: { email, isUsed: false },
+        data: { isUsed: true },
+      });
+
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+      const record = await prisma.passwordResetToken.create({
+        data: {
+          token: uuid(),
+          email,
+          expiresAt,
+          user: { connect: { email } },
+        },
+      });
+
+      await sendPasswordResetEmail({
+        email,
+        token: record.token,
+        name: user.name,
+      });
+    }
+
+    res.json({ message: "If that email exists, a reset link has been sent." });
+  } catch (err: any) {
+    if (err.name === "ZodError") {
+      res.status(400).json({ error: "Invalid email" });
+      return;
+    }
+    res.status(500).json({ error: "Something went wrong" });
+  }
+});
+
+// ─── POST /api/auth/reset-password ───────────────────────────────────────────
+router.post("/reset-password", async (req: Request, res: Response) => {
+  try {
+    const { token, password } = z
+      .object({
+        token: z.string().uuid(),
+        password: z.string().min(8),
+      })
+      .parse(req.body);
+
+    const record = await prisma.passwordResetToken.findUnique({
+      where: { token },
+    });
+
+    if (!record || record.isUsed || record.expiresAt < new Date()) {
+      res
+        .status(400)
+        .json({ error: "This reset link is invalid or has expired." });
+      return;
+    }
+
+    const hashed = await hashPassword(password);
+    await prisma.user.update({
+      where: { email: record.email },
+      data: { password: hashed },
+    });
+    await prisma.passwordResetToken.update({
+      where: { token },
+      data: { isUsed: true },
+    });
+
+    res.json({ message: "Password reset successfully. You can now log in." });
+  } catch (err: any) {
+    if (err.name === "ZodError") {
+      res.status(400).json({ error: "Invalid input" });
+      return;
+    }
+    res.status(500).json({ error: "Something went wrong" });
   }
 });
 

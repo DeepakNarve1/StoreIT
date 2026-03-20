@@ -1,7 +1,7 @@
 {
-  "name": "folderit-clone",
+  "name": "StoreIT",
   "version": "1.0.0",
-  "description": "Document Management SaaS — Folderit Clone",
+  "description": "Document Management SaaS — StoreIT",
   "private": true,
   "workspaces": [
     "apps/*",

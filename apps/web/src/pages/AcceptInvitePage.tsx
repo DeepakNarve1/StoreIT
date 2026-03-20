@@ -144,9 +144,7 @@ export default function AcceptInvitePage() {
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
             <span className="text-white text-sm font-bold">F</span>
           </div>
-          <span className="text-lg font-semibold text-gray-900">
-            FolderIT Clone
-          </span>
+          <span className="text-lg font-semibold text-gray-900">StoreIT</span>
         </div>
 
         {/* Invite info */}

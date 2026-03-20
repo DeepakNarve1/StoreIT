@@ -6,9 +6,14 @@ export type AuditAction =
   | "file.upload"
   | "file.upload.version"
   | "file.delete"
+  | "file.delete.permanent"
+  | "file.bulk_delete"
+  | "file.bulk_move"
   | "file.download"
   | "file.view"
   | "file.restore"
+  | "file.move"
+  | "file.rename"
   | "folder.create"
   | "folder.rename"
   | "folder.delete"
@@ -20,7 +25,11 @@ export type AuditAction =
   | "user.login"
   | "user.logout"
   | "category.create"
-  | "category.delete";
+  | "category.delete"
+  | "superadmin.org.create"
+  | "superadmin.org.update"
+  | "superadmin.org.suspend"
+  | "superadmin.impersonate";
 
 interface LogParams {
   action: AuditAction;

@@ -4,6 +4,7 @@ import { v4 as uuid } from "uuid";
 import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import { sendInviteEmail } from "../services/email.service";
+import bcrypt from "bcryptjs";
 
 const router = Router();
 
@@ -168,6 +169,103 @@ router.delete(
       res.json({ message: "Invite cancelled" });
     } catch (err) {
       res.status(500).json({ error: "Failed to cancel invite" });
+    }
+  },
+);
+
+// ─── GET /api/users/me/profile ────────────────────────────────────────────────
+router.get(
+  "/me/profile",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: req.user!.userId },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          createdAt: true,
+          tenant: { select: { name: true, plan: true } },
+        },
+      });
+      if (!user) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+      res.json({ user });
+    } catch {
+      res.status(500).json({ error: "Failed to fetch profile" });
+    }
+  },
+);
+
+// ─── PATCH /api/users/me/profile ─────────────────────────────────────────────
+router.patch(
+  "/me/profile",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { name } = z
+        .object({ name: z.string().min(2).max(100) })
+        .parse(req.body);
+      const updated = await prisma.user.update({
+        where: { id: req.user!.userId },
+        data: { name },
+        select: { id: true, name: true, email: true, role: true },
+      });
+      res.json({ user: updated });
+    } catch (err: any) {
+      if (err.name === "ZodError") {
+        res.status(400).json({ error: "Invalid input" });
+        return;
+      }
+      res.status(500).json({ error: "Failed to update profile" });
+    }
+  },
+);
+
+// ─── PATCH /api/users/me/password ─────────────────────────────────────────────
+router.patch(
+  "/me/password",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { currentPassword, newPassword } = z
+        .object({
+          currentPassword: z.string().min(1),
+          newPassword: z.string().min(8),
+        })
+        .parse(req.body);
+
+      const user = await prisma.user.findUnique({
+        where: { id: req.user!.userId },
+      });
+      if (!user) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+
+      const valid = await bcrypt.compare(currentPassword, user.password);
+      if (!valid) {
+        res.status(400).json({ error: "Current password is incorrect" });
+        return;
+      }
+
+      const hashed = await bcrypt.hash(newPassword, 12);
+      await prisma.user.update({
+        where: { id: req.user!.userId },
+        data: { password: hashed },
+      });
+
+      res.json({ message: "Password updated successfully" });
+    } catch (err: any) {
+      if (err.name === "ZodError") {
+        res.status(400).json({ error: "Invalid input" });
+        return;
+      }
+      res.status(500).json({ error: "Failed to update password" });
     }
   },
 );
