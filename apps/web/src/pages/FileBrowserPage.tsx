@@ -757,7 +757,6 @@ export default function FileBrowserPage() {
                     onSubmitApproval={(file) =>
                       submitApprovalMutation.mutate(file.id)
                     }
-                    onMetadata={(file) => setMetadataFile(file)}
                   />
                 )}
               </div>
