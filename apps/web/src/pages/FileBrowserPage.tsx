@@ -12,6 +12,7 @@ import {
   Trash2,
   Hash,
   FolderInput,
+  Download,
 } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import FileGrid from "../components/files/FileGrid";
@@ -26,6 +27,8 @@ import MoveFileModal from "../components/files/MoveFileModal";
 import AssignCategoryModal from "../components/files/AssignCategoryModal";
 import { useToast } from "../components/ui/Toast";
 import FileMetadataPanel from "../components/files/FileMetadataPanel";
+import FileCommentsPanel from "../components/files/FileCommentsPanel";
+import { useAuthStore } from "../store/authStore";
 
 type ViewMode = "grid" | "list";
 
@@ -64,6 +67,7 @@ export default function FileBrowserPage() {
   const [draggedFileId, setDraggedFileId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [commentsFile, setCommentsFile] = useState<any>(null);
   const [categoryResource, setCategoryResource] = useState<{
     id: string;
     type: "file" | "folder";
@@ -74,6 +78,7 @@ export default function FileBrowserPage() {
     id: string;
     name: string;
   } | null>(null);
+  const [approvalFile, setApprovalFile] = useState<any>(null);
   const [renameName, setRenameName] = useState("");
 
   // ── Fetch files ─────────────────────────────────────────────────────────────
@@ -84,6 +89,7 @@ export default function FileBrowserPage() {
       return res.data as { files: any[] };
     },
   });
+  const { user } = useAuthStore();
 
   // ── Fetch subfolders ─────────────────────────────────────────────────────────
   const { data: foldersData, isLoading: foldersLoading } = useQuery({
@@ -105,6 +111,45 @@ export default function FileBrowserPage() {
       useToast.getState().add("File renamed");
     },
     onError: () => useToast.getState().add("Failed to rename file", "error"),
+  });
+
+  const submitApprovalMutation = useMutation({
+    mutationFn: async (fileId: string) => {
+      await api.post(`/files/${fileId}/submit-approval`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["files", folderId ?? "root"],
+      });
+      useToast.getState().add("File submitted for approval");
+    },
+    onError: () =>
+      useToast.getState().add("Failed to submit for approval", "error"),
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: async ({
+      fileId,
+      action,
+      note,
+    }: {
+      fileId: string;
+      action: "approved" | "rejected";
+      note?: string;
+    }) => {
+      await api.post(`/files/${fileId}/approve`, { action, note });
+    },
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({
+        queryKey: ["files", folderId ?? "root"],
+      });
+      setApprovalFile(null);
+      useToast
+        .getState()
+        .add(vars.action === "approved" ? "File approved" : "File rejected");
+    },
+    onError: () =>
+      useToast.getState().add("Failed to process approval", "error"),
   });
 
   // Fetch categories for selector
@@ -212,7 +257,9 @@ export default function FileBrowserPage() {
   });
   const folders = foldersData?.folders ?? [];
   const isLoading = filesLoading || foldersLoading;
-  const isEmpty = files.length === 0 && folders.length === 0;
+  const isFilteredEmpty =
+    files.length === 0 && allFiles.length > 0 && typeFilter !== "all";
+  const isEmpty = allFiles.length === 0 && folders.length === 0;
 
   const handleUploadComplete = () => {
     queryClient.invalidateQueries({ queryKey: ["files", folderId ?? "root"] });
@@ -269,7 +316,7 @@ export default function FileBrowserPage() {
 
   return (
     <AppShell>
-      <div className="max-w-6xl mx-auto">
+      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl max-w-6xl mx-auto">
         {/* Breadcrumb */}
         <div className="flex items-center gap-1 text-sm text-gray-500 mb-4 flex-wrap">
           <Home size={14} className="shrink-0" />
@@ -468,7 +515,7 @@ export default function FileBrowserPage() {
         )}
 
         {/* Type filter */}
-        {files.length > 0 && (
+        {allFiles.length > 0 && (
           <div className="flex items-center gap-2 mb-4 flex-wrap">
             {["all", "pdf", "image", "video", "word", "excel", "zip"].map(
               (type) => (
@@ -488,6 +535,32 @@ export default function FileBrowserPage() {
           </div>
         )}
 
+        {/* Pending approvals badge — managers/admins only */}
+        {(user?.role === "ORG_ADMIN" ||
+          user?.role === "MANAGER" ||
+          user?.role === "SUPERADMIN") &&
+          files.some((f) => f.approvalStatus === "pending") && (
+            <div className="flex items-center gap-2 mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+              <span className="text-sm text-amber-700 font-medium">
+                {files.filter((f) => f.approvalStatus === "pending").length}{" "}
+                file(s) pending approval
+              </span>
+              <div className="flex gap-1.5 ml-auto flex-wrap">
+                {files
+                  .filter((f) => f.approvalStatus === "pending")
+                  .map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => setApprovalFile(f)}
+                      className="text-xs px-2.5 py-1 bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200 font-medium truncate max-w-[140px]"
+                    >
+                      Review: {f.name}
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+
         {/* Main content */}
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
@@ -495,6 +568,18 @@ export default function FileBrowserPage() {
               className="w-6 h-6 border-2 border-blue-600 border-t-transparent
                             rounded-full animate-spin"
             />
+          </div>
+        ) : isFilteredEmpty ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <p className="text-sm font-medium text-gray-500">
+              No files match the selected filter.
+            </p>
+            <button
+              onClick={() => setTypeFilter("all")}
+              className="mt-3 text-xs text-blue-600 hover:underline"
+            >
+              Clear filter
+            </button>
           </div>
         ) : isEmpty ? (
           <div className="bg-white border border-gray-200 rounded-xl">
@@ -668,6 +753,11 @@ export default function FileBrowserPage() {
                     onDragStart={(file) => setDraggedFileId(file.id)}
                     onDragEnd={() => setDraggedFileId(null)}
                     onMetadata={(file) => setMetadataFile(file)}
+                    onComments={(file) => setCommentsFile(file)}
+                    onSubmitApproval={(file) =>
+                      submitApprovalMutation.mutate(file.id)
+                    }
+                    onMetadata={(file) => setMetadataFile(file)}
                   />
                 )}
               </div>
@@ -766,6 +856,76 @@ export default function FileBrowserPage() {
           fileName={metadataFile.name}
           onClose={() => setMetadataFile(null)}
         />
+      )}
+
+      {commentsFile && (
+        <FileCommentsPanel
+          fileId={commentsFile.id}
+          fileName={commentsFile.name}
+          onClose={() => setCommentsFile(null)}
+        />
+      )}
+
+      {/* Approval review modal — managers/admins only */}
+      {approvalFile && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-md p-6 shadow-xl">
+            <h3 className="font-semibold text-gray-900 dark:text-white mb-1">
+              Review approval
+            </h3>
+            <p className="text-sm text-gray-500 mb-4 truncate">
+              {approvalFile.name}
+            </p>
+            <textarea
+              id="approval-note"
+              placeholder="Optional note…"
+              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm
+                   focus:outline-none focus:ring-2 focus:ring-blue-400 mb-4
+                   dark:bg-gray-800 dark:border-gray-700 dark:text-white"
+              rows={3}
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setApprovalFile(null)}
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() =>
+                  approveMutation.mutate({
+                    fileId: approvalFile.id,
+                    action: "rejected",
+                    note: (
+                      document.getElementById(
+                        "approval-note",
+                      ) as HTMLTextAreaElement
+                    )?.value,
+                  })
+                }
+                className="px-4 py-2 text-sm bg-red-50 text-red-600 border border-red-200 rounded-xl hover:bg-red-100 font-medium"
+              >
+                Reject
+              </button>
+              <button
+                onClick={() =>
+                  approveMutation.mutate({
+                    fileId: approvalFile.id,
+                    action: "approved",
+                    note: (
+                      document.getElementById(
+                        "approval-note",
+                      ) as HTMLTextAreaElement
+                    )?.value,
+                  })
+                }
+                className="px-4 py-2 text-sm bg-green-600 text-white rounded-xl hover:bg-green-700 font-medium"
+              >
+                Approve
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </AppShell>
   );

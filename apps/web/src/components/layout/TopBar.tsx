@@ -1,7 +1,8 @@
-import { Menu, Search, Bell, Plus, ChevronDown } from "lucide-react";
+import { Menu, Search, Bell, Plus, ChevronDown, Moon, Sun } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
+import { useThemeStore } from "../../store/themeStore";
 
 interface TopBarProps {
   onToggleSidebar: () => void;
@@ -12,6 +13,7 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const { isDark, toggle } = useThemeStore();
   const [searchQuery, setSearchQuery] = useState("");
 
   const handleLogout = async () => {
@@ -51,14 +53,11 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
   };
 
   return (
-    <header
-      className="h-14 bg-white border-b border-gray-200 flex items-center
-                       gap-4 px-4 shrink-0 z-10"
-    >
+    <header className="h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center gap-4 px-4 shrink-0 z-10">
       {/* Sidebar toggle */}
       <button
         onClick={onToggleSidebar}
-        className="text-gray-500 hover:text-gray-700 hover:bg-gray-100
+        className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800
                    p-1.5 rounded-lg transition-colors"
       >
         <Menu size={18} />
@@ -76,10 +75,10 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search files and folders..."
-            className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200
+            className="bg-gray-100 dark:bg-gray-800 border w-full pl-9 pr-4 py-2 border-gray-200
                        rounded-lg text-sm focus:outline-none focus:ring-2
                        focus:ring-blue-500 focus:border-transparent
-                       placeholder-gray-400"
+                       placeholder-gray-400 text-gray-900 dark:text-white dark:placeholder-gray-500"
           />
         </div>
       </form>
@@ -94,7 +93,14 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
           <Plus size={15} />
           Upload
         </button>
-
+        <button
+          onClick={toggle}
+          className="p-2 rounded-lg text-gray-500 hover:bg-gray-100
+             dark:text-gray-400 dark:hover:bg-gray-800 transition-colors"
+          title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+        >
+          {isDark ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
         {/* Notifications */}
         <button
           className="relative text-gray-500 hover:text-gray-700
@@ -112,7 +118,7 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
         <div className="relative">
           <button
             onClick={() => setShowUserMenu(!showUserMenu)}
-            className="flex items-center gap-2 hover:bg-gray-100
+            className="flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-800
                        pl-1 pr-2 py-1 rounded-lg transition-colors"
           >
             {/* Avatar */}
@@ -123,7 +129,7 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
               {getInitials(user?.name || "U")}
             </div>
             <div className="hidden sm:block text-left">
-              <div className="text-sm font-medium text-gray-800 leading-tight">
+              <div className="text-sm font-medium text-gray-800 dark:text-gray-100 leading-tight">
                 {user?.name}
               </div>
               <div
@@ -145,15 +151,15 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
                 onClick={() => setShowUserMenu(false)}
               />
               <div
-                className="absolute right-0 top-full mt-1 w-48 bg-white
-                              border border-gray-200 rounded-xl shadow-lg z-20
+                className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-900
+                              border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-20
                               overflow-hidden"
               >
-                <div className="px-4 py-3 border-b border-gray-100">
-                  <p className="text-sm font-medium text-gray-900 truncate">
+                <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
                     {user?.name}
                   </p>
-                  <p className="text-xs text-gray-500 truncate">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                     {user?.email}
                   </p>
                 </div>
@@ -163,8 +169,8 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
                       navigate("/profile");
                       setShowUserMenu(false);
                     }}
-                    className="w-full text-left px-3 py-2 text-sm text-gray-700
-                               hover:bg-gray-100 rounded-lg transition-colors"
+                    className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-300
+                               hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
                   >
                     My Profile
                   </button>
@@ -173,16 +179,16 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
                       navigate("/admin/settings");
                       setShowUserMenu(false);
                     }}
-                    className="w-full text-left px-3 py-2 text-sm text-gray-700
-                               hover:bg-gray-100 rounded-lg transition-colors"
+                    className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-300
+                               hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
                   >
                     Settings
                   </button>
-                  <div className="border-t border-gray-100 mt-1 pt-1">
+                  <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
                     <button
                       onClick={handleLogout}
-                      className="w-full text-left px-3 py-2 text-sm text-red-600
-                                 hover:bg-red-50 rounded-lg transition-colors"
+                      className="w-full text-left px-3 py-2 text-sm text-red-600 dark:text-red-400
+                                 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg transition-colors"
                     >
                       Sign out
                     </button>

@@ -3,7 +3,6 @@ import multer from "multer";
 import { v4 as uuid } from "uuid";
 import path from "path";
 import { z } from "zod";
-import { verifyAuth, AuthRequest } from "../middleware/auth";
 import { validateMimeType, SIGNED_URL_TTL } from "../middleware/security";
 import { prisma } from "../utils/prisma";
 import {
@@ -14,9 +13,9 @@ import {
 import { createAuditLog } from "../services/audit.service";
 import { getPlanLimits } from "../utils/plans";
 import archiver from "archiver";
-import { getFileViewUrl } from "../services/storage.service";
 import https from "https";
 import http from "http";
+import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 
 const router = Router();
 
@@ -30,7 +29,6 @@ const UUID_REGEX =
 const isValidUUID = (val: unknown): val is string =>
   typeof val === "string" && UUID_REGEX.test(val);
 
-// SEC FIX #3 + original Bug #4: sanitize AND block dangerous extensions
 function sanitizeFilename(raw: string): string {
   const base = path.basename(raw);
   return (
@@ -40,8 +38,6 @@ function sanitizeFilename(raw: string): string {
 }
 
 // ─── Helper: check if the current user has access to a file ──────────────────
-// SEC FIX #1: centralised permission check used by both GET /:id and download.
-// Previously download had NO permission check at all.
 async function userCanAccessFile(
   fileId: string,
   userId: string,
@@ -157,8 +153,6 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
 });
 
 // ─── POST /api/files/upload ───────────────────────────────────────────────────
-// SEC FIX #3: validateMimeType runs AFTER multer (needs file buffer) but
-// BEFORE any DB or storage write — rejects banned types cleanly with 400.
 router.post(
   "/upload",
   verifyAuth,
@@ -202,7 +196,7 @@ router.post(
 
       const savedFiles = [];
 
-      // ── Quota check ──────────────────────────────────────────────────────────────
+      // ── Quota check ──────────────────────────────────────────────────────────
       const tenant = await prisma.tenant.findUnique({
         where: { id: req.user!.tenantId },
         select: { plan: true },
@@ -570,12 +564,70 @@ router.post(
   },
 );
 
+// ─── FIX #5: one-time-links static routes moved ABOVE /:id ───────────────────
+// These were previously at the bottom of the file, causing Express to match
+// "one-time-links" as the :id param and never reaching these handlers.
+
+// ─── GET /api/files/one-time-links ───────────────────────────────────────────
+router.get(
+  "/one-time-links",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "MANAGER", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const links = await prisma.oneTimeLink.findMany({
+        where: { tenantId: req.user!.tenantId },
+        orderBy: { createdAt: "desc" },
+        include: {
+          file: { select: { id: true, name: true, mimeType: true } },
+        },
+      });
+      res.json({ links });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch shared links" });
+    }
+  },
+);
+
+// ─── DELETE /api/files/one-time-links/:linkId ─────────────────────────────────
+router.delete(
+  "/one-time-links/:linkId",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "MANAGER", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.linkId)) {
+      res.status(400).json({ error: "Invalid link ID" });
+      return;
+    }
+    try {
+      const link = await prisma.oneTimeLink.findFirst({
+        where: { id: req.params.linkId, tenantId: req.user!.tenantId },
+      });
+      if (!link) {
+        res.status(404).json({ error: "Link not found" });
+        return;
+      }
+      await prisma.oneTimeLink.delete({ where: { id: req.params.linkId } });
+
+      await createAuditLog({
+        action: "file.link.revoked",
+        userId: req.user!.userId,
+        tenantId: req.user!.tenantId,
+        resourceType: "file",
+        resourceId: link.fileId,
+        req,
+      });
+
+      res.json({ message: "Link revoked" });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to revoke link" });
+    }
+  },
+);
+
 // ─── PARAMETERIZED ROUTES ─────────────────────────────────────────────────────
 
 // ─── GET /api/files/:id/download ─────────────────────────────────────────────
-// SEC FIX #1: now runs the same permission check as GET /:id
-// Previously had NO access control — any authenticated user could download
-// any file by guessing the UUID.
 router.get(
   "/:id/download",
   verifyAuth,
@@ -596,7 +648,6 @@ router.get(
         return;
       }
 
-      // SEC FIX #1: enforce permission check for VIEWER role
       const canAccess = await userCanAccessFile(
         file.id,
         userId,
@@ -609,7 +660,6 @@ router.get(
         return;
       }
 
-      // SEC FIX #4: use shared TTL constant (300s = 5 min)
       const downloadUrl = await getFileViewUrl(
         file.storageKey,
         SIGNED_URL_TTL.DOWNLOAD,
@@ -839,7 +889,6 @@ router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // SEC FIX #4: use shared TTL constant
     const viewUrl = await getFileViewUrl(file.storageKey, SIGNED_URL_TTL.VIEW);
 
     await createAuditLog({
@@ -1142,6 +1191,8 @@ router.delete(
 );
 
 // ─── GET /api/files/:id/metadata ─────────────────────────────────────────────
+// FIX #6: scope through file first to enforce tenant isolation —
+// FileMetadata has no tenantId column so the join is required
 router.get(
   "/:id/metadata",
   verifyAuth,
@@ -1151,6 +1202,19 @@ router.get(
       return;
     }
     try {
+      const file = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+        select: { id: true },
+      });
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+
       const metadata = await prisma.fileMetadata.findMany({
         where: { fileId: req.params.id },
         orderBy: { createdAt: "asc" },
@@ -1163,7 +1227,6 @@ router.get(
 );
 
 // ─── PUT /api/files/:id/metadata ─────────────────────────────────────────────
-// Full replace — sends all key/value pairs at once
 router.put(
   "/:id/metadata",
   verifyAuth,
@@ -1214,6 +1277,238 @@ router.put(
         return;
       }
       res.status(500).json({ error: "Failed to update metadata" });
+    }
+  },
+);
+
+// ─── GET /api/files/:id/comments ─────────────────────────────────────────────
+// FIX #7: scope through file first — FileComment has no tenantId column
+router.get(
+  "/:id/comments",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.id)) {
+      res.status(400).json({ error: "Invalid ID" });
+      return;
+    }
+    try {
+      const file = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+        select: { id: true },
+      });
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      const comments = await prisma.fileComment.findMany({
+        where: { fileId: req.params.id },
+        orderBy: { createdAt: "asc" },
+        include: { user: { select: { id: true, name: true } } },
+      });
+      res.json({ comments });
+    } catch {
+      res.status(500).json({ error: "Failed to fetch comments" });
+    }
+  },
+);
+
+// ─── POST /api/files/:id/comments ────────────────────────────────────────────
+router.post(
+  "/:id/comments",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.id)) {
+      res.status(400).json({ error: "Invalid ID" });
+      return;
+    }
+    try {
+      const { content } = z
+        .object({ content: z.string().min(1).max(1000) })
+        .parse(req.body);
+
+      const file = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+      });
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      const comment = await prisma.fileComment.create({
+        data: { content, fileId: req.params.id, userId: req.user!.userId },
+        include: { user: { select: { id: true, name: true } } },
+      });
+      res.json({ comment });
+    } catch (err: any) {
+      if (err.name === "ZodError") {
+        res.status(400).json({ error: "Invalid input" });
+        return;
+      }
+      res.status(500).json({ error: "Failed to add comment" });
+    }
+  },
+);
+
+// ─── DELETE /api/files/:id/comments/:commentId ────────────────────────────────
+// FIX #8: verify the file belongs to this tenant before touching the comment
+router.delete(
+  "/:id/comments/:commentId",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const file = await prisma.file.findFirst({
+        where: { id: req.params.id, tenantId: req.user!.tenantId },
+        select: { id: true },
+      });
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      const comment = await prisma.fileComment.findFirst({
+        where: {
+          id: req.params.commentId,
+          fileId: req.params.id,
+          userId: req.user!.userId,
+        },
+      });
+      if (!comment) {
+        res.status(404).json({ error: "Comment not found" });
+        return;
+      }
+      await prisma.fileComment.delete({ where: { id: req.params.commentId } });
+      res.json({ message: "Comment deleted" });
+    } catch {
+      res.status(500).json({ error: "Failed to delete comment" });
+    }
+  },
+);
+
+// ─── POST /api/files/:id/submit-approval ─────────────────────────────────────
+router.post(
+  "/:id/submit-approval",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.id)) {
+      res.status(400).json({ error: "Invalid ID" });
+      return;
+    }
+    try {
+      const file = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+      });
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      await prisma.file.update({
+        where: { id: req.params.id },
+        data: {
+          approvalStatus: "pending",
+          approvedById: null,
+          approvedAt: null,
+          approvalNote: null,
+        },
+      });
+
+      await createAuditLog({
+        action: "file.approval.submitted",
+        userId: req.user!.userId,
+        tenantId: req.user!.tenantId,
+        resourceType: "file",
+        resourceId: file.id,
+        resourceName: file.name,
+        req,
+      });
+
+      res.json({ message: "File submitted for approval" });
+    } catch {
+      res.status(500).json({ error: "Failed to submit for approval" });
+    }
+  },
+);
+
+// ─── POST /api/files/:id/approve ─────────────────────────────────────────────
+router.post(
+  "/:id/approve",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "MANAGER", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.id)) {
+      res.status(400).json({ error: "Invalid ID" });
+      return;
+    }
+    try {
+      const { action, note } = z
+        .object({
+          action: z.enum(["approved", "rejected"]),
+          note: z.string().max(500).optional(),
+        })
+        .parse(req.body);
+
+      const file = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+      });
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+      if (file.approvalStatus !== "pending") {
+        res.status(400).json({ error: "File is not pending approval" });
+        return;
+      }
+
+      await prisma.file.update({
+        where: { id: req.params.id },
+        data: {
+          approvalStatus: action,
+          approvedById: req.user!.userId,
+          approvedAt: new Date(),
+          approvalNote: note ?? null,
+        },
+      });
+
+      // FIX #4: cast to the specific union the AuditAction type expects
+      const auditAction = `file.approval.${action}` as
+        | "file.approval.approved"
+        | "file.approval.rejected";
+
+      await createAuditLog({
+        action: auditAction,
+        userId: req.user!.userId,
+        tenantId: req.user!.tenantId,
+        resourceType: "file",
+        resourceId: file.id,
+        resourceName: file.name,
+        metadata: { note },
+        req,
+      });
+
+      res.json({ message: `File ${action}` });
+    } catch (err: any) {
+      if (err.name === "ZodError") {
+        res.status(400).json({ error: "Invalid input" });
+        return;
+      }
+      res.status(500).json({ error: "Failed to process approval" });
     }
   },
 );

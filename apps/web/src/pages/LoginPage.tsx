@@ -27,18 +27,18 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="bg-white p-8 rounded-xl border border-gray-200 w-full max-w-md shadow-sm">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center ">
+      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-8 rounded-xl w-full max-w-md shadow-sm">
         {/* Logo */}
         <div className="flex items-center gap-2 mb-6">
           <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
             <span className="text-white text-sm font-bold">F</span>
           </div>
-          <span className="text-lg font-semibold text-gray-900">StoreIT</span>
+          <span className="text-lg font-semibold text-gray-900 dark:text-white">StoreIT</span>
         </div>
 
-        <h1 className="text-xl font-semibold text-gray-900 mb-1">Sign in</h1>
-        <p className="text-gray-500 text-sm mb-6">
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-white mb-1">Sign in</h1>
+        <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">
           Enter your credentials to access your workspace
         </p>
 
@@ -50,7 +50,7 @@ export default function LoginPage() {
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Email address
             </label>
             <input
@@ -59,13 +59,14 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@company.com"
               required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg text-sm
+                         placeholder-gray-400 dark:placeholder-gray-500
                          focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Password
             </label>
             <input
@@ -74,7 +75,8 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg text-sm
+                         placeholder-gray-400 dark:placeholder-gray-500
                          focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             />
           </div>

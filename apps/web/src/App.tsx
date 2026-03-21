@@ -20,6 +20,7 @@ import { ToastContainer } from "./components/ui/Toast";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import BillingPage from "./pages/admin/BillingPage";
+import SharedLinksPage from "./pages/admin/SharedLinksPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -174,6 +175,14 @@ export default function App() {
             element={
               <AdminRoute>
                 <BillingPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/shared-links"
+            element={
+              <AdminRoute>
+                <SharedLinksPage />
               </AdminRoute>
             }
           />

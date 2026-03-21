@@ -1,6 +1,6 @@
 import { Router, Response, Request } from "express";
 import { z, ZodError } from "zod";
-import { verifyAuth, AuthRequest } from "../middleware/auth";
+import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import { v4 as uuid } from "uuid";
 import { getFileViewUrl } from "../services/storage.service";
@@ -250,6 +250,51 @@ router.post(
         return;
       }
       res.status(500).json({ error: "Failed to create link" });
+    }
+  },
+);
+
+// ─── GET /api/permissions/shared-links ───────────────────────────────────────
+router.get(
+  "/shared-links",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "MANAGER", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const links = await prisma.oneTimeLink.findMany({
+        where: { tenantId: req.user!.tenantId },
+        orderBy: { createdAt: "desc" },
+        include: { file: { select: { id: true, name: true, mimeType: true } } },
+      });
+      res.json({ links });
+    } catch {
+      res.status(500).json({ error: "Failed to fetch shared links" });
+    }
+  },
+);
+
+// ─── DELETE /api/permissions/shared-links/:id — revoke a link ─────────────────
+router.delete(
+  "/shared-links/:id",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "MANAGER", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const link = await prisma.oneTimeLink.findFirst({
+        where: { id: req.params.id, tenantId: req.user!.tenantId },
+      });
+      if (!link) {
+        res.status(404).json({ error: "Link not found" });
+        return;
+      }
+
+      await prisma.oneTimeLink.update({
+        where: { id: req.params.id },
+        data: { isUsed: true }, // mark used = revoked
+      });
+      res.json({ message: "Link revoked" });
+    } catch {
+      res.status(500).json({ error: "Failed to revoke link" });
     }
   },
 );

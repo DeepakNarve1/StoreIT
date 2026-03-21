@@ -18,6 +18,8 @@ import {
   ChevronUp,
   ChevronDown,
   Info,
+  MessageSquare,
+  CheckCircle,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -29,6 +31,7 @@ interface FileItem {
   createdAt: string;
   version?: number;
   isStarred?: boolean;
+  approvalStatus?: string;
 }
 
 interface FileListProps {
@@ -49,6 +52,8 @@ interface FileListProps {
   onDragStart?: (file: FileItem) => void;
   onDragEnd?: () => void;
   onMetadata?: (file: FileItem) => void;
+  onComments?: (file: FileItem) => void;
+  onSubmitApproval?: (file: FileItem) => void;
 }
 
 const getFileIcon = (mimeType: string) => {
@@ -109,6 +114,8 @@ export default function FileList({
   onDragStart,
   onDragEnd,
   onMetadata,
+  onComments,
+  onSubmitApproval,
 }: FileListProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
 
@@ -133,8 +140,8 @@ export default function FileList({
   if (files.length === 0) return null;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl overflow-visible">
-      <div className="grid grid-cols-12 gap-4 px-4 py-2.5 border-b border-gray-100 bg-gray-50 items-center">
+    <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-visible">
+      <div className="grid grid-cols-12 gap-4 px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 items-center">
         {onSelectChange && (
           <div className="col-span-1 flex items-center">
             <input
@@ -209,7 +216,7 @@ export default function FileList({
           <div
             key={file.id}
             className="relative group grid grid-cols-12 gap-4 px-4 py-3 border-b
-             border-gray-100 hover:bg-gray-50 items-center"
+             border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 items-center"
             draggable={!!onDragStart}
             onDragStart={() => onDragStart?.(file)}
             onDragEnd={() => onDragEnd?.()}
@@ -239,7 +246,7 @@ export default function FileList({
             >
               <Icon size={16} className={color} />
               <span
-                className="text-sm text-gray-800 truncate hover:text-blue-600
+                className="text-sm text-gray-800 dark:text-gray-100 truncate hover:text-blue-600 dark:hover:text-blue-400
                                transition-colors font-medium"
               >
                 {file.name}
@@ -252,23 +259,40 @@ export default function FileList({
                   v{file.version}
                 </span>
               )}
+              {file.approvalStatus && (
+                <span
+                  className={`text-xs px-1.5 py-0.5 rounded-full font-medium ml-1 shrink-0 ${
+                    file.approvalStatus === "approved"
+                      ? "bg-green-100 text-green-700"
+                      : file.approvalStatus === "rejected"
+                        ? "bg-red-100 text-red-700"
+                        : "bg-amber-100 text-amber-700"
+                  }`}
+                >
+                  {file.approvalStatus === "approved"
+                    ? "✓ Approved"
+                    : file.approvalStatus === "rejected"
+                      ? "✗ Rejected"
+                      : "⏳ Pending"}
+                </span>
+              )}
             </button>
 
             {/* Type */}
             <div className="col-span-2">
-              <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+              <span className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-2 py-0.5 rounded-full">
                 {ext}
               </span>
             </div>
 
             {/* Size */}
-            <div className="col-span-2 text-sm text-gray-500">
+            <div className="col-span-2 text-sm text-gray-500 dark:text-gray-400">
               {formatBytes(file.size)}
             </div>
 
             {/* Date + Actions */}
             <div className="col-span-2 flex items-center justify-between">
-              <span className="text-sm text-gray-500">
+              <span className="text-sm text-gray-500 dark:text-gray-400">
                 {new Date(file.createdAt).toLocaleDateString("en-US", {
                   month: "short",
                   day: "numeric",
@@ -282,7 +306,7 @@ export default function FileList({
                     setActiveMenu(activeMenu === file.id ? null : file.id)
                   }
                   className="p-1 rounded-lg opacity-0 group-hover:opacity-100
-           hover:bg-gray-100 transition-opacity text-gray-400"
+           hover:bg-gray-100 dark:hover:bg-gray-700 transition-opacity text-gray-400 dark:text-gray-500"
                 >
                   <MoreVertical size={14} />
                 </button>
@@ -294,8 +318,8 @@ export default function FileList({
                       onClick={() => setActiveMenu(null)}
                     />
                     <div
-                      className="absolute right-0 top-full mb-1 w-40 bg-white
-                                    border border-gray-200 rounded-xl shadow-lg z-20 p-1"
+                      className="absolute right-0 top-full mb-1 w-40 bg-white dark:bg-gray-900
+                                    border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-20 p-1"
                     >
                       <button
                         onClick={() => {
@@ -303,7 +327,7 @@ export default function FileList({
                           setActiveMenu(null);
                         }}
                         className="w-full flex items-center gap-2 px-3 py-2 text-sm
-                                   text-gray-700 hover:bg-gray-100 rounded-lg"
+                                   text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                       >
                         <Eye size={14} /> Preview
                       </button>
@@ -314,7 +338,7 @@ export default function FileList({
                             setActiveMenu(null);
                           }}
                           className="w-full flex items-center gap-2 px-3 py-2 text-sm
-               text-gray-700 hover:bg-gray-100 rounded-lg"
+               text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                         >
                           <Star size={14} />{" "}
                           {file.isStarred ? "Unstar" : "Star"}
@@ -326,7 +350,7 @@ export default function FileList({
                             onRename(file);
                             setActiveMenu(null);
                           }}
-                          className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                          className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
                         >
                           <Pencil size={14} /> Rename
                         </button>
@@ -356,7 +380,7 @@ export default function FileList({
                           setActiveMenu(null);
                         }}
                         className="w-full flex items-center gap-2 px-3 py-2 text-sm
-             text-gray-700 hover:bg-gray-100 rounded-lg"
+             text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                       >
                         <Download size={14} /> Download
                       </button>
@@ -367,9 +391,20 @@ export default function FileList({
                             setActiveMenu(null);
                           }}
                           className="w-full flex items-center gap-2 px-3 py-2 text-sm
-               text-gray-700 hover:bg-gray-100 rounded-lg"
+               text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                         >
                           <Shield size={14} /> Permissions
+                        </button>
+                      )}
+                      {onComments && (
+                        <button
+                          onClick={() => {
+                            onComments(file);
+                            setActiveMenu(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                        >
+                          <MessageSquare size={14} /> Comments
                         </button>
                       )}
                       {onVersions && (
@@ -379,7 +414,7 @@ export default function FileList({
                             setActiveMenu(null);
                           }}
                           className="w-full flex items-center gap-2 px-3 py-2 text-sm
-               text-gray-700 hover:bg-gray-100 rounded-lg"
+               text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                         >
                           <History size={14} /> Version History
                         </button>
@@ -391,9 +426,20 @@ export default function FileList({
                             setActiveMenu(null);
                           }}
                           className="w-full flex items-center gap-2 px-3 py-2 text-sm
-               text-gray-700 hover:bg-gray-100 rounded-lg"
+               text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                         >
                           <FolderInput size={14} /> Move to folder
+                        </button>
+                      )}
+                      {onSubmitApproval && !file.approvalStatus && (
+                        <button
+                          onClick={() => {
+                            onSubmitApproval(file);
+                            setActiveMenu(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                        >
+                          <CheckCircle size={14} /> Submit for approval
                         </button>
                       )}
                       {onAssignTag && (
@@ -403,29 +449,40 @@ export default function FileList({
                             setActiveMenu(null);
                           }}
                           className="w-full flex items-center gap-2 px-3 py-2 text-sm
-               text-gray-700 hover:bg-gray-100 rounded-lg"
+               text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                         >
                           <Tag size={14} /> Assign tag
                         </button>
                       )}
-                      <div className="border-t border-gray-100 mt-1 pt-1">
+                      <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
                         <button
                           onClick={() => {
                             onDelete(file);
                             setActiveMenu(null);
                           }}
                           className="w-full flex items-center gap-2 px-3 py-2 text-sm
-                                     text-red-600 hover:bg-red-50 rounded-lg"
+                                     text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg"
                         >
                           <Trash2 size={14} /> Delete
                         </button>
+                        {onSubmitApproval && !file.approvalStatus && (
+                          <button
+                            onClick={() => {
+                              onSubmitApproval(file);
+                              setActiveMenu(null);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                          >
+                            <CheckCircle size={14} /> Submit for approval
+                          </button>
+                        )}
                         {onMetadata && (
                           <button
                             onClick={() => {
                               onMetadata(file);
                               setActiveMenu(null);
                             }}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg"
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                           >
                             <Info size={14} /> Metadata
                           </button>

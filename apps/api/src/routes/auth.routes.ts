@@ -72,9 +72,6 @@ router.post("/login", async (req: Request, res: Response) => {
 });
 
 // ─── POST /api/auth/refresh ───────────────────────────────────────────────────
-// SEC FIX #6: verifyCsrf ensures this endpoint can't be hit by a cross-origin
-// form or img tag. The axios interceptor on the frontend must send the header:
-//   headers: { "X-Requested-With": "XMLHttpRequest" }
 router.post("/refresh", verifyCsrf, async (req: Request, res: Response) => {
   try {
     const refreshToken = req.cookies?.refresh_token;
@@ -199,12 +196,13 @@ router.post("/forgot-password", async (req: Request, res: Response) => {
       });
 
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+      // FIX: PasswordResetToken has no User relation — email is a plain String field
       const record = await prisma.passwordResetToken.create({
         data: {
           token: uuid(),
           email,
           expiresAt,
-          user: { connect: { email } },
         },
       });
 

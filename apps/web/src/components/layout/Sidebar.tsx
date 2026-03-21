@@ -19,6 +19,7 @@ import {
   Hash,
   X,
   Check,
+  Link2,
 } from "lucide-react";
 import clsx from "clsx";
 import api from "../../api/axios";
@@ -50,6 +51,7 @@ const NAV_ITEMS = [
   { label: "Starred", icon: Star, path: "/starred" },
   { label: "Tags", icon: Tag, path: "/tags" },
   { label: "Trash", icon: Trash2, path: "/trash" },
+  { label: "Shared Links", icon: Link2, path: "/admin/shared-links" },
 ];
 
 // ─── Folder node (recursive) ──────────────────────────────────────────────────
@@ -75,8 +77,8 @@ function FolderNode({
         className={clsx(
           "flex items-center gap-1 rounded-lg text-sm transition-colors group",
           isActive
-            ? "bg-blue-50 text-blue-700 font-medium"
-            : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
+            ? "bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-400 font-medium"
+            : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white",
         )}
         style={{ paddingLeft: `${12 + depth * 12}px`, paddingRight: 8 }}
       >
@@ -143,8 +145,8 @@ function CategoryNode({ category }: { category: CategoryItem }) {
         className={clsx(
           "flex items-center gap-1 rounded-lg text-sm transition-colors group",
           isActive
-            ? "bg-blue-50 text-blue-700 font-medium"
-            : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
+            ? "bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-400 font-medium"
+            : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white",
         )}
       >
         <button
@@ -176,7 +178,7 @@ function CategoryNode({ category }: { category: CategoryItem }) {
           <span className="truncate font-medium">{category.name}</span>
           {totalItems > 0 && (
             <span
-              className="ml-auto text-xs text-gray-400 bg-gray-100
+              className="ml-auto text-xs text-gray-400 bg-gray-100 dark:bg-gray-800
                              px-1.5 py-0.5 rounded-full shrink-0"
             >
               {totalItems}
@@ -252,13 +254,15 @@ export default function Sidebar({ isOpen }: SidebarProps) {
   if (!isOpen) return null;
 
   return (
-    <aside className="w-64 bg-white border-r border-gray-200 flex flex-col h-full shrink-0">
+    <aside className="w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col h-full shrink-0">
       {/* Logo */}
       <div className="h-14 flex items-center gap-2 px-4 border-b border-gray-200 shrink-0">
         <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center">
           <span className="text-white text-xs font-bold">F</span>
         </div>
-        <span className="font-semibold text-gray-900 text-sm">StoreIT</span>
+        <span className="font-semibold text-gray-900 dark:text-white text-sm">
+          StoreIT
+        </span>
       </div>
 
       <div className="flex-1 overflow-y-auto py-3">
@@ -277,8 +281,8 @@ export default function Sidebar({ isOpen }: SidebarProps) {
                 className={clsx(
                   "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors mb-0.5",
                   isActive
-                    ? "bg-blue-50 text-blue-700 font-medium"
-                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
+                    ? "bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-400 font-medium"
+                    : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white",
                 )}
               >
                 <Icon size={16} />
@@ -422,7 +426,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
       </div>
 
       {/* Bottom */}
-      <div className="border-t border-gray-200 p-2 shrink-0">
+      <div className="border-t border-gray-200 dark:border-gray-800 p-2 shrink-0">
         {user?.role === "SUPERADMIN" && (
           <button
             onClick={() => navigate("/superadmin/orgs")}
@@ -437,7 +441,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
           <button
             onClick={() => navigate("/admin/users")}
             className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
-                     text-gray-600 hover:bg-gray-100 transition-colors"
+                     text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors"
           >
             <Users size={16} />
             <span>Admin Panel</span>
@@ -447,7 +451,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
           <button
             onClick={() => navigate("/billing")}
             className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
-               text-gray-600 hover:bg-gray-100 transition-colors"
+               text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors"
           >
             <CreditCard size={16} />
             <span>Billing</span>
@@ -457,7 +461,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
           <button
             onClick={() => navigate("/admin/audit")}
             className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
-               text-gray-600 hover:bg-gray-100 transition-colors"
+               text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors"
           >
             <Activity size={16} />
             <span>Audit Log</span>
@@ -467,7 +471,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
           <button
             onClick={() => navigate("/admin/settings")}
             className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
-                     text-gray-600 hover:bg-gray-100 transition-colors"
+                     text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors"
           >
             <Settings size={16} />
             <span>Settings</span>
@@ -475,14 +479,14 @@ export default function Sidebar({ isOpen }: SidebarProps) {
         )}
         {/* Storage quota */}
         {stats && (
-          <div className="mx-2 mb-2 p-3 bg-gray-50 rounded-xl border border-gray-200">
+          <div className="mx-2 mb-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-xs font-medium text-gray-600">Storage</span>
-              <span className="text-xs text-gray-400 capitalize">
+              <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Storage</span>
+              <span className="text-xs text-gray-400 dark:text-gray-500 capitalize">
                 {stats.plan}
               </span>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-1.5 mb-1.5">
+            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mb-1.5">
               <div
                 className={`h-1.5 rounded-full transition-all ${
                   stats.storageLimit === null || stats.storageLimit > 1e15
@@ -501,7 +505,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
                 }}
               />
             </div>
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-gray-400 dark:text-gray-500">
               {stats.storageMB < 1024
                 ? `${stats.storageMB} MB`
                 : `${(stats.storageMB / 1024).toFixed(1)} GB`}

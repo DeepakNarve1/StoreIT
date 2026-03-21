@@ -22,6 +22,7 @@ model Tenant {
   folders      Folder[]
   files        File[]
   categories   Category[]
+  departments Department[]
   invites      InviteToken[]
   oneTimeLinks OneTimeLink[]
   auditLogs    AuditLog[]
@@ -37,7 +38,8 @@ model User {
   name         String
   password     String    // bcrypt hashed
   role         Role      @default(VIEWER)
-  departmentId String?   // optional department tag
+  departmentId String?  
+  department     Department? @relation("UserDepartment", fields: [departmentId], references: [id])
   isActive     Boolean   @default(true)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -45,6 +47,10 @@ model User {
   tenantId     String
   tenant       Tenant    @relation(fields: [tenantId], references: [id])
 
+  lockedFiles  File[]    @relation("LockedBy")
+  approvedFiles   File[]   @relation("ApprovedBy")
+
+  comments FileComment[]
   permissions  Permission[]
   invites      InviteToken[]
   uploadedFiles File[]   @relation("UploadedBy")
@@ -53,6 +59,18 @@ model User {
 
   @@index([tenantId])
   @@index([email])
+}
+
+model Department {
+  id        String   @id @default(uuid())
+  name      String
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  createdAt DateTime @default(now())
+  users     User[]   @relation("UserDepartment")
+
+  @@unique([name, tenantId])
+  @@index([tenantId])
 }
 
 // ─── ROLE ENUM ───────────────────────────────────────────────────────────────
@@ -133,11 +151,23 @@ model File {
   category     Category? @relation(fields: [categoryId], references: [id])
 
   isStarred    Boolean   @default(false)  
-  tags         FileTag[]           
+  tags         FileTag[]         
+
+  isLocked     Boolean   @default(false)
+lockedById   String?
+lockedBy     User?     @relation("LockedBy", fields: [lockedById], references: [id])
+lockedAt     DateTime?
+
+  approvalStatus  String?  // null | pending | approved | rejected
+approvalNote    String?  // reviewer's note
+approvedById    String?
+approvedBy      User?    @relation("ApprovedBy", fields: [approvedById], references: [id])
+approvedAt      DateTime?  
 
   uploadedById String?
   uploadedBy   User?     @relation("UploadedBy", fields: [uploadedById], references: [id])
 
+comments FileComment[]
   permissions  Permission[]
   metadata     FileMetadata[]
   oneTimeLinks OneTimeLink[]
@@ -270,6 +300,20 @@ model FileMetadata {
   fileId    String
   file      File     @relation(fields: [fileId], references: [id])
   createdAt DateTime @default(now())
+
+@@map("file_metadata")
+  @@index([fileId])
+}
+
+model FileComment {
+  id        String   @id @default(uuid())
+  content   String
+  fileId    String
+  file      File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([fileId])
 }

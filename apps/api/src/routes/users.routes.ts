@@ -71,30 +71,31 @@ router.post(
           .json({ error: "An active invite already exists for this email" });
         return;
       }
-      // Check user limit
+
+      // FIX #1: single query fetches both plan and name — removes duplicate const tenant declaration
       const tenant = await prisma.tenant.findUnique({
         where: { id: req.user!.tenantId },
-        select: { plan: true },
+        select: { plan: true, name: true },
       });
+
+      // Check user limit
       const { maxUsers } = getPlanLimits(tenant?.plan ?? "free");
       const currentUsers = await prisma.user.count({
         where: { tenantId: req.user!.tenantId, isActive: true },
       });
       if (maxUsers !== Infinity && currentUsers >= maxUsers) {
-        res.status(400).json({
+        res.status(402).json({
           error: `User limit reached for your plan (${maxUsers} users). Please upgrade.`,
           code: "USER_LIMIT_REACHED",
+          limit: maxUsers,
+          current: currentUsers,
         });
         return;
       }
 
-      // Get inviter info + tenant
+      // Get inviter info
       const inviter = await prisma.user.findUnique({
         where: { id: req.user!.userId },
-        select: { name: true },
-      });
-      const tenant = await prisma.tenant.findUnique({
-        where: { id: req.user!.tenantId },
         select: { name: true },
       });
 
@@ -364,6 +365,138 @@ router.delete(
       res.json({ message: "User removed successfully" });
     } catch (err) {
       res.status(500).json({ error: "Failed to remove user" });
+    }
+  },
+);
+
+// ─── GET /api/users/departments ───────────────────────────────────────────────
+router.get(
+  "/departments",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "MANAGER", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const departments = await prisma.department.findMany({
+        where: { tenantId: req.user!.tenantId },
+        orderBy: { name: "asc" },
+        include: { _count: { select: { users: true } } },
+      });
+      res.json({ departments });
+    } catch {
+      res.status(500).json({ error: "Failed to fetch departments" });
+    }
+  },
+);
+
+// ─── POST /api/users/departments ──────────────────────────────────────────────
+router.post(
+  "/departments",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { name } = z
+        .object({ name: z.string().min(1).max(100) })
+        .parse(req.body);
+
+      const existing = await prisma.department.findFirst({
+        where: { name, tenantId: req.user!.tenantId },
+      });
+      if (existing) {
+        res.status(400).json({ error: "Department already exists" });
+        return;
+      }
+
+      const dept = await prisma.department.create({
+        data: { name, tenantId: req.user!.tenantId },
+      });
+      res.status(201).json({ department: dept });
+    } catch (err: any) {
+      if (err.name === "ZodError") {
+        res.status(400).json({ error: "Invalid input" });
+        return;
+      }
+      res.status(500).json({ error: "Failed to create department" });
+    }
+  },
+);
+
+// ─── DELETE /api/users/departments/:id ────────────────────────────────────────
+router.delete(
+  "/departments/:id",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const dept = await prisma.department.findFirst({
+        where: { id: req.params.id, tenantId: req.user!.tenantId },
+      });
+      if (!dept) {
+        res.status(404).json({ error: "Department not found" });
+        return;
+      }
+
+      // Unassign users before deleting
+      await prisma.user.updateMany({
+        where: { departmentId: req.params.id, tenantId: req.user!.tenantId },
+        data: { departmentId: null },
+      });
+      await prisma.department.delete({ where: { id: req.params.id } });
+      res.json({ message: "Department deleted" });
+    } catch {
+      res.status(500).json({ error: "Failed to delete department" });
+    }
+  },
+);
+
+// ─── PATCH /api/users/:id/department ──────────────────────────────────────────
+router.patch(
+  "/:id/department",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { departmentId } = z
+        .object({
+          departmentId: z.string().uuid().nullable(),
+        })
+        .parse(req.body);
+
+      const user = await prisma.user.findFirst({
+        where: { id: req.params.id, tenantId: req.user!.tenantId },
+      });
+      if (!user) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+
+      if (departmentId) {
+        const dept = await prisma.department.findFirst({
+          where: { id: departmentId, tenantId: req.user!.tenantId },
+        });
+        if (!dept) {
+          res.status(400).json({ error: "Department not found" });
+          return;
+        }
+      }
+
+      const updated = await prisma.user.update({
+        where: { id: req.params.id },
+        data: { departmentId },
+        select: {
+          id: true,
+          name: true,
+          departmentId: true,
+          department: { select: { name: true } },
+        },
+      });
+      res.json({ user: updated });
+    } catch (err: any) {
+      if (err.name === "ZodError") {
+        res.status(400).json({ error: "Invalid input" });
+        return;
+      }
+      res.status(500).json({ error: "Failed to update department" });
     }
   },
 );
