@@ -25,6 +25,7 @@ import FileVersionsModal from "../components/files/FileVersionsModal";
 import MoveFileModal from "../components/files/MoveFileModal";
 import AssignCategoryModal from "../components/files/AssignCategoryModal";
 import { useToast } from "../components/ui/Toast";
+import FileMetadataPanel from "../components/files/FileMetadataPanel";
 
 type ViewMode = "grid" | "list";
 
@@ -45,6 +46,7 @@ export default function FileBrowserPage() {
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [previewFile, setPreviewFile] = useState<any>(null);
+  const [metadataFile, setMetadataFile] = useState<any>(null);
   const [permissionsResource, setPermissionsResource] = useState<{
     id: string;
     type: "file" | "folder";
@@ -59,6 +61,9 @@ export default function FileBrowserPage() {
     "name" | "size" | "createdAt" | "mimeType"
   >("createdAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [draggedFileId, setDraggedFileId] = useState<string | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<string>("all");
   const [categoryResource, setCategoryResource] = useState<{
     id: string;
     type: "file" | "folder";
@@ -156,7 +161,55 @@ export default function FileBrowserPage() {
     onError: () => useToast.getState().add("Failed to delete files", "error"),
   });
 
-  const files = filesData?.files ?? [];
+  const bulkDownload = async () => {
+    try {
+      const res = await api.post(
+        "/files/bulk-download",
+        { ids: selectedFiles },
+        { responseType: "blob" },
+      );
+      const url = URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `storeit-files-${Date.now()}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      useToast.getState().add("Failed to download files", "error");
+    }
+  };
+
+  const dragMove = useMutation({
+    mutationFn: async ({
+      fileId,
+      folderId,
+    }: {
+      fileId: string;
+      folderId: string;
+    }) => api.patch(`/files/${fileId}/move`, { folderId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["files", folderId ?? "root"],
+      });
+      useToast.getState().add("File moved");
+    },
+    onError: () => useToast.getState().add("Failed to move file", "error"),
+  });
+
+  const allFiles = filesData?.files ?? [];
+  const files = allFiles.filter((f) => {
+    if (typeFilter === "all") return true;
+    if (typeFilter === "pdf") return f.mimeType.includes("pdf");
+    if (typeFilter === "image") return f.mimeType.startsWith("image/");
+    if (typeFilter === "video") return f.mimeType.startsWith("video/");
+    if (typeFilter === "word")
+      return f.mimeType.includes("word") || f.mimeType.includes("document");
+    if (typeFilter === "excel")
+      return f.mimeType.includes("excel") || f.mimeType.includes("spreadsheet");
+    if (typeFilter === "zip")
+      return f.mimeType.includes("zip") || f.mimeType.includes("compressed");
+    return true;
+  });
   const folders = foldersData?.folders ?? [];
   const isLoading = filesLoading || foldersLoading;
   const isEmpty = files.length === 0 && folders.length === 0;
@@ -171,13 +224,14 @@ export default function FileBrowserPage() {
     setPermissionsResource({ id: file.id, type: "file", name: file.name });
   };
 
-  const handleFolderShare = (folder: StoreITem) => {
-    setPermissionsResource({
-      id: folder.id,
-      type: "folder",
-      name: folder.name,
-    });
-  };
+  // const handleFolderShare = (folder: StoreITem) => {
+  //   setPermissionsResource({
+  //     id: folder.id,
+  //     type: "folder",
+  //     name: folder.name,
+  //   });
+  // };
+
   const handleSort = (col: "name" | "size" | "createdAt" | "mimeType") => {
     if (sortBy === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else {
@@ -397,12 +451,40 @@ export default function FileBrowserPage() {
                 <Trash2 size={14} /> Delete
               </button>
               <button
+                onClick={bulkDownload}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700
+             bg-white border border-gray-200 rounded-lg hover:bg-gray-50 font-medium"
+              >
+                <Download size={14} /> Download ZIP
+              </button>
+              <button
                 onClick={() => setSelectedFiles([])}
                 className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700"
               >
                 Cancel
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Type filter */}
+        {files.length > 0 && (
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
+            {["all", "pdf", "image", "video", "word", "excel", "zip"].map(
+              (type) => (
+                <button
+                  key={type}
+                  onClick={() => setTypeFilter(type)}
+                  className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${
+                    typeFilter === type
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "bg-white text-gray-600 border-gray-300 hover:border-blue-300"
+                  }`}
+                >
+                  {type === "all" ? "All" : type.toUpperCase()}
+                </button>
+              ),
+            )}
           </div>
         )}
 
@@ -583,6 +665,9 @@ export default function FileBrowserPage() {
                     sortBy={sortBy}
                     sortDir={sortDir}
                     onSort={handleSort}
+                    onDragStart={(file) => setDraggedFileId(file.id)}
+                    onDragEnd={() => setDraggedFileId(null)}
+                    onMetadata={(file) => setMetadataFile(file)}
                   />
                 )}
               </div>
@@ -672,6 +757,14 @@ export default function FileBrowserPage() {
           resourceName={categoryResource.name}
           currentCategoryId={categoryResource.currentCategoryId}
           onClose={() => setCategoryResource(null)}
+        />
+      )}
+
+      {metadataFile && (
+        <FileMetadataPanel
+          fileId={metadataFile.id}
+          fileName={metadataFile.name}
+          onClose={() => setMetadataFile(null)}
         />
       )}
     </AppShell>

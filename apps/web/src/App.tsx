@@ -19,6 +19,7 @@ import SearchPage from "./pages/SearchPage";
 import { ToastContainer } from "./components/ui/Toast";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import BillingPage from "./pages/admin/BillingPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -166,6 +167,14 @@ export default function App() {
               <ProtectedRoute>
                 <SearchPage />
               </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/billing"
+            element={
+              <AdminRoute>
+                <BillingPage />
+              </AdminRoute>
             }
           />
           <Route path="*" element={<Navigate to="/" replace />} />

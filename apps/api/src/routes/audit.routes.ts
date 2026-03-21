@@ -107,4 +107,68 @@ router.get(
   },
 );
 
+// ─── GET /api/audit/export — download as CSV ──────────────────────────────────
+router.get(
+  "/export",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { action, userId, resourceType, from, to } = req.query;
+
+      const where: any = { tenantId: req.user!.tenantId };
+      if (action) where.action = action;
+      if (userId) where.userId = userId;
+      if (resourceType) where.resourceType = resourceType;
+      if (from || to) {
+        where.createdAt = {};
+        if (from) where.createdAt.gte = new Date(from as string);
+        if (to) where.createdAt.lte = new Date(to as string);
+      }
+
+      const logs = await prisma.auditLog.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: 10000, // cap at 10k rows
+        include: { user: { select: { name: true, email: true } } },
+      });
+
+      // Build CSV
+      const header = [
+        "Date",
+        "Action",
+        "User",
+        "Email",
+        "Resource Type",
+        "Resource Name",
+        "IP Address",
+      ];
+      const rows = logs.map((log) => [
+        new Date(log.createdAt).toISOString(),
+        log.action,
+        log.user?.name ?? "System",
+        log.user?.email ?? "",
+        log.resourceType ?? "",
+        log.resourceName ?? "",
+        log.ipAddress ?? "",
+      ]);
+
+      const escape = (val: string) => `"${val.replace(/"/g, '""')}"`;
+      const csv = [header, ...rows]
+        .map((row) => row.map(escape).join(","))
+        .join("\n");
+
+      const filename = `audit-log-${new Date().toISOString().split("T")[0]}.csv`;
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${filename}"`,
+      );
+      res.send(csv);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to export audit logs" });
+    }
+  },
+);
+
 export default router;

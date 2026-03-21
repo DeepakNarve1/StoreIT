@@ -5,6 +5,7 @@ import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import { sendInviteEmail } from "../services/email.service";
 import bcrypt from "bcryptjs";
+import { getPlanLimits } from "../utils/plans";
 
 const router = Router();
 
@@ -68,6 +69,22 @@ router.post(
         res
           .status(400)
           .json({ error: "An active invite already exists for this email" });
+        return;
+      }
+      // Check user limit
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: req.user!.tenantId },
+        select: { plan: true },
+      });
+      const { maxUsers } = getPlanLimits(tenant?.plan ?? "free");
+      const currentUsers = await prisma.user.count({
+        where: { tenantId: req.user!.tenantId, isActive: true },
+      });
+      if (maxUsers !== Infinity && currentUsers >= maxUsers) {
+        res.status(400).json({
+          error: `User limit reached for your plan (${maxUsers} users). Please upgrade.`,
+          code: "USER_LIMIT_REACHED",
+        });
         return;
       }
 

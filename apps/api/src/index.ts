@@ -18,6 +18,7 @@ import permissionRoutes from "./routes/permissions.routes";
 import auditRoutes from "./routes/audit.routes";
 import searchRoutes from "./routes/search.routes";
 import tagsRoutes from "./routes/tags.routes";
+import billingRoutes from "./routes/billing.routes";
 
 import path from "path";
 
@@ -81,6 +82,7 @@ app.use("/api/permissions", permissionRoutes);
 app.use("/api/audit", auditRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/tags", tagsRoutes);
+app.use("/api/billing", billingRoutes);
 
 // ─── 404 HANDLER ─────────────────────────────────────────────────────────────
 app.use("*", (req, res) => {

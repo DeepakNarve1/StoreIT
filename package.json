@@ -17,9 +17,11 @@
     "db:seed": "npm run seed --workspace=apps/api"
   },
   "devDependencies": {
+    "@types/archiver": "^7.0.0",
     "prisma": "^7.5.0"
   },
   "dependencies": {
-    "@prisma/client": "^7.5.0"
+    "@prisma/client": "^7.5.0",
+    "archiver": "^7.0.1"
   }
 }

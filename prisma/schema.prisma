@@ -26,6 +26,8 @@ model Tenant {
   oneTimeLinks OneTimeLink[]
   auditLogs    AuditLog[]
   tags    Tag[] 
+  stripeCustomerId     String?   // ← add
+  stripeSubscriptionId String?   // ← add
 }
 
 // ─── USER ────────────────────────────────────────────────────────────────────
@@ -47,7 +49,6 @@ model User {
   invites      InviteToken[]
   uploadedFiles File[]   @relation("UploadedBy")
   uploadedVersions FileVersion[] @relation("VersionUploadedBy")
-  passwordResetTokens PasswordResetToken[]
   auditLogs    AuditLog[]
 
   @@index([tenantId])
@@ -132,12 +133,13 @@ model File {
   category     Category? @relation(fields: [categoryId], references: [id])
 
   isStarred    Boolean   @default(false)  
-  tags         FileTag[]                  
+  tags         FileTag[]           
 
   uploadedById String?
   uploadedBy   User?     @relation("UploadedBy", fields: [uploadedById], references: [id])
 
   permissions  Permission[]
+  metadata     FileMetadata[]
   oneTimeLinks OneTimeLink[]
 
   @@index([tenantId])
@@ -235,12 +237,10 @@ model PasswordResetToken {
   token     String   @unique
   email     String
   isUsed    Boolean   @default(false) 
-  userId    String
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("password_reset_tokens")
 }
@@ -260,6 +260,18 @@ model OneTimeLink {
   file       File      @relation(fields: [fileId], references: [id])
 
   @@index([token])
+}
+
+// ─── FILE METADATA ────────────────────────────────────────────────────────────
+model FileMetadata {
+  id        String   @id @default(uuid())
+  key       String
+  value     String
+  fileId    String
+  file      File     @relation(fields: [fileId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([fileId])
 }
 
 // ─── AUDIT LOG ────────────────────────────────────────────────────────────────

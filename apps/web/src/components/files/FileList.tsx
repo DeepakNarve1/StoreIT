@@ -17,9 +17,9 @@ import {
   Pencil,
   ChevronUp,
   ChevronDown,
+  Info,
 } from "lucide-react";
 import { useState } from "react";
-import clsx from "clsx";
 
 interface FileItem {
   id: string;
@@ -46,6 +46,9 @@ interface FileListProps {
   sortBy?: "name" | "size" | "createdAt" | "mimeType";
   sortDir?: "asc" | "desc";
   onSort?: (col: "name" | "size" | "createdAt" | "mimeType") => void;
+  onDragStart?: (file: FileItem) => void;
+  onDragEnd?: () => void;
+  onMetadata?: (file: FileItem) => void;
 }
 
 const getFileIcon = (mimeType: string) => {
@@ -103,6 +106,9 @@ export default function FileList({
   sortBy,
   sortDir,
   onSort,
+  onDragStart,
+  onDragEnd,
+  onMetadata,
 }: FileListProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
 
@@ -202,11 +208,11 @@ export default function FileList({
         return (
           <div
             key={file.id}
-            className={clsx(
-              "grid grid-cols-12 gap-4 px-4 py-3 border-b border-gray-100",
-              "last:border-b-0 transition-colors group items-center",
-              selectedIds.includes(file.id) ? "bg-blue-50" : "hover:bg-gray-50",
-            )}
+            className="relative group grid grid-cols-12 gap-4 px-4 py-3 border-b
+             border-gray-100 hover:bg-gray-50 items-center"
+            draggable={!!onDragStart}
+            onDragStart={() => onDragStart?.(file)}
+            onDragEnd={() => onDragEnd?.()}
           >
             {onSelectChange && (
               <div
@@ -275,12 +281,8 @@ export default function FileList({
                   onClick={() =>
                     setActiveMenu(activeMenu === file.id ? null : file.id)
                   }
-                  className={clsx(
-                    "p-1 rounded-lg transition-colors",
-                    activeMenu === file.id
-                      ? "bg-gray-200 text-gray-700"
-                      : "opacity-0 group-hover:opacity-100 hover:bg-gray-200 text-gray-500",
-                  )}
+                  className="p-1 rounded-lg opacity-0 group-hover:opacity-100
+           hover:bg-gray-100 transition-opacity text-gray-400"
                 >
                   <MoreVertical size={14} />
                 </button>
@@ -417,6 +419,17 @@ export default function FileList({
                         >
                           <Trash2 size={14} /> Delete
                         </button>
+                        {onMetadata && (
+                          <button
+                            onClick={() => {
+                              onMetadata(file);
+                              setActiveMenu(null);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg"
+                          >
+                            <Info size={14} /> Metadata
+                          </button>
+                        )}
                       </div>
                     </div>
                   </>

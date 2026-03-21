@@ -13,6 +13,10 @@ import {
 } from "../services/storage.service";
 import { createAuditLog } from "../services/audit.service";
 import { getPlanLimits } from "../utils/plans";
+import archiver from "archiver";
+import { getFileViewUrl } from "../services/storage.service";
+import https from "https";
+import http from "http";
 
 const router = Router();
 
@@ -501,6 +505,67 @@ router.post(
         return;
       }
       res.status(500).json({ error: "Failed to move files" });
+    }
+  },
+);
+
+// ─── POST /api/files/bulk-download ───────────────────────────────────────────
+router.post(
+  "/bulk-download",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { ids } = z
+        .object({
+          ids: z.array(z.string().uuid()).min(1).max(50),
+        })
+        .parse(req.body);
+
+      const files = await prisma.file.findMany({
+        where: {
+          id: { in: ids },
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+        select: { id: true, name: true, storageKey: true },
+      });
+
+      if (files.length === 0) {
+        res.status(404).json({ error: "No files found" });
+        return;
+      }
+
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="storeit-files-${Date.now()}.zip"`,
+      );
+
+      const archive = archiver("zip", { zlib: { level: 6 } });
+      archive.pipe(res);
+
+      for (const file of files) {
+        const url = await getFileViewUrl(file.storageKey, 60);
+        await new Promise<void>((resolve, reject) => {
+          const client = url.startsWith("https") ? https : http;
+          client
+            .get(url, (stream) => {
+              archive.append(stream, { name: file.name });
+              stream.on("end", resolve);
+              stream.on("error", reject);
+            })
+            .on("error", reject);
+        });
+      }
+
+      await archive.finalize();
+    } catch (err: any) {
+      if (err.name === "ZodError") {
+        res.status(400).json({ error: "Invalid input" });
+        return;
+      }
+      console.error(err);
+      res.status(500).json({ error: "Failed to create ZIP" });
     }
   },
 );
@@ -1072,6 +1137,83 @@ router.delete(
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: "Failed to permanently delete file" });
+    }
+  },
+);
+
+// ─── GET /api/files/:id/metadata ─────────────────────────────────────────────
+router.get(
+  "/:id/metadata",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.id)) {
+      res.status(400).json({ error: "Invalid ID" });
+      return;
+    }
+    try {
+      const metadata = await prisma.fileMetadata.findMany({
+        where: { fileId: req.params.id },
+        orderBy: { createdAt: "asc" },
+      });
+      res.json({ metadata });
+    } catch {
+      res.status(500).json({ error: "Failed to fetch metadata" });
+    }
+  },
+);
+
+// ─── PUT /api/files/:id/metadata ─────────────────────────────────────────────
+// Full replace — sends all key/value pairs at once
+router.put(
+  "/:id/metadata",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.id)) {
+      res.status(400).json({ error: "Invalid ID" });
+      return;
+    }
+    try {
+      const { fields } = z
+        .object({
+          fields: z
+            .array(
+              z.object({
+                key: z.string().min(1).max(100),
+                value: z.string().max(500),
+              }),
+            )
+            .max(20),
+        })
+        .parse(req.body);
+
+      const file = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+      });
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      await prisma.$transaction([
+        prisma.fileMetadata.deleteMany({ where: { fileId: req.params.id } }),
+        ...fields.map((f) =>
+          prisma.fileMetadata.create({
+            data: { key: f.key, value: f.value, fileId: req.params.id },
+          }),
+        ),
+      ]);
+
+      res.json({ message: "Metadata updated" });
+    } catch (err: any) {
+      if (err.name === "ZodError") {
+        res.status(400).json({ error: "Invalid input" });
+        return;
+      }
+      res.status(500).json({ error: "Failed to update metadata" });
     }
   },
 );

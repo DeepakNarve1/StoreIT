@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Loader,
   User,
+  Download,
 } from "lucide-react";
 import AppShell from "../../components/layout/AppShell";
 import api from "../../api/axios";
@@ -180,6 +181,26 @@ export default function AuditLogPage() {
   const pagination = data?.pagination;
   const stats = statsData;
 
+  const handleExport = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (filterAction) params.set("action", filterAction);
+
+      const res = await api.get(`/audit/export?${params.toString()}`, {
+        responseType: "blob",
+      });
+
+      const url = URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `audit-log-${new Date().toISOString().split("T")[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Failed to export audit log");
+    }
+  };
+
   return (
     <AppShell>
       <div className="max-w-6xl mx-auto">
@@ -304,6 +325,15 @@ export default function AuditLogPage() {
             </span>
           )}
         </div>
+        <button
+          onClick={handleExport}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium
+             text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50
+             transition-colors ml-auto"
+        >
+          <Download size={14} />
+          Export CSV
+        </button>
 
         {/* Log table */}
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
