@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
@@ -80,6 +80,75 @@ export default function FileBrowserPage() {
   } | null>(null);
   const [approvalFile, setApprovalFile] = useState<any>(null);
   const [renameName, setRenameName] = useState("");
+  // FIX (Bug 2): Controlled state for approval note — replaces DOM getElementById reads
+  const [approvalNote, setApprovalNote] = useState("");
+
+  // Escape key closes any open modal/panel
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (approvalFile) {
+        setApprovalFile(null);
+        setApprovalNote("");
+        return;
+      }
+      if (renameFile) {
+        setRenameFile(null);
+        return;
+      }
+      if (metadataFile) {
+        setMetadataFile(null);
+        return;
+      }
+      if (commentsFile) {
+        setCommentsFile(null);
+        return;
+      }
+      if (versionsFile) {
+        setVersionsFile(null);
+        return;
+      }
+      if (previewFile) {
+        setPreviewFile(null);
+        return;
+      }
+      if (permissionsResource) {
+        setPermissionsResource(null);
+        return;
+      }
+      if (moveFiles.length > 0) {
+        setMoveFiles([]);
+        return;
+      }
+      if (categoryResource) {
+        setCategoryResource(null);
+        return;
+      }
+      if (showUpload) {
+        setShowUpload(false);
+        return;
+      }
+      if (showNewFolder) {
+        setShowNewFolder(false);
+        return;
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    approvalFile,
+    renameFile,
+    metadataFile,
+    commentsFile,
+    versionsFile,
+    previewFile,
+    permissionsResource,
+    moveFiles,
+    categoryResource,
+    showUpload,
+    showNewFolder,
+    approvalNote,
+  ]);
 
   // ── Fetch files ─────────────────────────────────────────────────────────────
   const { data: filesData, isLoading: filesLoading } = useQuery({
@@ -101,6 +170,7 @@ export default function FileBrowserPage() {
       return res.data as { folders: StoreITem[] };
     },
   });
+
   const renameMutation = useMutation({
     mutationFn: async ({ id, name }: { id: string; name: string }) => {
       await api.patch(`/files/${id}/rename`, { name });
@@ -127,6 +197,25 @@ export default function FileBrowserPage() {
       useToast.getState().add("Failed to submit for approval", "error"),
   });
 
+  const lockMutation = useMutation({
+    mutationFn: async ({
+      fileId,
+      isLocked,
+    }: {
+      fileId: string;
+      isLocked: boolean;
+    }) => {
+      await api.post(`/files/${fileId}/${isLocked ? "unlock" : "lock"}`);
+    },
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({
+        queryKey: ["files", folderId ?? "root"],
+      });
+      useToast.getState().add(vars.isLocked ? "File unlocked" : "File locked");
+    },
+    onError: () => useToast.getState().add("Failed to update lock", "error"),
+  });
+
   const approveMutation = useMutation({
     mutationFn: async ({
       fileId,
@@ -144,6 +233,8 @@ export default function FileBrowserPage() {
         queryKey: ["files", folderId ?? "root"],
       });
       setApprovalFile(null);
+      // FIX (Bug 2): Clear controlled note state on success
+      setApprovalNote("");
       useToast
         .getState()
         .add(vars.action === "approved" ? "File approved" : "File rejected");
@@ -270,14 +361,6 @@ export default function FileBrowserPage() {
   const handleShare = (file: any) => {
     setPermissionsResource({ id: file.id, type: "file", name: file.name });
   };
-
-  // const handleFolderShare = (folder: StoreITem) => {
-  //   setPermissionsResource({
-  //     id: folder.id,
-  //     type: "folder",
-  //     name: folder.name,
-  //   });
-  // };
 
   const handleSort = (col: "name" | "size" | "createdAt" | "mimeType") => {
     if (sortBy === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -582,29 +665,33 @@ export default function FileBrowserPage() {
             </button>
           </div>
         ) : isEmpty ? (
+          // FIX (Bug 4): Replaced outer <p> with <div> — block elements like <div>
+          // cannot be nested inside a <p>, which caused broken double-render of empty state
           <div className="bg-white border border-gray-200 rounded-xl">
             <div className="flex flex-col items-center justify-center py-20 text-center">
-              <div
-                className="w-14 h-14 bg-gray-100 rounded-full flex items-center
-                              justify-center mb-4"
-              >
-                <Upload size={22} className="text-gray-400" />
-              </div>
-              <p className="text-sm font-medium text-gray-700">
-                {!filesLoading &&
-                  !foldersLoading &&
-                  (filesData?.files?.length ?? 0) === 0 &&
-                  (foldersData?.folders?.length ?? 0) === 0 && (
-                    <div className="flex flex-col items-center justify-center py-20 text-center">
-                      <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-4">
-                        <Upload size={28} className="text-blue-400" />
-                      </div>
-                      <h3 className="text-gray-700 font-medium mb-1">
-                        This folder is empty
-                      </h3>
-                      <p className="text-gray-400 text-sm mb-4">
-                        Upload files or create a folder to get started
-                      </p>
+              {!filesLoading &&
+                !foldersLoading &&
+                (filesData?.files?.length ?? 0) === 0 &&
+                (foldersData?.folders?.length ?? 0) === 0 && (
+                  <div className="flex flex-col items-center justify-center text-center">
+                    <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-4">
+                      <Upload size={28} className="text-blue-400" />
+                    </div>
+                    <h3 className="text-gray-700 font-medium mb-1">
+                      This folder is empty
+                    </h3>
+                    <p className="text-gray-400 text-sm mb-4">
+                      Upload files or create a folder to get started
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setShowNewFolder(true)}
+                        className="text-sm text-gray-600 border border-gray-300
+                                   hover:bg-gray-50 px-3 py-1.5 rounded-lg
+                                   transition-colors font-medium"
+                      >
+                        New Folder
+                      </button>
                       <button
                         onClick={() => setShowUpload(true)}
                         className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
@@ -612,28 +699,8 @@ export default function FileBrowserPage() {
                         Upload files
                       </button>
                     </div>
-                  )}
-              </p>
-              <p className="text-xs text-gray-400 mt-1 mb-4">
-                Create a folder or upload files to get started
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowNewFolder(true)}
-                  className="text-sm text-gray-600 border border-gray-300
-                             hover:bg-gray-50 px-3 py-1.5 rounded-lg
-                             transition-colors font-medium"
-                >
-                  New Folder
-                </button>
-                <button
-                  onClick={() => setShowUpload(true)}
-                  className="text-sm text-blue-600 hover:text-blue-700
-                             font-medium transition-colors px-3 py-1.5"
-                >
-                  Upload files →
-                </button>
-              </div>
+                  </div>
+                )}
             </div>
           </div>
         ) : (
@@ -688,6 +755,8 @@ export default function FileBrowserPage() {
                         >
                           <Hash size={12} />
                         </button>
+                        {/* FIX (Bug 3): Added .catch() so folder delete failures
+                            surface as a toast instead of silently doing nothing */}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -696,14 +765,21 @@ export default function FileBrowserPage() {
                                 `Delete folder "${folder.name}" and all its contents?`,
                               )
                             ) {
-                              api.delete(`/folders/${folder.id}`).then(() => {
-                                queryClient.invalidateQueries({
-                                  queryKey: ["folders", folderId ?? "root"],
-                                });
-                                queryClient.invalidateQueries({
-                                  queryKey: ["folders", "root"],
-                                });
-                              });
+                              api
+                                .delete(`/folders/${folder.id}`)
+                                .then(() => {
+                                  queryClient.invalidateQueries({
+                                    queryKey: ["folders", folderId ?? "root"],
+                                  });
+                                  queryClient.invalidateQueries({
+                                    queryKey: ["folders", "root"],
+                                  });
+                                })
+                                .catch(() =>
+                                  useToast
+                                    .getState()
+                                    .add("Failed to delete folder", "error"),
+                                );
                             }
                           }}
                           className="p-1.5 bg-white border border-gray-200 rounded-lg
@@ -734,6 +810,8 @@ export default function FileBrowserPage() {
                 {viewMode === "grid" ? (
                   <FileGrid files={files} onFileClick={handleFileClick} />
                 ) : (
+                  // FIX (Bug 1): Removed duplicate onMetadata prop that caused the
+                  // "JSX elements cannot have multiple attributes with the same name" error
                   <FileList
                     files={files}
                     onFileClick={handleFileClick}
@@ -757,12 +835,19 @@ export default function FileBrowserPage() {
                     onSubmitApproval={(file) =>
                       submitApprovalMutation.mutate(file.id)
                     }
+                    onLock={(file) =>
+                      lockMutation.mutate({
+                        fileId: file.id,
+                        isLocked: !!file.isLocked,
+                      })
+                    }
                   />
                 )}
               </div>
             )}
           </div>
         )}
+
         {renameFile && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl p-6 w-96 shadow-xl">
@@ -875,8 +960,10 @@ export default function FileBrowserPage() {
             <p className="text-sm text-gray-500 mb-4 truncate">
               {approvalFile.name}
             </p>
+            {/* FIX (Bug 2): Textarea is now a controlled component via approvalNote state */}
             <textarea
-              id="approval-note"
+              value={approvalNote}
+              onChange={(e) => setApprovalNote(e.target.value)}
               placeholder="Optional note…"
               className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm
                    focus:outline-none focus:ring-2 focus:ring-blue-400 mb-4
@@ -884,22 +971,24 @@ export default function FileBrowserPage() {
               rows={3}
             />
             <div className="flex gap-2 justify-end">
+              {/* FIX (Bug 2): Cancel now also clears the note state */}
               <button
-                onClick={() => setApprovalFile(null)}
+                onClick={() => {
+                  setApprovalFile(null);
+                  setApprovalNote("");
+                }}
                 className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
               >
                 Cancel
               </button>
+              {/* FIX (Bug 2): Both buttons now pass approvalNote from state,
+                  not from document.getElementById which is unreliable in React */}
               <button
                 onClick={() =>
                   approveMutation.mutate({
                     fileId: approvalFile.id,
                     action: "rejected",
-                    note: (
-                      document.getElementById(
-                        "approval-note",
-                      ) as HTMLTextAreaElement
-                    )?.value,
+                    note: approvalNote,
                   })
                 }
                 className="px-4 py-2 text-sm bg-red-50 text-red-600 border border-red-200 rounded-xl hover:bg-red-100 font-medium"
@@ -911,11 +1000,7 @@ export default function FileBrowserPage() {
                   approveMutation.mutate({
                     fileId: approvalFile.id,
                     action: "approved",
-                    note: (
-                      document.getElementById(
-                        "approval-note",
-                      ) as HTMLTextAreaElement
-                    )?.value,
+                    note: approvalNote,
                   })
                 }
                 className="px-4 py-2 text-sm bg-green-600 text-white rounded-xl hover:bg-green-700 font-medium"

@@ -103,6 +103,9 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
           tags: {
             select: { tag: { select: { id: true, name: true, color: true } } },
           },
+          isLocked: true,
+          lockedById: true,
+          approvalStatus: true,
         },
       });
     } else {
@@ -1509,6 +1512,104 @@ router.post(
         return;
       }
       res.status(500).json({ error: "Failed to process approval" });
+    }
+  },
+);
+
+// ─── POST /api/files/:id/lock ─────────────────────────────────────────────────
+router.post(
+  "/:id/lock",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const file = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+      });
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+      if (file.isLocked) {
+        res.status(400).json({ error: "File is already locked" });
+        return;
+      }
+
+      await prisma.file.update({
+        where: { id: file.id },
+        data: {
+          isLocked: true,
+          lockedById: req.user!.userId,
+          lockedAt: new Date(),
+        },
+      });
+      await createAuditLog({
+        action: "file.lock",
+        userId: req.user!.userId,
+        tenantId: req.user!.tenantId,
+        resourceType: "file",
+        resourceId: file.id,
+        resourceName: file.name,
+        req,
+      });
+      res.json({ message: "File locked" });
+    } catch {
+      res.status(500).json({ error: "Failed to lock file" });
+    }
+  },
+);
+
+// ─── POST /api/files/:id/unlock ───────────────────────────────────────────────
+router.post(
+  "/:id/unlock",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const file = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+      });
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+      if (!file.isLocked) {
+        res.status(400).json({ error: "File is not locked" });
+        return;
+      }
+
+      const canUnlock =
+        ["SUPERADMIN", "ORG_ADMIN", "MANAGER"].includes(req.user!.role) ||
+        file.lockedById === req.user!.userId;
+      if (!canUnlock) {
+        res
+          .status(403)
+          .json({ error: "Only the locker or a manager can unlock" });
+        return;
+      }
+
+      await prisma.file.update({
+        where: { id: file.id },
+        data: { isLocked: false, lockedById: null, lockedAt: null },
+      });
+      await createAuditLog({
+        action: "file.unlock",
+        userId: req.user!.userId,
+        tenantId: req.user!.tenantId,
+        resourceType: "file",
+        resourceId: file.id,
+        resourceName: file.name,
+        req,
+      });
+      res.json({ message: "File unlocked" });
+    } catch {
+      res.status(500).json({ error: "Failed to unlock file" });
     }
   },
 );

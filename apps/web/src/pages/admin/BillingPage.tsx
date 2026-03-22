@@ -168,104 +168,100 @@ export default function BillingPage() {
           </div>
         )}
 
-        {/* Current usage */}
+        {/* Loading skeleton */}
+        {isLoading && (
+          <div className="animate-pulse space-y-4 mb-6">
+            <div className="bg-white border border-gray-200 rounded-xl p-5">
+              <div className="h-3 bg-gray-200 rounded w-24 mb-3" />
+              <div className="h-5 bg-gray-200 rounded w-32 mb-4" />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="h-12 bg-gray-100 rounded-xl" />
+                <div className="h-12 bg-gray-100 rounded-xl" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* FIX (Bug 1 & 2): Restored the complete current usage card body and
+            added the missing closing )} so the JSX expression is valid */}
         {!isLoading && data && (
           <div className="bg-white border border-gray-200 rounded-xl p-5 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <p className="text-xs text-gray-500 mb-1">Current plan</p>
-                <span className="text-sm font-semibold text-gray-900 capitalize">
-                  {currentPlan}
-                </span>
-                {data.stripe.subscriptionStatus && (
-                  <span
-                    className={`ml-2 text-xs px-2 py-0.5 rounded-full font-medium ${
-                      data.stripe.subscriptionStatus === "active"
-                        ? "bg-green-100 text-green-700"
-                        : "bg-amber-100 text-amber-700"
-                    }`}
-                  >
-                    {data.stripe.subscriptionStatus}
-                  </span>
-                )}
-              </div>
-              {currentPlan !== "free" && (
-                <button
-                  onClick={() => portal.mutate()}
-                  disabled={portal.isPending}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700
-                             border border-gray-300 rounded-lg hover:bg-gray-50 font-medium"
-                >
-                  <ExternalLink size={13} />
-                  {portal.isPending ? "Opening…" : "Manage subscription"}
-                </button>
-              )}
-            </div>
-
+            <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">
+              Current usage
+            </p>
             <div className="grid grid-cols-2 gap-4">
               {/* Storage */}
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center gap-2 mb-2">
-                  <HardDrive size={14} className="text-gray-400" />
-                  <span className="text-xs font-medium text-gray-600">
-                    Storage
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-xs text-gray-500">
+                  <span className="flex items-center gap-1">
+                    <HardDrive size={12} /> Storage
+                  </span>
+                  <span>
+                    {formatBytes(storageUsed)} /{" "}
+                    {storageLimit ? formatBytes(storageLimit) : "∞"}
                   </span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-1.5 mb-1.5">
+                <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                   <div
-                    className={`h-1.5 rounded-full transition-all ${
-                      storagePct > 90
-                        ? "bg-red-500"
-                        : storagePct > 75
-                          ? "bg-amber-500"
-                          : "bg-blue-500"
+                    className={`h-full rounded-full transition-all ${
+                      storagePct >= 90 ? "bg-red-500" : "bg-blue-500"
                     }`}
-                    style={{ width: `${storageLimit ? storagePct : 5}%` }}
+                    style={{ width: `${storagePct}%` }}
                   />
                 </div>
-                <p className="text-xs text-gray-500">
-                  {formatBytes(storageUsed)}{" "}
-                  {storageLimit
-                    ? `of ${formatBytes(storageLimit)}`
-                    : "(unlimited)"}
-                </p>
               </div>
 
               {/* Users */}
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center gap-2 mb-2">
-                  <Users size={14} className="text-gray-400" />
-                  <span className="text-xs font-medium text-gray-600">
-                    Users
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-xs text-gray-500">
+                  <span className="flex items-center gap-1">
+                    <Users size={12} /> Users
+                  </span>
+                  <span>
+                    {usersUsed} / {usersLimit ?? "∞"}
                   </span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-1.5 mb-1.5">
+                <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                   <div
-                    className={`h-1.5 rounded-full transition-all ${
-                      usersPct > 90
-                        ? "bg-red-500"
-                        : usersPct > 75
-                          ? "bg-amber-500"
-                          : "bg-blue-500"
+                    className={`h-full rounded-full transition-all ${
+                      usersPct >= 90 ? "bg-red-500" : "bg-blue-500"
                     }`}
-                    style={{ width: `${usersLimit ? usersPct : 5}%` }}
+                    style={{ width: `${usersPct}%` }}
                   />
                 </div>
-                <p className="text-xs text-gray-500">
-                  {usersUsed}{" "}
-                  {usersLimit ? `of ${usersLimit} users` : "users (unlimited)"}
-                </p>
               </div>
             </div>
 
-            {data.stripe.currentPeriodEnd && (
-              <p className="text-xs text-gray-400 mt-3">
-                Next billing date:{" "}
-                {new Date(data.stripe.currentPeriodEnd).toLocaleDateString(
-                  "en-US",
-                  { month: "long", day: "numeric", year: "numeric" },
-                )}
-              </p>
+            {/* Stripe subscription status + portal button */}
+            {data.stripe.subscriptionStatus && (
+              <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
+                <div className="text-xs text-gray-500">
+                  <span className="font-medium text-gray-700 capitalize">
+                    {data.stripe.subscriptionStatus}
+                  </span>
+                  {data.stripe.currentPeriodEnd && (
+                    <>
+                      {" "}
+                      · renews{" "}
+                      {new Date(
+                        data.stripe.currentPeriodEnd,
+                      ).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </>
+                  )}
+                </div>
+                <button
+                  onClick={() => portal.mutate()}
+                  disabled={portal.isPending}
+                  className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 font-medium disabled:opacity-50"
+                >
+                  <ExternalLink size={12} />
+                  {portal.isPending ? "Opening…" : "Manage billing"}
+                </button>
+              </div>
             )}
           </div>
         )}

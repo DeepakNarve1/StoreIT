@@ -18,6 +18,8 @@ export type AuditAction =
   | "file.link.revoked"
   | "file.approval.approved"
   | "file.approval.rejected"
+  | "file.lock"
+  | "file.unlock"
   | "folder.create"
   | "folder.rename"
   | "folder.delete"
