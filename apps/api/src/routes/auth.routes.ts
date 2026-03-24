@@ -31,10 +31,11 @@ router.post("/login", async (req: Request, res: Response) => {
     const { email, password } = loginSchema.parse(req.body);
     const result = await loginUser(email, password);
 
+    const isProd = process.env.NODE_ENV === "production";
     res.cookie("refresh_token", result.refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax", // 'none' required for cross-domain cookies (Vercel -> Render)
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
