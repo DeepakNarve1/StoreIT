@@ -23,12 +23,12 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        <div className="bg-white rounded-2xl border border-gray-200 p-8">
+        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-8">
           <div className="text-center mb-6">
-            <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-4">
-              <span className="text-white font-bold text-lg">S</span>
+            <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
+              <span className="text-white text-sm font-bold">F</span>
             </div>
             <h1 className="text-xl font-semibold text-gray-900">
               Forgot password?
@@ -63,7 +63,7 @@ export default function ForgotPasswordPage() {
               </p>
               <Link
                 to="/login"
-                className="block text-sm text-blue-600 hover:underline mt-4"
+                className="block text-sm text-primary-500 hover:underline mt-4"
               >
                 Back to login
               </Link>
@@ -71,7 +71,7 @@ export default function ForgotPasswordPage() {
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">
                   Email address
                 </label>
                 <input
@@ -81,25 +81,27 @@ export default function ForgotPasswordPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@company.com"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  className="w-full border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2.5 text-sm
+           bg-white dark:bg-gray-800 text-gray-900 dark:text-white
+                          placeholder-gray-400 dark:placeholder-gray-500
+                         focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 />
               </div>
               {error && <p className="text-xs text-red-500">{error}</p>}
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-2.5 bg-blue-600 text-white text-sm font-medium
-                           rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                className="w-full py-2.5 bg-primary-600 text-white text-sm font-medium
+                           rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
               >
                 {loading ? "Sending…" : "Send reset link"}
               </button>
               <div className="text-center">
                 <Link
-                  to="/login"
-                  className="text-xs text-gray-400 hover:text-gray-600"
+                  to="/forgot-password"
+                  className="text-xs text-gray-400 hover:text-primary-600 transition-colors"
                 >
-                  Back to login
+                  Forgot your password?
                 </Link>
               </div>
             </form>

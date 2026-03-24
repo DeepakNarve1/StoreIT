@@ -63,20 +63,20 @@ export default function FileCommentsPanel({
   const comments = data?.comments ?? [];
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 flex flex-col max-h-[80vh]">
+    <div className="fixed inset-0 bg-black/40 dark:bg-black/60 flex items-center justify-center z-50">
+      <div className="bg-white dark:bg-gray-900 border border-transparent dark:border-gray-800 rounded-xl shadow-xl w-full max-w-md mx-4 flex flex-col max-h-[80vh]">
         {/* Header */}
-        <div className="flex items-center gap-3 p-5 border-b border-gray-100 shrink-0">
-          <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center">
-            <MessageSquare size={15} className="text-blue-600" />
+        <div className="flex items-center gap-3 p-5 border-b border-gray-100 dark:border-gray-800 shrink-0">
+          <div className="w-8 h-8 bg-primary-50 dark:bg-primary-900/30 rounded-lg flex items-center justify-center">
+            <MessageSquare size={15} className="text-primary-600 dark:text-primary-400" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900">Comments</p>
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Comments</p>
             <p className="text-xs text-gray-400 truncate">{fileName}</p>
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
           >
             <X size={16} />
           </button>
@@ -86,7 +86,7 @@ export default function FileCommentsPanel({
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {isLoading ? (
             <div className="flex justify-center py-6">
-              <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+              <div className="w-5 h-5 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
             </div>
           ) : comments.length === 0 ? (
             <div className="text-center py-8">
@@ -100,21 +100,21 @@ export default function FileCommentsPanel({
             comments.map((c) => (
               <div key={c.id} className="flex gap-3 group">
                 <div
-                  className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center
-                                text-blue-600 font-medium text-xs shrink-0 mt-0.5"
+                  className="w-7 h-7 rounded-full bg-primary-100 dark:bg-primary-900/40 flex items-center justify-center
+                                text-primary-600 dark:text-primary-400 font-medium text-xs shrink-0 mt-0.5"
                 >
                   {c.user.name.charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2 mb-1">
-                    <span className="text-xs font-medium text-gray-800">
+                    <span className="text-xs font-medium text-gray-800 dark:text-gray-200">
                       {c.user.name}
                     </span>
                     <span className="text-xs text-gray-400">
                       {timeAgo(c.createdAt)}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-700 leading-relaxed">
+                  <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
                     {c.content}
                   </p>
                 </div>
@@ -133,7 +133,7 @@ export default function FileCommentsPanel({
         </div>
 
         {/* Input */}
-        <div className="p-5 pt-0 border-t border-gray-100 shrink-0">
+        <div className="p-5 pt-0 border-t border-gray-100 dark:border-gray-800 shrink-0">
           <div className="flex items-center gap-2 mt-4">
             <input
               value={content}
@@ -145,13 +145,13 @@ export default function FileCommentsPanel({
                 addComment.mutate()
               }
               placeholder="Add a comment…"
-              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm
-                         focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className="flex-1 border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-3 py-2 text-sm
+                         focus:outline-none focus:ring-2 focus:ring-primary-400 dark:focus:ring-primary-500"
             />
             <button
               onClick={() => addComment.mutate()}
               disabled={!content.trim() || addComment.isPending}
-              className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700
+              className="p-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700
                          disabled:opacity-50 transition-colors shrink-0"
             >
               <Send size={14} />

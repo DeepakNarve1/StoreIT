@@ -69,7 +69,7 @@ export default function FileVersionsModal({
                           border-b border-gray-200"
           >
             <div className="flex items-center gap-2">
-              <History size={16} className="text-blue-500" />
+              <History size={16} className="text-primary-500" />
               <div>
                 <p className="text-sm font-semibold text-gray-900">
                   Version History
@@ -116,7 +116,7 @@ export default function FileVersionsModal({
                                     justify-center shrink-0 text-xs font-bold
                                     ${
                                       ver.isCurrent
-                                        ? "bg-blue-600 text-white"
+                                        ? "bg-primary-600 text-white"
                                         : "bg-gray-100 text-gray-600"
                                     }`}
                     >
@@ -132,7 +132,7 @@ export default function FileVersionsModal({
                         {ver.isCurrent && (
                           <span
                             className="flex items-center gap-1 text-xs
-                                           bg-blue-50 text-blue-600 px-2 py-0.5
+                                           bg-primary-50 text-primary-500 px-2 py-0.5
                                            rounded-full font-medium"
                           >
                             <CheckCircle size={10} />
@@ -173,7 +173,7 @@ export default function FileVersionsModal({
                           }}
                           disabled={restore.isPending}
                           className="flex items-center gap-1 px-2 py-1.5 text-xs
-                                     font-medium text-blue-600 hover:bg-blue-50
+                                     font-medium text-primary-500 hover:bg-primary-50
                                      rounded-lg transition-colors disabled:opacity-50"
                           title="Restore this version"
                         >

@@ -3,12 +3,12 @@
 @variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --color-primary-50: #e6f1fb;
-  --color-primary-100: #b5d4f4;
-  --color-primary-500: #378add;
-  --color-primary-600: #185fa5;
-  --color-primary-700: #0c447c;
-  --color-primary-900: #042c53;
+  --color-primary-50: #fff0ee;
+  --color-primary-100: #ffe4e1;
+  --color-primary-500: #f06292;
+  --color-primary-600: #e91e63;
+  --color-primary-700: #c2185b;
+  --color-primary-900: #880e4f;
   --font-family-sans: "Inter", system-ui, sans-serif;
 }
 

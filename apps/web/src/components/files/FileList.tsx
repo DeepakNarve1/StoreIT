@@ -20,8 +20,11 @@ import {
   Info,
   MessageSquare,
   CheckCircle,
+  Hash,
 } from "lucide-react";
 import { useState } from "react";
+import { useAuthStore } from "../../store/authStore";
+import type { CapabilityMap } from "../../hooks/useFileCapabilities";
 
 interface FileItem {
   id: string;
@@ -30,10 +33,15 @@ interface FileItem {
   size: number;
   createdAt: string;
   version?: number;
+  uploadedById?: string;
   isStarred?: boolean;
-  approvalStatus?: string;
+  approvalStatus?: string | null;
+  approvalNote?: string | null;
+  approvedAt?: string | null;
+  approvedBy?: { name: string } | null;
   isLocked?: boolean;
   lockedById?: string;
+  categoryId?: string | null;
 }
 
 interface FileListProps {
@@ -57,6 +65,12 @@ interface FileListProps {
   onComments?: (file: FileItem) => void;
   onSubmitApproval?: (file: FileItem) => void;
   onLock?: (file: FileItem) => void;
+  onAssignCategory?: (file: FileItem) => void;
+  onApprovalDetail?: (file: FileItem) => void;
+  /** Per-file granular capability map from useFileCapabilities hook */
+  capabilitiesMap?: CapabilityMap;
+  /** @deprecated use capabilitiesMap. Kept for backwards compat */
+  canDownload?: boolean;
 }
 
 const getFileIcon = (mimeType: string) => {
@@ -70,7 +84,7 @@ const getFileIcon = (mimeType: string) => {
     return { icon: FileText, color: "text-red-500" };
   if (mimeType.includes("zip"))
     return { icon: Archive, color: "text-yellow-500" };
-  return { icon: File, color: "text-blue-500" };
+  return { icon: File, color: "text-primary-500" };
 };
 
 const formatBytes = (bytes: number) => {
@@ -91,11 +105,57 @@ function SortIcon({
   sortDir?: string;
 }) {
   if (sortBy !== col)
-    return <ChevronUp size={11} className="text-gray-300 ml-0.5" />;
+    return (
+      <ChevronUp
+        size={11}
+        className="text-gray-300 dark:text-gray-600 ml-0.5"
+      />
+    );
   return sortDir === "asc" ? (
-    <ChevronUp size={11} className="text-blue-500 ml-0.5" />
+    <ChevronUp size={11} className="text-primary-500 ml-0.5" />
   ) : (
-    <ChevronDown size={11} className="text-blue-500 ml-0.5" />
+    <ChevronDown size={11} className="text-primary-500 ml-0.5" />
+  );
+}
+
+// Tooltip wrapper — shows on hover, positions above the badge
+function ApprovalTooltip({
+  note,
+  reviewerName,
+  children,
+}: {
+  note?: string | null;
+  reviewerName?: string | null;
+  children: React.ReactNode;
+}) {
+  const [show, setShow] = useState(false);
+  const hasContent = note || reviewerName;
+
+  return (
+    <span
+      className="relative inline-flex"
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      {children}
+      {show && hasContent && (
+        <span
+          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-30
+                         w-52 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg
+                         px-2.5 py-2 shadow-lg pointer-events-none"
+        >
+          {reviewerName && (
+            <span className="block font-medium mb-0.5">by {reviewerName}</span>
+          )}
+          {note && <span className="block text-gray-300">{note}</span>}
+          {/* Arrow */}
+          <span
+            className="absolute top-full left-1/2 -translate-x-1/2 border-4
+                           border-transparent border-t-gray-900 dark:border-t-gray-700"
+          />
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -120,8 +180,34 @@ export default function FileList({
   onComments,
   onSubmitApproval,
   onLock,
+  onAssignCategory,
+  onApprovalDetail,
+  capabilitiesMap,
+  canDownload,
 }: FileListProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const { user } = useAuthStore();
+  const isPrivileged = ["ORG_ADMIN", "SUPERADMIN", "MANAGER", "EDITOR"].includes(
+    user?.role ?? "",
+  );
+  const isLockPrivileged = ["ORG_ADMIN", "SUPERADMIN", "MANAGER"].includes(
+    user?.role ?? "",
+  );
+
+  /**
+   * Per-file capability resolver.
+   * - Privileged roles: always true.
+   * - VIEWERs with capabilitiesMap: read from the map.
+   * - VIEWERs without map (legacy): fall back to canDownload for download, deny others.
+   */
+  const fileCan = (fileId: string, cap: string): boolean => {
+    if (isPrivileged) return true;
+    if (capabilitiesMap) return capabilitiesMap[fileId]?.[cap] === true;
+    // Legacy fallback
+    if (cap === "download_files")
+      return canDownload !== undefined ? canDownload : false;
+    return false;
+  };
 
   const sorted = [...files].sort((a, b) => {
     const dir = sortDir === "desc" ? -1 : 1;
@@ -143,28 +229,33 @@ export default function FileList({
 
   if (files.length === 0) return null;
 
+  const hasCheckbox = !!onSelectChange;
+  const hasStar = !!onStar;
+  const nameSpan = hasCheckbox ? (hasStar ? 4 : 5) : hasStar ? 5 : 6;
+
   return (
     <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-visible">
-      <div className="grid grid-cols-12 gap-4 px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 items-center">
-        {onSelectChange && (
+      {/* Header */}
+      <div className="grid grid-cols-12 gap-4 px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-white/5 items-center">
+        {hasCheckbox && (
           <div className="col-span-1 flex items-center">
             <input
               type="checkbox"
               checked={files.length > 0 && selectedIds.length === files.length}
               onChange={(e) =>
-                onSelectChange(e.target.checked ? sorted.map((f) => f.id) : [])
+                onSelectChange!(e.target.checked ? sorted.map((f) => f.id) : [])
               }
-              className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 cursor-pointer"
+              className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-primary-500 cursor-pointer"
             />
           </div>
         )}
         <div
-          className={`${onSelectChange ? "col-span-5" : "col-span-6"} text-xs font-medium text-gray-500`}
+          className={`col-span-${nameSpan} text-xs font-medium text-gray-500`}
         >
           {onSort ? (
             <button
               onClick={() => onSort("name")}
-              className="flex items-center hover:text-gray-700"
+              className="flex items-center hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             >
               Name <SortIcon col="name" sortBy={sortBy} sortDir={sortDir} />
             </button>
@@ -172,11 +263,16 @@ export default function FileList({
             "Name"
           )}
         </div>
+        {hasStar && (
+          <div className="col-span-1 flex items-center justify-center">
+            <Star size={11} className="text-gray-300 dark:text-gray-600" />
+          </div>
+        )}
         <div className="col-span-2 text-xs font-medium text-gray-500">
           {onSort ? (
             <button
               onClick={() => onSort("mimeType")}
-              className="flex items-center hover:text-gray-700"
+              className="flex items-center hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             >
               Type <SortIcon col="mimeType" sortBy={sortBy} sortDir={sortDir} />
             </button>
@@ -188,7 +284,7 @@ export default function FileList({
           {onSort ? (
             <button
               onClick={() => onSort("size")}
-              className="flex items-center hover:text-gray-700"
+              className="flex items-center hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             >
               Size <SortIcon col="size" sortBy={sortBy} sortDir={sortDir} />
             </button>
@@ -200,7 +296,7 @@ export default function FileList({
           {onSort ? (
             <button
               onClick={() => onSort("createdAt")}
-              className="flex items-center hover:text-gray-700"
+              className="flex items-center hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             >
               Modified{" "}
               <SortIcon col="createdAt" sortBy={sortBy} sortDir={sortDir} />
@@ -220,12 +316,14 @@ export default function FileList({
           <div
             key={file.id}
             className="relative group grid grid-cols-12 gap-4 px-4 py-3 border-b
-             border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 items-center"
+                       border-gray-100 dark:border-gray-800 last:border-b-0
+                       hover:bg-gray-50 dark:hover:bg-white/5 transition-colors items-center"
             draggable={!!onDragStart}
             onDragStart={() => onDragStart?.(file)}
             onDragEnd={() => onDragEnd?.()}
           >
-            {onSelectChange && (
+            {/* Checkbox */}
+            {hasCheckbox && (
               <div
                 className="col-span-1 flex items-center"
                 onClick={(e) => e.stopPropagation()}
@@ -237,55 +335,86 @@ export default function FileList({
                     const next = e.target.checked
                       ? [...selectedIds, file.id]
                       : selectedIds.filter((id) => id !== file.id);
-                    onSelectChange(next);
+                    onSelectChange!(next);
                   }}
-                  className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 cursor-pointer"
+                  className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-primary-500 cursor-pointer"
                 />
               </div>
             )}
-            {/* Name */}
+
+            {/* Name + badges */}
             <button
               onClick={() => onFileClick(file)}
-              className={`${onSelectChange ? "col-span-5" : "col-span-6"} flex items-center gap-3 text-left`}
+              className={`col-span-${nameSpan} flex items-center gap-3 text-left`}
             >
               <Icon size={16} className={color} />
-              <span
-                className="text-sm text-gray-800 dark:text-gray-100 truncate hover:text-blue-600 dark:hover:text-blue-400
-                               transition-colors font-medium"
-              >
+              <span className="text-sm text-gray-800 dark:text-gray-100 truncate hover:text-primary-500 dark:hover:text-pink-400 transition-colors font-medium">
                 {file.name}
               </span>
               {(file.version ?? 0) > 1 && (
-                <span
-                  className="text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5
-                   rounded-full font-medium ml-1 shrink-0"
-                >
+                <span className="text-xs bg-pink-100 dark:bg-pink-900/40 text-primary-500 dark:text-pink-300 px-1.5 py-0.5 rounded-full font-medium ml-1 shrink-0">
                   v{file.version}
                 </span>
               )}
+
+              {/* ── Approval badge — hoverable tooltip + clickable for detail panel ── */}
               {file.approvalStatus && (
-                <span
-                  className={`text-xs px-1.5 py-0.5 rounded-full font-medium ml-1 shrink-0 ${
-                    file.approvalStatus === "approved"
-                      ? "bg-green-100 text-green-700"
-                      : file.approvalStatus === "rejected"
-                        ? "bg-red-100 text-red-700"
-                        : "bg-amber-100 text-amber-700"
-                  }`}
+                <ApprovalTooltip
+                  note={file.approvalNote}
+                  reviewerName={file.approvedBy?.name}
                 >
-                  {file.approvalStatus === "approved"
-                    ? "✓ Approved"
-                    : file.approvalStatus === "rejected"
-                      ? "✗ Rejected"
-                      : "⏳ Pending"}
-                </span>
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onApprovalDetail?.(file);
+                    }}
+                    className={`text-xs px-1.5 py-0.5 rounded-full font-medium ml-1 shrink-0 cursor-pointer
+                                transition-opacity hover:opacity-80 ${
+                                  file.approvalStatus === "approved"
+                                    ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400"
+                                    : file.approvalStatus === "rejected"
+                                      ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-400"
+                                      : "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400"
+                                }`}
+                  >
+                    {file.approvalStatus === "approved"
+                      ? "✓ Approved"
+                      : file.approvalStatus === "rejected"
+                        ? "✗ Rejected"
+                        : "⏳ Pending"}
+                  </span>
+                </ApprovalTooltip>
               )}
+
               {file.isLocked && (
-                <span className="text-xs px-1.5 py-0.5 rounded-full font-medium ml-1 shrink-0 bg-gray-100 text-gray-600">
+                <span className="text-xs px-1.5 py-0.5 rounded-full font-medium ml-1 shrink-0 bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
                   🔒 Locked
                 </span>
               )}
             </button>
+
+            {/* Star column */}
+            {hasStar && (
+              <div
+                className="col-span-1 flex items-center justify-center"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  onClick={() => onStar!(file)}
+                  className="p-1 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                  title={file.isStarred ? "Unstar" : "Star"}
+                >
+                  <Star
+                    size={14}
+                    className={
+                      file.isStarred
+                        ? "text-yellow-400 fill-yellow-400"
+                        : "text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                    }
+                  />
+                </button>
+              </div>
+            )}
 
             {/* Type */}
             <div className="col-span-2">
@@ -308,14 +437,13 @@ export default function FileList({
                 })}
               </span>
 
-              {/* Actions menu */}
               <div className="relative">
                 <button
                   onClick={() =>
                     setActiveMenu(activeMenu === file.id ? null : file.id)
                   }
                   className="p-1 rounded-lg opacity-0 group-hover:opacity-100
-           hover:bg-gray-100 dark:hover:bg-gray-700 transition-opacity text-gray-400 dark:text-gray-500"
+                             hover:bg-gray-100 dark:hover:bg-gray-700 transition-opacity text-gray-400 dark:text-gray-500"
                 >
                   <MoreVertical size={14} />
                 </button>
@@ -326,81 +454,64 @@ export default function FileList({
                       className="fixed inset-0 z-10"
                       onClick={() => setActiveMenu(null)}
                     />
-                    <div
-                      className="absolute right-0 top-full mb-1 w-40 bg-white dark:bg-gray-900
-                                    border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-20 p-1"
-                    >
+                    <div className="absolute right-0 top-full mb-1 w-44 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-20 p-1">
                       <button
                         onClick={() => {
                           onFileClick(file);
                           setActiveMenu(null);
                         }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm
-                                   text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                       >
                         <Eye size={14} /> Preview
                       </button>
-                      {onStar && (
-                        <button
-                          onClick={() => {
-                            onStar(file);
-                            setActiveMenu(null);
-                          }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-sm
-               text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                        >
-                          <Star size={14} />{" "}
-                          {file.isStarred ? "Unstar" : "Star"}
-                        </button>
-                      )}
-                      {onRename && (
+                      {fileCan(file.id, "edit_file_attrs") && onRename && (
                         <button
                           onClick={() => {
                             onRename(file);
                             setActiveMenu(null);
                           }}
-                          className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                         >
                           <Pencil size={14} /> Rename
                         </button>
                       )}
-                      <button
-                        onClick={async () => {
-                          try {
-                            const res = await fetch(
-                              `/api/files/${file.id}/download`,
-                            );
-                            if (!res.ok) {
-                              alert(
-                                "Download not available yet — storage not connected",
+                      {fileCan(file.id, "download_files") && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const res = await fetch(
+                                `/api/files/${file.id}/download`,
                               );
-                              return;
+                              if (!res.ok) {
+                                alert(
+                                  "Download not available yet — storage not connected",
+                                );
+                                return;
+                              }
+                              const blob = await res.blob();
+                              const url = URL.createObjectURL(blob);
+                              const link = document.createElement("a");
+                              link.href = url;
+                              link.download = file.name;
+                              link.click();
+                              URL.revokeObjectURL(url);
+                            } catch {
+                              alert("Download failed");
                             }
-                            const blob = await res.blob();
-                            const url = URL.createObjectURL(blob);
-                            const link = document.createElement("a");
-                            link.href = url;
-                            link.download = file.name;
-                            link.click();
-                            URL.revokeObjectURL(url); // ✅ clean up memory
-                          } catch {
-                            alert("Download failed");
-                          }
-                          setActiveMenu(null);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm
-             text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                      >
-                        <Download size={14} /> Download
-                      </button>
-                      {onShare && (
+                            setActiveMenu(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                        >
+                          <Download size={14} /> Download
+                        </button>
+                      )}
+                      {fileCan(file.id, "share_files") && onShare && (
                         <button
                           onClick={() => {
                             onShare(file);
                             setActiveMenu(null);
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-sm
-               text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                         >
                           <Shield size={14} /> Permissions
                         </button>
@@ -422,36 +533,38 @@ export default function FileList({
                             onVersions(file);
                             setActiveMenu(null);
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-sm
-               text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                         >
                           <History size={14} /> Version History
                         </button>
                       )}
-                      {onMove && (
+                      {fileCan(file.id, "add_files") && onMove && (
                         <button
                           onClick={() => {
                             onMove(file);
                             setActiveMenu(null);
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-sm
-               text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                         >
                           <FolderInput size={14} /> Move to folder
                         </button>
                       )}
-                      {onSubmitApproval && !file.approvalStatus && (
-                        <button
-                          onClick={() => {
-                            onSubmitApproval(file);
-                            setActiveMenu(null);
-                          }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                        >
-                          <CheckCircle size={14} /> Submit for approval
-                        </button>
-                      )}
-                      {onLock && (
+                      {fileCan(file.id, "edit_file_attrs") &&
+                        onSubmitApproval &&
+                        (!file.approvalStatus ||
+                          file.approvalStatus === "rejected") && (
+                          <button
+                            onClick={() => {
+                              onSubmitApproval(file);
+                              setActiveMenu(null);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                          >
+                            <CheckCircle size={14} /> Submit for approval
+                          </button>
+                        )}
+                      {/* Lock/Unlock is strictly for MANAGER+ or file owner (handled separately by backend, but hidden here to avoid confusion for EDITORs who don't own it) */}
+                      {(isLockPrivileged || file.uploadedById === user?.id) && onLock && (
                         <button
                           onClick={() => {
                             onLock(file);
@@ -462,42 +575,52 @@ export default function FileList({
                           {file.isLocked ? "🔓 Unlock" : "🔒 Lock"}
                         </button>
                       )}
-                      {onAssignTag && (
+                      {fileCan(file.id, "edit_file_attrs") && onAssignTag && (
                         <button
                           onClick={() => {
                             onAssignTag(file);
                             setActiveMenu(null);
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-sm
-               text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                         >
                           <Tag size={14} /> Assign tag
                         </button>
                       )}
-                      <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
+                      {fileCan(file.id, "edit_file_attrs") && onAssignCategory && (
                         <button
                           onClick={() => {
-                            onDelete(file);
+                            onAssignCategory(file);
                             setActiveMenu(null);
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-sm
-                                     text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg"
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                         >
-                          <Trash2 size={14} /> Delete
+                          <Hash size={14} /> Assign category
                         </button>
-
-                        {onMetadata && (
+                      )}
+                      {fileCan(file.id, "edit_file_attrs") && onMetadata && (
+                        <button
+                          onClick={() => {
+                            onMetadata(file);
+                            setActiveMenu(null);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                        >
+                          <Info size={14} /> Metadata
+                        </button>
+                      )}
+                      {fileCan(file.id, "delete_files") && (
+                        <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
                           <button
                             onClick={() => {
-                              onMetadata(file);
+                              onDelete(file);
                               setActiveMenu(null);
                             }}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg"
                           >
-                            <Info size={14} /> Metadata
+                            <Trash2 size={14} /> Delete
                           </button>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   </>
                 )}

@@ -1,6 +1,6 @@
 import { Router, Response } from "express";
 import { z } from "zod";
-import { verifyAuth, AuthRequest } from "../middleware/auth";
+import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import { createAuditLog } from "../services/audit.service";
 
@@ -69,6 +69,32 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: "Failed to fetch folders" });
   }
 });
+// ─── GET /api/folders/all — flat list for sidebar tree ───────────────────────
+router.get("/all", verifyAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const folders = await prisma.folder.findMany({
+      where: { tenantId: req.user!.tenantId, isDeleted: false },
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+        createdAt: true,
+        isStarred: true,
+        _count: {
+          select: {
+            files: { where: { isDeleted: false } },
+            children: { where: { isDeleted: false } },
+          },
+        },
+      },
+    });
+    res.json({ folders });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch folders" });
+  }
+});
 
 // ─── POST /api/folders ────────────────────────────────────────────────────────
 const createFolderSchema = z.object({
@@ -80,10 +106,43 @@ const createFolderSchema = z.object({
 router.post("/", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
     const { name, parentId, categoryId } = createFolderSchema.parse(req.body);
+    const { userId, tenantId, role } = req.user!;
+    const isPrivileged = [
+      "SUPERADMIN",
+      "ORG_ADMIN",
+      "MANAGER",
+      "EDITOR",
+    ].includes(role);
+
+    // VIEWERs can only create folders inside a folder they have write access to
+    if (!isPrivileged) {
+      if (!parentId) {
+        res
+          .status(403)
+          .json({ error: "You don't have permission to create folders here." });
+        return;
+      }
+      const perm = await prisma.permission.findFirst({
+        where: {
+          resourceType: "folder",
+          resourceId: parentId,
+          OR: [{ grantedTo: "all" }, { grantedTo: "user", userId }],
+          AND: [
+            { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+          ],
+        },
+      });
+      if (!perm || !["write", "delete", "admin"].includes(perm.action)) {
+        res
+          .status(403)
+          .json({ error: "You don't have permission to create folders here." });
+        return;
+      }
+    }
 
     if (parentId) {
       const parent = await prisma.folder.findFirst({
-        where: { id: parentId, tenantId: req.user!.tenantId, isDeleted: false },
+        where: { id: parentId, tenantId, isDeleted: false },
       });
       if (!parent) {
         res.status(400).json({ error: "Parent folder not found" });
@@ -134,6 +193,7 @@ router.post("/", verifyAuth, async (req: AuthRequest, res: Response) => {
 router.patch(
   "/:id/restore",
   verifyAuth,
+  requireRole("ORG_ADMIN", "MANAGER", "SUPERADMIN", "EDITOR"),
   async (req: AuthRequest, res: Response) => {
     if (!isValidUUID(req.params.id)) {
       res.status(400).json({ error: "Invalid folder ID" });
@@ -220,6 +280,19 @@ router.patch("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
     res.status(400).json({ error: "Invalid folder ID" });
     return;
   }
+  const { role } = req.user!;
+  const isPrivileged = [
+    "SUPERADMIN",
+    "ORG_ADMIN",
+    "MANAGER",
+    "EDITOR",
+  ].includes(role);
+  if (!isPrivileged) {
+    res
+      .status(403)
+      .json({ error: "You don't have permission to modify folders." });
+    return;
+  }
   try {
     const { name, categoryId } = z
       .object({
@@ -276,11 +349,103 @@ router.patch("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: "Failed to update folder" });
   }
 });
+// ─── DELETE /api/folders/:id/permanent ───────────────────────────────────────
+router.delete(
+  "/:id/permanent",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "MANAGER", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.id)) {
+      res.status(400).json({ error: "Invalid folder ID" });
+      return;
+    }
+    try {
+      const folder = await prisma.folder.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: true,
+        },
+      });
+      if (!folder) {
+        res.status(404).json({ error: "Folder not found in trash" });
+        return;
+      }
+
+      // Collect all descendant folder IDs so we delete the whole tree
+      const descendantIds = await getAllDescendantFolderIds(
+        req.params.id,
+        req.user!.tenantId,
+      );
+      const allFolderIds = [req.params.id, ...descendantIds];
+
+      // Delete all files inside these folders first, then the folders
+      await prisma.$transaction([
+        prisma.fileTag.deleteMany({
+          where: { file: { folderId: { in: allFolderIds } } },
+        }),
+        prisma.permission.deleteMany({
+          where: { folder: { id: { in: allFolderIds } } },
+        }),
+        prisma.oneTimeLink.deleteMany({
+          where: { file: { folderId: { in: allFolderIds } } },
+        }),
+        prisma.fileVersion.deleteMany({
+          where: { file: { folderId: { in: allFolderIds } } },
+        }),
+        prisma.fileMetadata.deleteMany({
+          where: { file: { folderId: { in: allFolderIds } } },
+        }),
+        prisma.fileComment.deleteMany({
+          where: { file: { folderId: { in: allFolderIds } } },
+        }),
+        prisma.file.deleteMany({
+          where: {
+            folderId: { in: allFolderIds },
+            tenantId: req.user!.tenantId,
+          },
+        }),
+        prisma.folder.deleteMany({
+          where: { id: { in: allFolderIds }, tenantId: req.user!.tenantId },
+        }),
+      ]);
+
+      await createAuditLog({
+        action: "folder.delete.permanent",
+        userId: req.user!.userId,
+        tenantId: req.user!.tenantId,
+        resourceType: "folder",
+        resourceId: req.params.id,
+        resourceName: folder.name,
+        metadata: { deletedSubfolders: descendantIds.length },
+        req,
+      });
+
+      res.json({ message: "Folder permanently deleted" });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Failed to permanently delete folder" });
+    }
+  },
+);
 
 // ─── DELETE /api/folders/:id — soft delete folder + ALL descendants ───────────
 router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
   if (!isValidUUID(req.params.id)) {
     res.status(400).json({ error: "Invalid folder ID" });
+    return;
+  }
+  const { role } = req.user!;
+  const isPrivileged = [
+    "SUPERADMIN",
+    "ORG_ADMIN",
+    "MANAGER",
+    "EDITOR",
+  ].includes(role);
+  if (!isPrivileged) {
+    res
+      .status(403)
+      .json({ error: "You don't have permission to delete folders." });
     return;
   }
   try {
@@ -297,12 +462,33 @@ router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    // FIX #1: recursively collect all descendants, delete everything in one tx
     const descendantIds = await getAllDescendantFolderIds(
       req.params.id,
       req.user!.tenantId,
     );
     const allFolderIds = [req.params.id, ...descendantIds];
+
+    // Check if any file in these folders is locked and the user is not privileged to bypass
+    const isLockPrivileged = ["SUPERADMIN", "ORG_ADMIN", "MANAGER"].includes(
+      role,
+    );
+    if (!isLockPrivileged) {
+      const lockedFiles = await prisma.file.findFirst({
+        where: {
+          folderId: { in: allFolderIds },
+          tenantId: req.user!.tenantId,
+          isLocked: true,
+          isDeleted: false,
+        },
+      });
+
+      if (lockedFiles) {
+        res.status(423).json({
+          error: "Cannot delete folder because it contains locked files.",
+        });
+        return;
+      }
+    }
 
     await prisma.$transaction([
       prisma.folder.updateMany({
@@ -353,7 +539,11 @@ router.get(
       // Walk up the tree — max 20 levels to prevent infinite loops
       let depth = 0;
       while (currentId && depth < 20) {
-        const currentFolder: { id: string; name: string; parentId: string | null } | null = await prisma.folder.findFirst({
+        const currentFolder: {
+          id: string;
+          name: string;
+          parentId: string | null;
+        } | null = await prisma.folder.findFirst({
           where: {
             id: currentId as string,
             tenantId: req.user!.tenantId,

@@ -1,4 +1,12 @@
-import { FileText, Image, Film, Music, Archive, File } from "lucide-react";
+import {
+  FileText,
+  Image,
+  Film,
+  Music,
+  Archive,
+  File,
+  Star,
+} from "lucide-react";
 import clsx from "clsx";
 
 interface FileItem {
@@ -7,25 +15,51 @@ interface FileItem {
   mimeType: string;
   size: number;
   createdAt: string;
+  isStarred?: boolean;
 }
 
 interface FileGridProps {
   files: FileItem[];
   onFileClick: (file: FileItem) => void;
+  onStar?: (file: FileItem) => void;
 }
 
 const getFileIcon = (mimeType: string) => {
   if (mimeType.startsWith("image/"))
-    return { icon: Image, color: "text-green-500", bg: "bg-green-50" };
+    return {
+      icon: Image,
+      color: "text-green-500",
+      bg: "bg-green-50 dark:bg-green-900/30",
+    };
   if (mimeType.startsWith("video/"))
-    return { icon: Film, color: "text-purple-500", bg: "bg-purple-50" };
+    return {
+      icon: Film,
+      color: "text-purple-500",
+      bg: "bg-purple-50 dark:bg-purple-900/30",
+    };
   if (mimeType.startsWith("audio/"))
-    return { icon: Music, color: "text-pink-500", bg: "bg-pink-50" };
+    return {
+      icon: Music,
+      color: "text-pink-500",
+      bg: "bg-pink-50 dark:bg-pink-900/30",
+    };
   if (mimeType.includes("pdf"))
-    return { icon: FileText, color: "text-red-500", bg: "bg-red-50" };
+    return {
+      icon: FileText,
+      color: "text-red-500",
+      bg: "bg-red-50 dark:bg-red-900/30",
+    };
   if (mimeType.includes("zip") || mimeType.includes("rar"))
-    return { icon: Archive, color: "text-yellow-500", bg: "bg-yellow-50" };
-  return { icon: File, color: "text-blue-500", bg: "bg-blue-50" };
+    return {
+      icon: Archive,
+      color: "text-yellow-500",
+      bg: "bg-yellow-50 dark:bg-yellow-900/30",
+    };
+  return {
+    icon: File,
+    color: "text-primary-500",
+    bg: "bg-pink-50 dark:bg-pink-900/40",
+  };
 };
 
 const formatBytes = (bytes: number) => {
@@ -44,7 +78,11 @@ const formatDate = (dateStr: string) => {
   });
 };
 
-export default function FileGrid({ files, onFileClick }: FileGridProps) {
+export default function FileGrid({
+  files,
+  onFileClick,
+  onStar,
+}: FileGridProps) {
   if (files.length === 0) return null;
 
   return (
@@ -52,31 +90,61 @@ export default function FileGrid({ files, onFileClick }: FileGridProps) {
       {files.map((file) => {
         const { icon: Icon, color, bg } = getFileIcon(file.mimeType);
         return (
-          <button
-            key={file.id}
-            onClick={() => onFileClick(file)}
-            className="flex flex-col items-center p-4 bg-white border border-gray-200
-                       rounded-xl hover:border-blue-300 hover:shadow-sm transition-all
-                       text-left group"
-          >
-            <div
-              className={clsx(
-                "w-12 h-12 rounded-xl flex items-center justify-center mb-3",
-                bg,
-              )}
+          // Outer wrapper is relative so the star button can be positioned absolutely
+          <div key={file.id} className="relative group">
+            <button
+              onClick={() => onFileClick(file)}
+              className="w-full flex flex-col items-center p-4 bg-white dark:bg-gray-800
+                         border border-gray-200 dark:border-gray-700 rounded-xl
+                         hover:border-pink-300 dark:hover:border-pink-500 hover:shadow-sm
+                         transition-all text-left"
             >
-              <Icon size={22} className={color} />
-            </div>
-            <span className="text-xs font-medium text-gray-800 truncate w-full text-center">
-              {file.name}
-            </span>
-            <span className="text-xs text-gray-400 mt-1">
-              {formatBytes(file.size)}
-            </span>
-            <span className="text-xs text-gray-400">
-              {formatDate(file.createdAt)}
-            </span>
-          </button>
+              <div
+                className={clsx(
+                  "w-12 h-12 rounded-xl flex items-center justify-center mb-3",
+                  bg,
+                )}
+              >
+                <Icon size={22} className={color} />
+              </div>
+              <span className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate w-full text-center">
+                {file.name}
+              </span>
+              <span className="text-xs text-gray-400 mt-1">
+                {formatBytes(file.size)}
+              </span>
+              <span className="text-xs text-gray-400">
+                {formatDate(file.createdAt)}
+              </span>
+            </button>
+
+            {/* Star button — top-right corner, always visible if starred, else shows on hover */}
+            {onStar && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStar(file);
+                }}
+                className={clsx(
+                  "absolute top-2 right-2 p-1 rounded-lg transition-all",
+                  "hover:bg-gray-100 dark:hover:bg-gray-700",
+                  file.isStarred
+                    ? "opacity-100" // always visible if starred
+                    : "opacity-0 group-hover:opacity-100", // visible on hover otherwise
+                )}
+                title={file.isStarred ? "Unstar" : "Star"}
+              >
+                <Star
+                  size={13}
+                  className={
+                    file.isStarred
+                      ? "text-yellow-400 fill-yellow-400"
+                      : "text-gray-400 dark:text-gray-500"
+                  }
+                />
+              </button>
+            )}
+          </div>
         );
       })}
     </div>

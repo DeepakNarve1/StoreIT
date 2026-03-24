@@ -30,22 +30,30 @@ async function main() {
   });
   console.log("✅ Tenant created:", tenant.name);
 
-  // Create superadmin user
-  const hashedPassword = await bcrypt.hash("Admin@123", 12);
-  const admin = await prisma.user.upsert({
-    where: { email: "admin@acme.com" },
-    update: {},
-    create: {
-      name: "Admin User",
-      email: "admin@acme.com",
-      password: hashedPassword,
-      role: "ORG_ADMIN",
-      tenantId: tenant.id,
-      isActive: true,
-    },
-  });
-  console.log("✅ Admin user created:", admin.email);
-  console.log("🔑 Password: Admin@123");
+  // Create test users for different roles in Acme Corp
+  const rolesToTest = [
+    { role: "ORG_ADMIN", email: "admin@acme.com", name: "Admin User", pass: "Admin@123" },
+    { role: "MANAGER", email: "manager@acme.com", name: "Manager User", pass: "Manager@123" },
+    { role: "EDITOR", email: "editor@acme.com", name: "Editor User", pass: "Editor@123" },
+    { role: "VIEWER", email: "viewer@acme.com", name: "Viewer User", pass: "Viewer@123" },
+  ];
+
+  for (const t of rolesToTest) {
+    const pwhash = await bcrypt.hash(t.pass, 12);
+    await prisma.user.upsert({
+      where: { email: t.email },
+      update: {},
+      create: {
+        name: t.name,
+        email: t.email,
+        password: pwhash,
+        role: t.role as any,
+        tenantId: tenant.id,
+        isActive: true,
+      },
+    });
+    console.log(`✅ [Acme Corp] ${t.role} created: ${t.email} / ${t.pass}`);
+  }
 
   // ── Create default categories ──────────────────────────────────────────────
   const categoryNames = [

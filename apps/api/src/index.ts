@@ -1,7 +1,8 @@
-// FIX #9: removed duplicate dotenv.config() call — only one load needed
+// Env validation FIRST — fails fast if required vars are missing
+import "./utils/env";
 import "dotenv/config";
 
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
@@ -19,6 +20,8 @@ import auditRoutes from "./routes/audit.routes";
 import searchRoutes from "./routes/search.routes";
 import tagsRoutes from "./routes/tags.routes";
 import billingRoutes from "./routes/billing.routes";
+import { globalErrorHandler } from "./middleware/errorHandler";
+import { prisma, pool } from "./utils/prisma";
 
 import path from "path";
 
@@ -41,7 +44,6 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser() as any);
 
 // ─── RATE LIMITING ────────────────────────────────────────────────────────────
-// General API limiter — auth, reads, etc.
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
@@ -49,8 +51,6 @@ const generalLimiter = rateLimit({
   skip: (req) => req.path.startsWith("/files/upload"),
 });
 
-// FIX #6: Upload gets its own generous limiter so bulk uploads
-// (20 files at once) don't hit 429 after the global 100-req cap.
 const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 500,
@@ -61,12 +61,19 @@ app.use("/api/", generalLimiter);
 app.use("/api/files/upload", uploadLimiter);
 
 // ─── HEALTH CHECK ────────────────────────────────────────────────────────────
-app.get("/health", (req, res) => {
-  res.json({
-    status: "ok",
-    app: "StoreIT API",
-    time: new Date().toISOString(),
-  });
+app.get("/health", async (_req: Request, res: Response) => {
+  try {
+    // Verify DB connectivity on every health check
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({
+      status: "ok",
+      app: "StoreIT API",
+      db: "connected",
+      time: new Date().toISOString(),
+    });
+  } catch {
+    res.status(503).json({ status: "error", db: "unreachable" });
+  }
 });
 
 // ─── ROUTES ──────────────────────────────────────────────────────────────────
@@ -85,19 +92,47 @@ app.use("/api/tags", tagsRoutes);
 app.use("/api/billing", billingRoutes);
 
 // ─── 404 HANDLER ─────────────────────────────────────────────────────────────
-app.use("*", (req, res) => {
+app.use("*", (_req: Request, res: Response) => {
   res.status(404).json({ error: "Route not found" });
 });
 
+// ─── GLOBAL ERROR HANDLER (must be last) ────────────────────────────────────
+app.use(
+  (err: unknown, req: Request, res: Response, next: NextFunction) =>
+    globalErrorHandler(err, req, res, next),
+);
+
 // ─── GRACEFUL SHUTDOWN ────────────────────────────────────────────────────────
-process.on("SIGTERM", () => {
-  console.log("SIGTERM received — shutting down gracefully");
-  process.exit(0);
+async function shutdown(signal: string) {
+  console.log(`\n${signal} received — shutting down gracefully…`);
+  try {
+    await prisma.$disconnect();
+    await pool.end();
+    console.log("✅ Database connections closed.");
+  } catch (err) {
+    console.error("Error during shutdown:", err);
+  } finally {
+    process.exit(0);
+  }
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
+// ─── UNHANDLED REJECTIONS / EXCEPTIONS ───────────────────────────────────────
+process.on("unhandledRejection", (reason) => {
+  console.error("[Unhandled Rejection]", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[Uncaught Exception]", err);
+  shutdown("uncaughtException");
 });
 
 // ─── START SERVER ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`✅ StoreIT API running on http://localhost:${PORT}`);
+  console.log(`   Environment: ${process.env.NODE_ENV || "development"}`);
 });
 
 export default app;

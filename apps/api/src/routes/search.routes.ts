@@ -7,10 +7,20 @@ const router = Router();
 // ─── GET /api/search?q=query&type=file|folder|all ─────────────────────────────
 router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
-    const { q, type = "all", categoryId, mimeType, limit = "20" } = req.query;
+    const { q, type = "all", categoryId, limit = "20" } = req.query;
 
     const query = String(q || "").trim();
     const limitNum = Math.min(parseInt(String(limit)), 50);
+    const MIME_FILTERS: Record<string, string> = {
+      pdf: "application/pdf",
+      image: "image/",
+      video: "video/",
+      audio: "audio/",
+      excel: "spreadsheetml",
+      zip: "zip",
+    };
+    const mimeFilter = MIME_FILTERS[String(type)] ?? null;
+    const resolvedType = mimeFilter ? "file" : String(type);
 
     if (!query || query.length < 1) {
       res.json({ files: [], folders: [], categories: [], total: 0 });
@@ -43,16 +53,16 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
 
     // ── Search files ──────────────────────────────────────────────────────────
     const files =
-      type === "all" || type === "file"
+      resolvedType === "all" || resolvedType === "file"
         ? await prisma.file.findMany({
             where: {
               tenantId,
               isDeleted: false,
               name: { contains: query, mode: "insensitive" },
-              ...(mimeType
+              ...(mimeFilter
                 ? {
                     mimeType: {
-                      contains: String(mimeType),
+                      contains: String(mimeFilter),
                       mode: "insensitive",
                     },
                   }
@@ -85,7 +95,7 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
 
     // ── Search folders ────────────────────────────────────────────────────────
     const folders =
-      type === "all" || type === "folder"
+      resolvedType === "all" || resolvedType === "folder"
         ? await prisma.folder.findMany({
             where: {
               tenantId,
@@ -113,7 +123,7 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
 
     // ── Search categories ─────────────────────────────────────────────────────
     const categories =
-      type === "all"
+      resolvedType === "all"
         ? await prisma.category.findMany({
             where: {
               tenantId,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   LayoutGrid,
@@ -13,6 +13,8 @@ import {
   Hash,
   FolderInput,
   Download,
+  Loader2,
+  MoreVertical,
 } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import FileGrid from "../components/files/FileGrid";
@@ -25,10 +27,14 @@ import api from "../api/axios";
 import FileVersionsModal from "../components/files/FileVersionsModal";
 import MoveFileModal from "../components/files/MoveFileModal";
 import AssignCategoryModal from "../components/files/AssignCategoryModal";
+import AssignTagModal from "../components/files/AssignTagModal.tsx";
 import { useToast } from "../components/ui/Toast";
 import FileMetadataPanel from "../components/files/FileMetadataPanel";
 import FileCommentsPanel from "../components/files/FileCommentsPanel";
 import { useAuthStore } from "../store/authStore";
+import ApprovalDetailPanel from "../components/files/ApprovalDetailPanel";
+import { useFileCapabilities } from "../hooks/useFileCapabilities";
+import DeleteModal from "../components/common/DeleteModal";
 
 type ViewMode = "grid" | "list";
 
@@ -42,10 +48,20 @@ interface StoreITem {
 export default function FileBrowserPage() {
   const { folderId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
 
   const [viewMode, setViewMode] = useState<ViewMode>("list");
-  const [showUpload, setShowUpload] = useState(false);
+  const [showUpload, setShowUpload] = useState(
+    () => searchParams.get("upload") === "1",
+  );
+
+  // Sync upload zone with ?upload=1 query param (e.g. from TopBar button)
+  useEffect(() => {
+    if (searchParams.get("upload") === "1") {
+      setShowUpload(true);
+    }
+  }, [searchParams]);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [previewFile, setPreviewFile] = useState<any>(null);
@@ -66,6 +82,7 @@ export default function FileBrowserPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [draggedFileId, setDraggedFileId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [folderMenuId, setFolderMenuId] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [commentsFile, setCommentsFile] = useState<any>(null);
   const [categoryResource, setCategoryResource] = useState<{
@@ -80,8 +97,22 @@ export default function FileBrowserPage() {
   } | null>(null);
   const [approvalFile, setApprovalFile] = useState<any>(null);
   const [renameName, setRenameName] = useState("");
-  // FIX (Bug 2): Controlled state for approval note — replaces DOM getElementById reads
   const [approvalNote, setApprovalNote] = useState("");
+  const [approvalDetailFile, setApprovalDetailFile] = useState<any>(null);
+
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [showBulkDelete, setShowBulkDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // ── Tag modal state ───────────────────────────────────────────────────────
+  // Stores the full file object so AssignTagModal can read its current tags
+  const [tagFile, setTagFile] = useState<any>(null);
+
+  // ── Bulk download progress state ──────────────────────────────────────────
+  const [isZipping, setIsZipping] = useState(false);
+  const [zipProgress, setZipProgress] = useState<
+    "zipping" | "downloading" | null
+  >(null);
 
   // Escape key closes any open modal/panel
   useEffect(() => {
@@ -92,8 +123,16 @@ export default function FileBrowserPage() {
         setApprovalNote("");
         return;
       }
+      if (approvalDetailFile) {
+        setApprovalDetailFile(null);
+        return;
+      }
       if (renameFile) {
         setRenameFile(null);
+        return;
+      }
+      if (tagFile) {
+        setTagFile(null);
         return;
       }
       if (metadataFile) {
@@ -137,7 +176,9 @@ export default function FileBrowserPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
     approvalFile,
+    approvalDetailFile,
     renameFile,
+    tagFile,
     metadataFile,
     commentsFile,
     versionsFile,
@@ -150,7 +191,7 @@ export default function FileBrowserPage() {
     approvalNote,
   ]);
 
-  // ── Fetch files ─────────────────────────────────────────────────────────────
+  // ── Fetch files ───────────────────────────────────────────────────────────
   const { data: filesData, isLoading: filesLoading } = useQuery({
     queryKey: ["files", folderId ?? "root"],
     queryFn: async () => {
@@ -159,8 +200,15 @@ export default function FileBrowserPage() {
     },
   });
   const { user } = useAuthStore();
+  const canWrite = ["SUPERADMIN", "ORG_ADMIN", "MANAGER", "EDITOR"].includes(
+    user?.role ?? "",
+  );
 
-  // ── Fetch subfolders ─────────────────────────────────────────────────────────
+  // ── Granular per-file capabilities for VIEWER role ───────────────────────
+  const fileIds = (filesData?.files ?? []).map((f: any) => f.id as string);
+  const { capMap } = useFileCapabilities(fileIds);
+
+  // ── Fetch subfolders ──────────────────────────────────────────────────────
   const { data: foldersData, isLoading: foldersLoading } = useQuery({
     queryKey: ["folders", folderId ?? "root"],
     queryFn: async () => {
@@ -216,6 +264,22 @@ export default function FileBrowserPage() {
     onError: () => useToast.getState().add("Failed to update lock", "error"),
   });
 
+  const starMutation = useMutation({
+    mutationFn: async (file: any) => {
+      await api.patch(`/files/${file.id}/star`);
+    },
+    onSuccess: (_, file) => {
+      queryClient.invalidateQueries({
+        queryKey: ["files", folderId ?? "root"],
+      });
+      queryClient.invalidateQueries({ queryKey: ["files", "starred"] });
+      useToast
+        .getState()
+        .add(file.isStarred ? "Removed from starred" : "Added to starred");
+    },
+    onError: () => useToast.getState().add("Failed to update star", "error"),
+  });
+
   const approveMutation = useMutation({
     mutationFn: async ({
       fileId,
@@ -233,7 +297,6 @@ export default function FileBrowserPage() {
         queryKey: ["files", folderId ?? "root"],
       });
       setApprovalFile(null);
-      // FIX (Bug 2): Clear controlled note state on success
       setApprovalNote("");
       useToast
         .getState()
@@ -243,7 +306,6 @@ export default function FileBrowserPage() {
       useToast.getState().add("Failed to process approval", "error"),
   });
 
-  // Fetch categories for selector
   const { data: categoriesData } = useQuery({
     queryKey: ["categories"],
     queryFn: async () => {
@@ -291,6 +353,8 @@ export default function FileBrowserPage() {
       queryClient.invalidateQueries({
         queryKey: ["files", folderId ?? "root"],
       });
+      queryClient.invalidateQueries({ queryKey: ["recent-files"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       setSelectedFiles([]);
       useToast.getState().add(`${ids.length} files deleted`);
     },
@@ -299,10 +363,15 @@ export default function FileBrowserPage() {
 
   const bulkDownload = async () => {
     try {
+      setIsZipping(true);
+      setZipProgress("zipping");
       const res = await api.post(
         "/files/bulk-download",
         { ids: selectedFiles },
-        { responseType: "blob" },
+        {
+          responseType: "blob",
+          onDownloadProgress: () => setZipProgress("downloading"),
+        },
       );
       const url = URL.createObjectURL(new Blob([res.data]));
       const a = document.createElement("a");
@@ -310,19 +379,24 @@ export default function FileBrowserPage() {
       a.download = `storeit-files-${Date.now()}.zip`;
       a.click();
       URL.revokeObjectURL(url);
+      useToast.getState().add(`${selectedFiles.length} files downloaded`);
     } catch {
       useToast.getState().add("Failed to download files", "error");
+    } finally {
+      setIsZipping(false);
+      setZipProgress(null);
     }
   };
 
+  // FIX: renamed inner param to targetFolderId to avoid shadowing useParams folderId
   const dragMove = useMutation({
     mutationFn: async ({
       fileId,
-      folderId,
+      targetFolderId,
     }: {
       fileId: string;
-      folderId: string;
-    }) => api.patch(`/files/${fileId}/move`, { folderId }),
+      targetFolderId: string;
+    }) => api.patch(`/files/${fileId}/move`, { folderId: targetFolderId }),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["files", folderId ?? "root"],
@@ -339,9 +413,13 @@ export default function FileBrowserPage() {
     if (typeFilter === "image") return f.mimeType.startsWith("image/");
     if (typeFilter === "video") return f.mimeType.startsWith("video/");
     if (typeFilter === "word")
-      return f.mimeType.includes("word") || f.mimeType.includes("document");
+      return (
+        f.mimeType.includes("msword") || f.mimeType.includes("wordprocessingml")
+      );
     if (typeFilter === "excel")
-      return f.mimeType.includes("excel") || f.mimeType.includes("spreadsheet");
+      return (
+        f.mimeType.includes("excel") || f.mimeType.includes("spreadsheetml")
+      );
     if (typeFilter === "zip")
       return f.mimeType.includes("zip") || f.mimeType.includes("compressed");
     return true;
@@ -357,11 +435,9 @@ export default function FileBrowserPage() {
   };
 
   const handleFileClick = (file: any) => setPreviewFile(file);
-
   const handleShare = (file: any) => {
     setPermissionsResource({ id: file.id, type: "file", name: file.name });
   };
-
   const handleSort = (col: "name" | "size" | "createdAt" | "mimeType") => {
     if (sortBy === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else {
@@ -369,25 +445,35 @@ export default function FileBrowserPage() {
       setSortDir("asc");
     }
   };
+  const handleDelete = (file: any) => setDeleteTarget(file);
 
-  const handleDelete = async (file: any) => {
-    if (!confirm(`Delete "${file.name}"?`)) return;
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
     try {
-      await api.delete(`/files/${file.id}`);
+      await api.delete(`/files/${deleteTarget.id}`);
       queryClient.invalidateQueries({
         queryKey: ["files", folderId ?? "root"],
       });
-    } catch {
-      alert("Failed to delete file");
+      queryClient.invalidateQueries({ queryKey: ["recent-files"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      useToast.getState().add('File deleted successfully');
+    } catch (e: any) {
+      if (e.response?.data?.error) {
+        useToast.getState().add(e.response.data.error, "error");
+      } else {
+        useToast.getState().add("Failed to delete file", "error");
+      }
+    } finally {
+      setIsDeleting(false);
+      setDeleteTarget(null);
     }
   };
-
   const handleCreateFolder = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFolderName.trim()) return;
     createFolder.mutate(newFolderName.trim());
   };
-
   const handleMove = (file: any) => setMoveFiles([file]);
   const handleFolderAssignCategory = (folder: any) =>
     setCategoryResource({
@@ -399,14 +485,14 @@ export default function FileBrowserPage() {
 
   return (
     <AppShell>
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl max-w-6xl mx-auto">
+      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl max-w-6xl mx-auto p-6">
         {/* Breadcrumb */}
         <div className="flex items-center gap-1 text-sm text-gray-500 mb-4 flex-wrap">
           <Home size={14} className="shrink-0" />
           <span
             onClick={() => navigate("/browse")}
             className={clsx(
-              "cursor-pointer hover:text-gray-800 transition-colors px-1",
+              "cursor-pointer hover:text-gray-800 transition-colors px-1 dark:text-white",
               !folderId && "text-gray-800 font-medium pointer-events-none",
             )}
           >
@@ -432,21 +518,20 @@ export default function FileBrowserPage() {
 
         {/* Toolbar */}
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-          <h1 className="text-base font-semibold text-gray-900">
+          <h1 className="text-base font-semibold text-gray-900 dark:text-white">
             {ancestors.length > 0
               ? ancestors[ancestors.length - 1].name
               : "All Files"}
           </h1>
           <div className="flex items-center gap-2">
-            {/* View toggle */}
-            <div className="flex items-center bg-gray-100 rounded-lg p-1 gap-0.5">
+            <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-1 gap-0.5">
               <button
                 onClick={() => setViewMode("grid")}
                 className={clsx(
                   "p-1.5 rounded-md transition-colors",
                   viewMode === "grid"
-                    ? "bg-white text-gray-800 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700",
+                    ? "bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 shadow-sm"
+                    : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200",
                 )}
               >
                 <LayoutGrid size={15} />
@@ -456,35 +541,36 @@ export default function FileBrowserPage() {
                 className={clsx(
                   "p-1.5 rounded-md transition-colors",
                   viewMode === "list"
-                    ? "bg-white text-gray-800 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700",
+                    ? "bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 shadow-sm"
+                    : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200",
                 )}
               >
                 <List size={15} />
               </button>
             </div>
-
-            {/* New Folder */}
-            <button
-              onClick={() => setShowNewFolder(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm
-                         text-gray-700 border border-gray-300 rounded-lg
-                         hover:bg-gray-50 transition-colors font-medium"
-            >
-              <FolderPlus size={15} />
-              New Folder
-            </button>
-
-            {/* Upload */}
-            <button
-              onClick={() => setShowUpload(!showUpload)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm
-                         bg-blue-600 hover:bg-blue-700 text-white rounded-lg
-                         transition-colors font-medium"
-            >
-              <Upload size={15} />
-              Upload
-            </button>
+            {canWrite && (
+              <button
+                onClick={() => setShowNewFolder(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm
+                           text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg
+                           hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors font-medium"
+              >
+                <FolderPlus size={15} /> New Folder
+              </button>
+            )}
+            {(canWrite ||
+              // VIEWERs with an add_files capability on ANY file in this folder
+              // (checked via capMap on already-loaded files — good enough signal)
+              fileIds.some((id) => capMap[id]?.add_files === true)) && (
+              <button
+                onClick={() => setShowUpload(!showUpload)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm
+                           bg-primary-500 hover:bg-primary-600 text-white rounded-lg
+                           transition-colors font-medium"
+              >
+                <Upload size={15} /> Upload
+              </button>
+            )}
           </div>
         </div>
 
@@ -492,23 +578,25 @@ export default function FileBrowserPage() {
         {showNewFolder && (
           <form
             onSubmit={handleCreateFolder}
-            className="flex items-center gap-2 mb-4 p-3 bg-blue-50
-               border border-blue-200 rounded-xl flex-wrap"
+            className="flex items-center gap-2 mb-4 p-3 bg-pink-50 dark:bg-pink-900/20
+               border border-pink-100 dark:border-pink-800 rounded-xl flex-wrap"
           >
-            <Folder size={16} className="text-blue-500 shrink-0" />
+            <Folder size={16} className="text-primary-500 shrink-0" />
             <input
               autoFocus
               value={newFolderName}
               onChange={(e) => setNewFolderName(e.target.value)}
               placeholder="Folder name…"
-              className="flex-1 min-w-32 bg-white border border-blue-200 rounded-lg
-                 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className="flex-1 min-w-32 bg-white dark:bg-gray-800 border border-pink-100 dark:border-gray-700
+                         dark:text-gray-100 rounded-lg px-3 py-1.5 text-sm focus:outline-none
+                         focus:ring-2 focus:ring-primary-500 dark:focus:ring-pink-500"
             />
             <select
               value={newFolderCategoryId}
               onChange={(e) => setNewFolderCategoryId(e.target.value)}
-              className="px-3 py-1.5 bg-white border border-blue-200 rounded-lg
-                 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-pink-100 dark:border-gray-700
+                         dark:text-gray-100 rounded-lg text-sm focus:outline-none
+                         focus:ring-2 focus:ring-primary-500 dark:focus:ring-pink-500"
             >
               <option value="">No category</option>
               {categories.map((cat) => (
@@ -520,8 +608,8 @@ export default function FileBrowserPage() {
             <button
               type="submit"
               disabled={!newFolderName.trim() || createFolder.isPending}
-              className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg
-                 hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
+              className="px-3 py-1.5 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600
+                         dark:bg-primary-500 dark:hover:bg-primary-600 disabled:opacity-50 transition-colors font-medium"
             >
               {createFolder.isPending ? "Creating…" : "Create"}
             </button>
@@ -532,7 +620,7 @@ export default function FileBrowserPage() {
                 setNewFolderName("");
                 setNewFolderCategoryId("");
               }}
-              className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+              className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 transition-colors"
             >
               Cancel
             </button>
@@ -551,49 +639,87 @@ export default function FileBrowserPage() {
 
         {/* Bulk action bar */}
         {selectedFiles.length > 0 && (
-          <div
-            className="flex items-center gap-3 mb-4 px-4 py-2.5 bg-blue-50 border
-                  border-blue-200 rounded-xl"
-          >
-            <span className="text-sm font-medium text-blue-700">
-              {selectedFiles.length} selected
-            </span>
-            <div className="flex items-center gap-2 ml-auto">
-              <button
-                onClick={() =>
-                  setMoveFiles(
-                    files.filter((f) => selectedFiles.includes(f.id)),
-                  )
-                }
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-blue-700
-                   bg-white border border-blue-200 rounded-lg hover:bg-blue-50 font-medium"
-              >
-                <FolderInput size={14} /> Move
-              </button>
-              <button
-                onClick={() => {
-                  if (!confirm(`Delete ${selectedFiles.length} files?`)) return;
-                  bulkDelete.mutate(selectedFiles);
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600
-                   bg-white border border-red-200 rounded-lg hover:bg-red-50 font-medium"
-              >
-                <Trash2 size={14} /> Delete
-              </button>
-              <button
-                onClick={bulkDownload}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700
-             bg-white border border-gray-200 rounded-lg hover:bg-gray-50 font-medium"
-              >
-                <Download size={14} /> Download ZIP
-              </button>
-              <button
-                onClick={() => setSelectedFiles([])}
-                className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700"
-              >
-                Cancel
-              </button>
+          <div className="mb-4 rounded-xl border border-pink-100 dark:border-pink-800 overflow-hidden">
+            <div className="flex items-center gap-3 px-4 py-2.5 bg-pink-50 dark:bg-pink-900/20">
+              <span className="text-sm font-medium text-primary-500 dark:text-pink-400">
+                {selectedFiles.length} selected
+              </span>
+              <div className="flex items-center gap-2 ml-auto">
+                {canWrite && (
+                  <button
+                    onClick={() =>
+                      setMoveFiles(
+                        files.filter((f) => selectedFiles.includes(f.id)),
+                      )
+                    }
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-primary-500 dark:text-pink-400
+                               bg-white dark:bg-gray-800 border border-pink-100 dark:border-pink-800 rounded-lg
+                               hover:bg-pink-50 dark:hover:bg-gray-700 font-medium"
+                  >
+                    <FolderInput size={14} /> Move
+                  </button>
+                )}
+                {canWrite && (
+                  <button
+                    onClick={() => setShowBulkDelete(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 dark:text-red-400
+                               bg-white dark:bg-gray-800 border border-red-200 dark:border-red-800 rounded-lg
+                               hover:bg-red-50 dark:hover:bg-gray-700 font-medium"
+                  >
+                    <Trash2 size={14} /> Delete
+                  </button>
+                )}
+                {canWrite && (
+                  <button
+                    onClick={bulkDownload}
+                    disabled={isZipping}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300
+                               bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg
+                               hover:bg-gray-50 dark:hover:bg-gray-700 font-medium disabled:opacity-60
+                               disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isZipping ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <Download size={14} />
+                    )}
+                    {isZipping
+                      ? zipProgress === "downloading"
+                        ? "Downloading…"
+                        : "Zipping…"
+                      : "Download ZIP"}
+                  </button>
+                )}
+                <button
+                  onClick={() => setSelectedFiles([])}
+                  className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
+            {isZipping && (
+              <div className="h-1 w-full bg-pink-100 dark:bg-pink-900/40">
+                <div
+                  className={clsx(
+                    "h-full transition-all duration-500",
+                    zipProgress === "downloading"
+                      ? "bg-green-500 w-full"
+                      : "bg-primary-500 w-2/3 animate-pulse",
+                  )}
+                />
+              </div>
+            )}
+            {isZipping && (
+              <div className="px-4 py-2 bg-pink-50 dark:bg-pink-900/20 border-t border-pink-100 dark:border-pink-900">
+                <p className="text-xs text-primary-500 dark:text-pink-400 flex items-center gap-1.5">
+                  <Loader2 size={11} className="animate-spin shrink-0" />
+                  {zipProgress === "downloading"
+                    ? "ZIP ready — saving to your device…"
+                    : `Building ZIP for ${selectedFiles.length} file${selectedFiles.length !== 1 ? "s" : ""}…`}
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -607,8 +733,8 @@ export default function FileBrowserPage() {
                   onClick={() => setTypeFilter(type)}
                   className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${
                     typeFilter === type
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "bg-white text-gray-600 border-gray-300 hover:border-blue-300"
+                      ? "bg-primary-500 text-white border-primary-500"
+                      : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-500"
                   }`}
                 >
                   {type === "all" ? "All" : type.toUpperCase()}
@@ -618,13 +744,13 @@ export default function FileBrowserPage() {
           </div>
         )}
 
-        {/* Pending approvals badge — managers/admins only */}
+        {/* Pending approvals badge */}
         {(user?.role === "ORG_ADMIN" ||
           user?.role === "MANAGER" ||
           user?.role === "SUPERADMIN") &&
           files.some((f) => f.approvalStatus === "pending") && (
-            <div className="flex items-center gap-2 mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-              <span className="text-sm text-amber-700 font-medium">
+            <div className="flex items-center gap-2 mb-4 p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-xl">
+              <span className="text-sm text-amber-700 dark:text-amber-400 font-medium">
                 {files.filter((f) => f.approvalStatus === "pending").length}{" "}
                 file(s) pending approval
               </span>
@@ -635,7 +761,7 @@ export default function FileBrowserPage() {
                     <button
                       key={f.id}
                       onClick={() => setApprovalFile(f)}
-                      className="text-xs px-2.5 py-1 bg-amber-100 text-amber-800 rounded-lg hover:bg-amber-200 font-medium truncate max-w-[140px]"
+                      className="text-xs px-2.5 py-1 bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-800 font-medium truncate max-w-[140px]"
                     >
                       Review: {f.name}
                     </button>
@@ -647,58 +773,56 @@ export default function FileBrowserPage() {
         {/* Main content */}
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
-            <div
-              className="w-6 h-6 border-2 border-blue-600 border-t-transparent
-                            rounded-full animate-spin"
-            />
+            <div className="w-6 h-6 border-2 border-primary-500 dark:border-pink-500 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : isFilteredEmpty ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
-            <p className="text-sm font-medium text-gray-500">
+            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
               No files match the selected filter.
             </p>
             <button
               onClick={() => setTypeFilter("all")}
-              className="mt-3 text-xs text-blue-600 hover:underline"
+              className="mt-3 text-xs text-primary-500 dark:text-pink-400 hover:underline"
             >
               Clear filter
             </button>
           </div>
         ) : isEmpty ? (
-          // FIX (Bug 4): Replaced outer <p> with <div> — block elements like <div>
-          // cannot be nested inside a <p>, which caused broken double-render of empty state
-          <div className="bg-white border border-gray-200 rounded-xl">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl">
             <div className="flex flex-col items-center justify-center py-20 text-center">
               {!filesLoading &&
                 !foldersLoading &&
                 (filesData?.files?.length ?? 0) === 0 &&
                 (foldersData?.folders?.length ?? 0) === 0 && (
                   <div className="flex flex-col items-center justify-center text-center">
-                    <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-4">
-                      <Upload size={28} className="text-blue-400" />
+                    <div className="w-16 h-16 bg-pink-50 dark:bg-pink-900/20 rounded-full flex items-center justify-center mb-4">
+                      <Upload size={28} className="text-primary-500" />
                     </div>
-                    <h3 className="text-gray-700 font-medium mb-1">
+                    <h3 className="text-gray-700 dark:text-gray-300 font-medium mb-1">
                       This folder is empty
                     </h3>
                     <p className="text-gray-400 text-sm mb-4">
-                      Upload files or create a folder to get started
+                      {canWrite
+                        ? "Upload files or create a folder to get started"
+                        : "No files have been shared with you here yet"}
                     </p>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setShowNewFolder(true)}
-                        className="text-sm text-gray-600 border border-gray-300
-                                   hover:bg-gray-50 px-3 py-1.5 rounded-lg
-                                   transition-colors font-medium"
-                      >
-                        New Folder
-                      </button>
-                      <button
-                        onClick={() => setShowUpload(true)}
-                        className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
-                      >
-                        Upload files
-                      </button>
-                    </div>
+                    {canWrite && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setShowNewFolder(true)}
+                          className="text-sm text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600
+                                         hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-1.5 rounded-lg transition-colors font-medium"
+                        >
+                          New Folder
+                        </button>
+                        <button
+                          onClick={() => setShowUpload(true)}
+                          className="px-4 py-2 bg-primary-500 text-white text-sm rounded-lg hover:bg-primary-600 dark:bg-primary-500 dark:hover:bg-primary-600"
+                        >
+                          Upload files
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
             </div>
@@ -708,88 +832,208 @@ export default function FileBrowserPage() {
             {/* Subfolders */}
             {folders.length > 0 && (
               <div>
-                <p
-                  className="text-xs font-medium text-gray-400 uppercase
-                               tracking-wider mb-3"
-                >
+                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">
                   Folders ({folders.length})
                 </p>
-                <div
-                  className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4
-                                lg:grid-cols-5 gap-3"
-                >
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                   {folders.map((folder) => (
                     <div key={folder.id} className="relative group">
                       <button
                         onClick={() => navigate(`/browse/${folder.id}`)}
-                        className="w-full flex flex-col items-center p-4 bg-white
-                 border border-gray-200 rounded-xl hover:border-blue-300
-                 hover:shadow-sm transition-all text-center"
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setDragOverFolderId(folder.id);
+                        }}
+                        onDragLeave={() => setDragOverFolderId(null)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setDragOverFolderId(null);
+                          if (draggedFileId) {
+                            dragMove.mutate({
+                              fileId: draggedFileId,
+                              targetFolderId: folder.id,
+                            });
+                            setDraggedFileId(null);
+                          }
+                        }}
+                        className={clsx(
+                          "w-full border rounded-xl transition-all text-left",
+                          viewMode === "list"
+                            ? "flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                            : "flex flex-col items-center p-4 hover:shadow-sm text-center",
+                          dragOverFolderId === folder.id
+                            ? "border-blue-400 bg-blue-50 dark:bg-blue-900/30 scale-105"
+                            : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500",
+                        )}
                       >
                         <div
-                          className="w-12 h-12 bg-blue-50 rounded-xl flex items-center
-                      justify-center mb-3 group-hover:bg-blue-100 transition-colors"
+                          className={clsx(
+                            "bg-blue-50 dark:bg-blue-900/40 rounded-xl flex items-center justify-center shrink-0 transition-colors group-hover:bg-blue-100 dark:group-hover:bg-blue-800/60",
+                            viewMode === "list" ? "w-8 h-8" : "w-12 h-12 mb-3",
+                          )}
                         >
-                          <Folder size={22} className="text-blue-500" />
+                          <Folder
+                            size={viewMode === "list" ? 16 : 22}
+                            className="text-blue-500"
+                          />
                         </div>
-                        <span className="text-xs font-medium text-gray-800 truncate w-full text-center">
-                          {folder.name}
-                        </span>
-                        <span className="text-xs text-gray-400 mt-1">
-                          {folder._count.files} file
-                          {folder._count.files !== 1 ? "s" : ""}
-                        </span>
+                        <div
+                          className={
+                            viewMode === "list"
+                              ? "flex-1 min-w-0 flex items-center justify-between pr-6"
+                              : "w-full"
+                          }
+                        >
+                          <span
+                            className={clsx(
+                              "text-xs font-medium text-gray-800 dark:text-gray-200 truncate",
+                              viewMode !== "list" && "w-full text-center block",
+                            )}
+                          >
+                            {folder.name}
+                          </span>
+                          <span
+                            className={clsx(
+                              "text-xs text-gray-400 shrink-0",
+                              viewMode !== "list" && "mt-1 block",
+                            )}
+                          >
+                            {folder._count.files} file
+                            {folder._count.files !== 1 ? "s" : ""}
+                          </span>
+                        </div>
                       </button>
+                      {/* Grid view: icon buttons on hover */}
+                      {viewMode === "grid" && (
+                        <div className="absolute top-2 right-2 hidden group-hover:flex items-center gap-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleFolderAssignCategory(folder);
+                            }}
+                            className="p-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg
+                                       text-gray-400 hover:text-purple-600 dark:hover:text-purple-400
+                                       hover:border-purple-300 dark:hover:border-purple-500 shadow-sm transition-colors"
+                            title="Assign category"
+                          >
+                            <Hash size={12} />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (
+                                confirm(
+                                  `Delete folder "${folder.name}" and all its contents?`,
+                                )
+                              ) {
+                                api
+                                  .delete(`/folders/${folder.id}`)
+                                  .then(() => {
+                                    queryClient.invalidateQueries({
+                                      queryKey: ["folders", folderId ?? "root"],
+                                    });
+                                    queryClient.invalidateQueries({
+                                      queryKey: ["folders", "root"],
+                                    });
+                                  })
+                                  .catch(() =>
+                                    useToast
+                                      .getState()
+                                      .add("Failed to delete folder", "error"),
+                                  );
+                              }
+                            }}
+                            className="p-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg
+                                       text-gray-400 hover:text-red-600 dark:hover:text-red-400
+                                       hover:border-red-300 dark:hover:border-red-500 shadow-sm transition-colors"
+                            title="Delete folder"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      )}
 
-                      {/* Folder action buttons — show on hover */}
-                      <div className="absolute top-2 right-2 hidden group-hover:flex items-center gap-1">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleFolderAssignCategory(folder);
-                          }}
-                          className="p-1.5 bg-white border border-gray-200 rounded-lg
-                   text-gray-400 hover:text-purple-600 hover:border-purple-300
-                   shadow-sm transition-colors"
-                          title="Assign category"
+                      {/* List view: dots menu */}
+                      {viewMode === "list" && (
+                        <div
+                          className="absolute right-2 top-1/2 -translate-y-1/2"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <Hash size={12} />
-                        </button>
-                        {/* FIX (Bug 3): Added .catch() so folder delete failures
-                            surface as a toast instead of silently doing nothing */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (
-                              confirm(
-                                `Delete folder "${folder.name}" and all its contents?`,
-                              )
-                            ) {
-                              api
-                                .delete(`/folders/${folder.id}`)
-                                .then(() => {
-                                  queryClient.invalidateQueries({
-                                    queryKey: ["folders", folderId ?? "root"],
-                                  });
-                                  queryClient.invalidateQueries({
-                                    queryKey: ["folders", "root"],
-                                  });
-                                })
-                                .catch(() =>
-                                  useToast
-                                    .getState()
-                                    .add("Failed to delete folder", "error"),
-                                );
-                            }
-                          }}
-                          className="p-1.5 bg-white border border-gray-200 rounded-lg
-                   text-gray-400 hover:text-red-600 hover:border-red-300
-                   shadow-sm transition-colors"
-                          title="Delete folder"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setFolderMenuId(
+                                folderMenuId === folder.id ? null : folder.id,
+                              );
+                            }}
+                            className="p-1 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-gray-100
+                                       dark:hover:bg-gray-700 text-gray-400 transition-opacity"
+                          >
+                            <MoreVertical size={14} />
+                          </button>
+                          {folderMenuId === folder.id && (
+                            <>
+                              <div
+                                className="fixed inset-0 z-10"
+                                onClick={() => setFolderMenuId(null)}
+                              />
+                              <div
+                                className="absolute right-0 top-full mt-1 w-44 bg-white dark:bg-gray-900
+                                              border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-20 p-1"
+                              >
+                                <button
+                                  onClick={() => {
+                                    handleFolderAssignCategory(folder);
+                                    setFolderMenuId(null);
+                                  }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700
+                                             dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                                >
+                                  <Hash size={14} /> Assign category
+                                </button>
+                                <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
+                                  <button
+                                    onClick={() => {
+                                      setFolderMenuId(null);
+                                      if (
+                                        confirm(
+                                          `Delete folder "${folder.name}" and all its contents?`,
+                                        )
+                                      ) {
+                                        api
+                                          .delete(`/folders/${folder.id}`)
+                                          .then(() => {
+                                            queryClient.invalidateQueries({
+                                              queryKey: [
+                                                "folders",
+                                                folderId ?? "root",
+                                              ],
+                                            });
+                                            queryClient.invalidateQueries({
+                                              queryKey: ["folders", "root"],
+                                            });
+                                          })
+                                          .catch(() =>
+                                            useToast
+                                              .getState()
+                                              .add(
+                                                "Failed to delete folder",
+                                                "error",
+                                              ),
+                                          );
+                                      }
+                                    }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600
+                                               dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg"
+                                  >
+                                    <Trash2 size={14} /> Delete
+                                  </button>
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -800,18 +1044,17 @@ export default function FileBrowserPage() {
             {files.length > 0 && (
               <div>
                 {folders.length > 0 && (
-                  <p
-                    className="text-xs font-medium text-gray-400 uppercase
-                                 tracking-wider mb-3"
-                  >
+                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">
                     Files ({files.length})
                   </p>
                 )}
                 {viewMode === "grid" ? (
-                  <FileGrid files={files} onFileClick={handleFileClick} />
+                  <FileGrid
+                    files={files}
+                    onFileClick={handleFileClick}
+                    onStar={(file) => starMutation.mutate(file)}
+                  />
                 ) : (
-                  // FIX (Bug 1): Removed duplicate onMetadata prop that caused the
-                  // "JSX elements cannot have multiple attributes with the same name" error
                   <FileList
                     files={files}
                     onFileClick={handleFileClick}
@@ -819,6 +1062,7 @@ export default function FileBrowserPage() {
                     onShare={handleShare}
                     onVersions={handleVersions}
                     onMove={handleMove}
+                    onStar={(file) => starMutation.mutate(file)}
                     onRename={(file) => {
                       setRenameFile(file);
                       setRenameName(file.name);
@@ -841,6 +1085,17 @@ export default function FileBrowserPage() {
                         isLocked: !!file.isLocked,
                       })
                     }
+                    onAssignCategory={(file) =>
+                      setCategoryResource({
+                        id: file.id,
+                        type: "file",
+                        name: file.name,
+                        currentCategoryId: file.categoryId ?? null,
+                      })
+                    }
+                    onAssignTag={(file) => setTagFile(file)}
+                    onApprovalDetail={(file) => setApprovalDetailFile(file)}
+                    capabilitiesMap={capMap}
                   />
                 )}
               </div>
@@ -850,11 +1105,15 @@ export default function FileBrowserPage() {
 
         {renameFile && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl p-6 w-96 shadow-xl">
-              <h3 className="font-semibold mb-4">Rename file</h3>
+            <div className="bg-white dark:bg-gray-900 border border-transparent dark:border-gray-800 rounded-xl p-6 w-96 shadow-xl">
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                Rename file
+              </h3>
               <input
                 autoFocus
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
+                className="w-full border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800
+                           text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 text-sm mb-4
+                           focus:ring-2 focus:ring-blue-400 focus:outline-none"
                 value={renameName}
                 onChange={(e) => setRenameName(e.target.value)}
                 onKeyDown={(e) =>
@@ -865,7 +1124,7 @@ export default function FileBrowserPage() {
               <div className="flex gap-2 justify-end">
                 <button
                   onClick={() => setRenameFile(null)}
-                  className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
+                  className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                 >
                   Cancel
                 </button>
@@ -876,7 +1135,7 @@ export default function FileBrowserPage() {
                       name: renameName,
                     })
                   }
-                  className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
                 >
                   Rename
                 </button>
@@ -886,15 +1145,12 @@ export default function FileBrowserPage() {
         )}
       </div>
 
-      {/* File Preview Modal */}
       {previewFile && (
         <FilePreviewModal
           file={previewFile}
           onClose={() => setPreviewFile(null)}
         />
       )}
-
-      {/* Permissions Panel */}
       {permissionsResource && (
         <PermissionsPanel
           resourceId={permissionsResource.id}
@@ -903,14 +1159,12 @@ export default function FileBrowserPage() {
           onClose={() => setPermissionsResource(null)}
         />
       )}
-
       {versionsFile && (
         <FileVersionsModal
           file={versionsFile}
           onClose={() => setVersionsFile(null)}
         />
       )}
-
       {moveFiles.length > 0 && (
         <MoveFileModal
           files={moveFiles}
@@ -923,7 +1177,6 @@ export default function FileBrowserPage() {
           }}
         />
       )}
-
       {categoryResource && (
         <AssignCategoryModal
           resourceId={categoryResource.id}
@@ -933,7 +1186,10 @@ export default function FileBrowserPage() {
           onClose={() => setCategoryResource(null)}
         />
       )}
-
+      {/* ── Tag modal — opened from FileList onAssignTag ── */}
+      {tagFile && (
+        <AssignTagModal file={tagFile} onClose={() => setTagFile(null)} />
+      )}
       {metadataFile && (
         <FileMetadataPanel
           fileId={metadataFile.id}
@@ -941,7 +1197,6 @@ export default function FileBrowserPage() {
           onClose={() => setMetadataFile(null)}
         />
       )}
-
       {commentsFile && (
         <FileCommentsPanel
           fileId={commentsFile.id}
@@ -950,7 +1205,6 @@ export default function FileBrowserPage() {
         />
       )}
 
-      {/* Approval review modal — managers/admins only */}
       {approvalFile && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-md p-6 shadow-xl">
@@ -960,29 +1214,25 @@ export default function FileBrowserPage() {
             <p className="text-sm text-gray-500 mb-4 truncate">
               {approvalFile.name}
             </p>
-            {/* FIX (Bug 2): Textarea is now a controlled component via approvalNote state */}
             <textarea
               value={approvalNote}
               onChange={(e) => setApprovalNote(e.target.value)}
               placeholder="Optional note…"
               className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm
-                   focus:outline-none focus:ring-2 focus:ring-blue-400 mb-4
-                   dark:bg-gray-800 dark:border-gray-700 dark:text-white"
+                         focus:outline-none focus:ring-2 focus:ring-blue-400 mb-4
+                         dark:bg-gray-800 dark:border-gray-700 dark:text-white"
               rows={3}
             />
             <div className="flex gap-2 justify-end">
-              {/* FIX (Bug 2): Cancel now also clears the note state */}
               <button
                 onClick={() => {
                   setApprovalFile(null);
                   setApprovalNote("");
                 }}
-                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+                className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100"
               >
                 Cancel
               </button>
-              {/* FIX (Bug 2): Both buttons now pass approvalNote from state,
-                  not from document.getElementById which is unreliable in React */}
               <button
                 onClick={() =>
                   approveMutation.mutate({
@@ -991,7 +1241,9 @@ export default function FileBrowserPage() {
                     note: approvalNote,
                   })
                 }
-                className="px-4 py-2 text-sm bg-red-50 text-red-600 border border-red-200 rounded-xl hover:bg-red-100 font-medium"
+                className="px-4 py-2 text-sm bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400
+                           border border-red-200 dark:border-red-800 rounded-xl hover:bg-red-100
+                           dark:hover:bg-red-900/50 font-medium"
               >
                 Reject
               </button>
@@ -1003,7 +1255,8 @@ export default function FileBrowserPage() {
                     note: approvalNote,
                   })
                 }
-                className="px-4 py-2 text-sm bg-green-600 text-white rounded-xl hover:bg-green-700 font-medium"
+                className="px-4 py-2 text-sm bg-green-600 text-white rounded-xl hover:bg-green-700
+                           dark:bg-green-500 dark:hover:bg-green-600 font-medium"
               >
                 Approve
               </button>
@@ -1011,6 +1264,38 @@ export default function FileBrowserPage() {
           </div>
         </div>
       )}
+
+      {approvalDetailFile && (
+        <ApprovalDetailPanel
+          file={approvalDetailFile}
+          onClose={() => setApprovalDetailFile(null)}
+          onResubmit={() =>
+            submitApprovalMutation.mutate(approvalDetailFile.id)
+          }
+        />
+      )}
+
+      {/* Delete Modals */}
+      <DeleteModal
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={confirmDelete}
+        title="Delete File"
+        message={`Are you sure you want to delete "${deleteTarget?.name}"? It will be moved to the trash.`}
+        isLoading={isDeleting}
+      />
+
+      <DeleteModal
+        isOpen={showBulkDelete}
+        onClose={() => setShowBulkDelete(false)}
+        onConfirm={() => {
+          setShowBulkDelete(false);
+          bulkDelete.mutate(selectedFiles);
+        }}
+        title="Delete Multiple Files"
+        message={`Are you sure you want to delete ${selectedFiles.length} files? They will be moved to the trash.`}
+        isLoading={bulkDelete.isPending}
+      />
     </AppShell>
   );
 }

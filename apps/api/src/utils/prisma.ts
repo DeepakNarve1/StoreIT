@@ -7,7 +7,7 @@ import path from "path";
 // Load root .env file
 dotenv.config({ path: path.join(__dirname, "../../../../.env") });
 
-const pool = new Pool({
+export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 

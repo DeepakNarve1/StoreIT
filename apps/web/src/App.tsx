@@ -21,6 +21,7 @@ import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import BillingPage from "./pages/admin/BillingPage";
 import SharedLinksPage from "./pages/admin/SharedLinksPage";
+import PermissionsOverviewPage from "./pages/admin/PermissionsOverviewPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,8 +42,9 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
-  if (user?.role !== "ORG_ADMIN" && user?.role !== "SUPERADMIN") {
-    return <Navigate to="/" replace />; // ✅ redirect non-admins to home
+  const allowed = ["ORG_ADMIN", "SUPERADMIN", "MANAGER"];
+  if (!allowed.includes(user?.role ?? "")) {
+    return <Navigate to="/browse" replace />;
   }
 
   return <>{children}</>;
@@ -76,9 +78,9 @@ export default function App() {
           <Route
             path="/"
             element={
-              <ProtectedRoute>
+              <AdminRoute>
                 <DashboardPage />
-              </ProtectedRoute>
+              </AdminRoute>
             }
           />
           <Route
@@ -183,6 +185,14 @@ export default function App() {
             element={
               <AdminRoute>
                 <SharedLinksPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/permissions"
+            element={
+              <AdminRoute>
+                <PermissionsOverviewPage />
               </AdminRoute>
             }
           />

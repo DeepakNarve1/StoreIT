@@ -111,6 +111,13 @@ router.patch("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
 // ─── DELETE /api/categories/:id ───────────────────────────────────────────────
 router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
+    const { role } = req.user!;
+    const isPrivileged = ["SUPERADMIN", "ORG_ADMIN", "MANAGER", "EDITOR"].includes(role);
+    if (!isPrivileged) {
+      res.status(403).json({ error: "You don't have permission to delete categories." });
+      return;
+    }
+
     const category = await prisma.category.findFirst({
       where: { id: req.params.id, tenantId: req.user!.tenantId },
     });

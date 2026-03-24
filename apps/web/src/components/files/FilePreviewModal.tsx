@@ -56,19 +56,47 @@ const getFileIcon = (mimeType: string) => {
   const type = getFileType(mimeType);
   switch (type) {
     case "image":
-      return { icon: Image, color: "text-green-500", bg: "bg-green-50" };
+      return {
+        icon: Image,
+        color: "text-green-500",
+        bg: "bg-green-50 dark:bg-green-900/30",
+      };
     case "video":
-      return { icon: Film, color: "text-purple-500", bg: "bg-purple-50" };
+      return {
+        icon: Film,
+        color: "text-purple-500",
+        bg: "bg-purple-50 dark:bg-purple-900/30",
+      };
     case "audio":
-      return { icon: Music, color: "text-pink-500", bg: "bg-pink-50" };
+      return {
+        icon: Music,
+        color: "text-pink-500",
+        bg: "bg-pink-50 dark:bg-pink-900/30",
+      };
     case "pdf":
-      return { icon: FileText, color: "text-red-500", bg: "bg-red-50" };
+      return {
+        icon: FileText,
+        color: "text-red-500",
+        bg: "bg-red-50 dark:bg-red-900/30",
+      };
     case "office":
-      return { icon: FileText, color: "text-blue-500", bg: "bg-blue-50" };
+      return {
+        icon: FileText,
+        color: "text-primary-500",
+        bg: "bg-primary-50 dark:bg-primary-900/30",
+      };
     case "text":
-      return { icon: FileText, color: "text-gray-500", bg: "bg-gray-50" };
+      return {
+        icon: FileText,
+        color: "text-gray-500",
+        bg: "bg-gray-50 dark:bg-gray-800",
+      };
     default:
-      return { icon: File, color: "text-gray-500", bg: "bg-gray-50" };
+      return {
+        icon: File,
+        color: "text-gray-500",
+        bg: "bg-gray-50 dark:bg-gray-800",
+      };
   }
 };
 
@@ -123,13 +151,15 @@ export default function FilePreviewModal({
           >
             <Icon size={36} className={color} />
           </div>
-          <p className="text-sm font-medium text-gray-700 mb-1">{file.name}</p>
+          <p className="text-sm font-medium text-gray-700 dark:text-gray-100 mb-1">
+            {file.name}
+          </p>
           <p className="text-xs text-gray-400 mb-6">{formatBytes(file.size)}</p>
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 max-w-sm">
-            <p className="text-xs text-amber-700 font-medium mb-1">
+          <div className="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-xl px-4 py-3 max-w-sm">
+            <p className="text-xs text-amber-700 dark:text-amber-400 font-medium mb-1">
               Preview not available yet
             </p>
-            <p className="text-xs text-amber-600">
+            <p className="text-xs text-amber-600 dark:text-amber-500">
               File preview will work once S3/R2 storage is connected. The file
               metadata has been saved successfully.
             </p>
@@ -176,7 +206,9 @@ export default function FilePreviewModal({
           >
             <Icon size={40} className={color} />
           </div>
-          <p className="text-sm font-medium text-gray-700">{file.name}</p>
+          <p className="text-sm font-medium text-gray-700 dark:text-gray-100">
+            {file.name}
+          </p>
           <audio src={viewUrl} controls className="w-full max-w-md">
             Your browser does not support audio playback.
           </audio>
@@ -204,7 +236,7 @@ export default function FilePreviewModal({
             className="w-full flex-1 border-0"
             title={file.name}
           />
-          <div className="p-2 bg-gray-50 border-t border-gray-200 text-center">
+          <div className="p-2 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 text-center">
             <p className="text-xs text-gray-400">
               Powered by Microsoft Office Online
             </p>
@@ -218,7 +250,7 @@ export default function FilePreviewModal({
       return (
         <iframe
           src={viewUrl}
-          className="w-full h-full border-0 rounded-b-xl bg-white"
+          className="w-full h-full border-0 rounded-b-xl bg-white dark:bg-gray-900"
           title={file.name}
         />
       );
@@ -232,7 +264,9 @@ export default function FilePreviewModal({
         >
           <Icon size={36} className={color} />
         </div>
-        <p className="text-sm font-medium text-gray-700 mb-1">{file.name}</p>
+        <p className="text-sm font-medium text-gray-700 dark:text-gray-100 mb-1">
+          {file.name}
+        </p>
         <p className="text-xs text-gray-400 mb-6">{formatBytes(file.size)}</p>
         <p className="text-xs text-gray-500 mb-4">
           This file type cannot be previewed in the browser.
@@ -240,8 +274,8 @@ export default function FilePreviewModal({
         <a
           href={viewUrl}
           download={file.name}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white
-                     text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white
+                     text-sm font-medium rounded-lg hover:bg-primary-700 transition-colors"
         >
           <Download size={15} />
           Download file
@@ -261,12 +295,12 @@ export default function FilePreviewModal({
       {/* Modal */}
       <div
         className="fixed inset-4 md:inset-8 lg:inset-12 z-50 flex flex-col
-                      bg-white rounded-2xl shadow-2xl overflow-hidden"
+                      bg-white dark:bg-gray-900 rounded-2xl shadow-2xl overflow-hidden"
       >
         {/* Header */}
         <div
-          className="flex items-center gap-3 px-4 py-3 border-b border-gray-200
-                        bg-white shrink-0"
+          className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 dark:border-gray-800
+                        bg-white dark:bg-gray-900 shrink-0"
         >
           {/* File icon */}
           <div
@@ -277,7 +311,7 @@ export default function FilePreviewModal({
 
           {/* File info */}
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900 truncate">
+            <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
               {file.name}
             </p>
             <p className="text-xs text-gray-400">
@@ -298,8 +332,8 @@ export default function FilePreviewModal({
                   href={viewUrl}
                   download={file.name}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
-                             text-gray-700 border border-gray-300 rounded-lg
-                             hover:bg-gray-50 transition-colors"
+                             text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg
+                             hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                 >
                   <Download size={13} />
                   Download
@@ -309,8 +343,8 @@ export default function FilePreviewModal({
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
-                             text-gray-700 border border-gray-300 rounded-lg
-                             hover:bg-gray-50 transition-colors"
+                             text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg
+                             hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                 >
                   <ExternalLink size={13} />
                   Open
@@ -319,7 +353,7 @@ export default function FilePreviewModal({
             )}
             <button
               onClick={onClose}
-              className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100
+              className="p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800
                          rounded-lg transition-colors"
             >
               <X size={18} />
@@ -328,7 +362,9 @@ export default function FilePreviewModal({
         </div>
 
         {/* Preview content */}
-        <div className="flex-1 overflow-auto bg-gray-50">{renderPreview()}</div>
+        <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900">
+          {renderPreview()}
+        </div>
       </div>
     </>
   );

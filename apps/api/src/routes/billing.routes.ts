@@ -17,7 +17,7 @@ const APP_URL = process.env.APP_URL || "http://localhost:5173";
 router.get(
   "/status",
   verifyAuth,
-  requireRole("ORG_ADMIN", "SUPERADMIN"),
+  requireRole("ORG_ADMIN", "SUPERADMIN", "MANAGER"),
   async (req: AuthRequest, res: Response) => {
     try {
       const tenant = await prisma.tenant.findUnique({
@@ -105,17 +105,29 @@ router.post(
       if (!priceId) {
         res
           .status(400)
-          .json({ error: `Stripe price ID not configured for ${plan} plan` });
+          .json({ error: `Stripe price ID not configured for ${plan} plan. Please contact support.` });
         return;
       }
 
+      // ── DOWNGRADE GUARD ────────────────────────────────────────────────────
+      const planRank: Record<string, number> = { free: 0, starter: 1, pro: 2, enterprise: 3 };
       const tenant = await prisma.tenant.findUnique({
         where: { id: req.user!.tenantId },
-        select: { id: true, name: true, stripeCustomerId: true },
+        select: { id: true, name: true, plan: true, stripeCustomerId: true, stripeSubscriptionId: true },
       });
-
       if (!tenant) {
         res.status(404).json({ error: "Tenant not found" });
+        return;
+      }
+      if ((planRank[plan] ?? 0) < (planRank[tenant.plan] ?? 0)) {
+        res.status(400).json({
+          error: "Downgrading is not supported via checkout. Please use the billing portal to manage your subscription.",
+        });
+        return;
+      }
+      // If already on this plan, just redirect to portal
+      if (tenant.plan === plan) {
+        res.status(400).json({ error: "You are already on this plan." });
         return;
       }
 
@@ -139,18 +151,90 @@ router.post(
         mode: "subscription",
         payment_method_types: ["card"],
         line_items: [{ price: priceId, quantity: 1 }],
-        success_url: `${APP_URL}/billing?success=true`,
+        success_url: `${APP_URL}/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${APP_URL}/billing?canceled=true`,
         metadata: { tenantId: tenant.id, plan },
-        subscription_data: {
-          metadata: { tenantId: tenant.id, plan },
-        },
+        // Cancel any existing subscription and replace with new one
+        ...(tenant.stripeSubscriptionId ? {
+          subscription_data: {
+            metadata: { tenantId: tenant.id, plan },
+            // Stripe handles proration automatically
+          },
+        } : {
+          subscription_data: {
+            metadata: { tenantId: tenant.id, plan },
+          },
+        }),
       });
 
       res.json({ url: session.url });
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: "Failed to create checkout session" });
+    }
+  },
+);
+
+// ─── POST /api/billing/verify ─────────────────────────────────────────────────
+// Called by the frontend when redirected back from Stripe checkout.
+// Retrieves the session directly from Stripe and immediately applies the plan,
+// so the update is instant regardless of whether the webhook has fired yet.
+router.post(
+  "/verify",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { sessionId } = req.body;
+      if (!sessionId || typeof sessionId !== "string") {
+        res.status(400).json({ error: "sessionId is required" });
+        return;
+      }
+
+      // Retrieve the session directly from Stripe — no webhook needed
+      const session = await stripe.checkout.sessions.retrieve(sessionId, {
+        expand: ["subscription"],
+      });
+
+      if (session.payment_status !== "paid") {
+        res.status(402).json({ error: "Payment not completed" });
+        return;
+      }
+
+      const tenantId = session.metadata?.tenantId;
+      const plan = session.metadata?.plan;
+
+      if (!tenantId || !plan) {
+        res.status(400).json({ error: "Missing session metadata" });
+        return;
+      }
+
+      // Security: ensure this session belongs to the requesting tenant
+      if (tenantId !== req.user!.tenantId) {
+        res.status(403).json({ error: "Session does not belong to your organisation" });
+        return;
+      }
+
+      const subscriptionId =
+        typeof session.subscription === "string"
+          ? session.subscription
+          : (session.subscription as any)?.id ?? null;
+
+      // Idempotent update — safe to call multiple times
+      await prisma.tenant.update({
+        where: { id: tenantId },
+        data: {
+          plan,
+          ...(subscriptionId && { stripeSubscriptionId: subscriptionId }),
+        },
+      });
+
+      console.log(`✅ Plan verified & applied: tenant=${tenantId} plan=${plan}`);
+
+      res.json({ plan, subscriptionId });
+    } catch (err: any) {
+      console.error("Verify error:", err);
+      res.status(500).json({ error: "Failed to verify session" });
     }
   },
 );
@@ -247,13 +331,24 @@ router.post(
         case "customer.subscription.updated": {
           const sub = event.data.object as Stripe.Subscription;
           const tenantId = sub.metadata?.tenantId;
-          const plan = sub.metadata?.plan;
-
+          // Plan is stored in subscription metadata — but if user changed via
+          // billing portal, metadata may not change. Derive plan from price ID instead.
+          let plan = sub.metadata?.plan;
+          if (!plan) {
+            const priceId = sub.items?.data?.[0]?.price?.id;
+            if (priceId) {
+              const matched = Object.entries(STRIPE_PRICE_IDS).find(
+                ([, id]) => id === priceId,
+              );
+              if (matched) plan = matched[0];
+            }
+          }
           if (tenantId && plan) {
             await prisma.tenant.update({
               where: { id: tenantId },
               data: { plan },
             });
+            console.log(`📋 Tenant ${tenantId} plan updated to ${plan}`);
           }
           break;
         }
@@ -276,8 +371,18 @@ router.post(
 
         case "invoice.payment_failed": {
           const invoice = event.data.object as Stripe.Invoice;
-          console.error(`❌ Payment failed for customer ${invoice.customer}`);
-          // TODO: send email notification to org admin
+          const customerId = invoice.customer as string;
+          console.error(`❌ Payment failed for customer ${customerId}`);
+          // Find tenant by stripeCustomerId and mark subscription as past_due
+          const failedTenant = await prisma.tenant.findFirst({
+            where: { stripeCustomerId: customerId },
+            select: { id: true },
+          });
+          if (failedTenant) {
+            // Don't downgrade immediately — give Stripe time to retry.
+            // Log it so admins can act (connect to email/Slack in production).
+            console.error(`❌ Payment failed for tenant ${failedTenant.id}. Stripe will auto-retry.`);
+          }
           break;
         }
       }

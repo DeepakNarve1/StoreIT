@@ -32,24 +32,24 @@ export default function ResetPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        <div className="bg-white rounded-2xl border border-gray-200 p-8">
+        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-8">
           <div className="text-center mb-6">
-            <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-4">
+            <div className="w-12 h-12 bg-primary-600 rounded-xl flex items-center justify-center mx-auto mb-4">
               <span className="text-white font-bold text-lg">S</span>
             </div>
-            <h1 className="text-xl font-semibold text-gray-900">
+            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
               Set new password
             </h1>
-            <p className="text-sm text-gray-500 mt-1">
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Choose a strong password for your account
             </p>
           </div>
 
           {done ? (
             <div className="text-center space-y-3">
-              <div className="w-14 h-14 bg-green-50 rounded-full flex items-center justify-center mx-auto">
+              <div className="w-14 h-14 bg-green-50 dark:bg-green-950 rounded-full flex items-center justify-center mx-auto">
                 <svg
                   width="24"
                   height="24"
@@ -61,15 +61,17 @@ export default function ResetPasswordPage() {
                   <path d="M20 6L9 17l-5-5" />
                 </svg>
               </div>
-              <p className="text-sm text-gray-600 font-medium">
+              <p className="text-sm text-gray-600 dark:text-gray-300 font-medium">
                 Password updated!
               </p>
-              <p className="text-xs text-gray-400">Redirecting to login…</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                Redirecting to login…
+              </p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">
                   New password
                 </label>
                 <input
@@ -79,12 +81,14 @@ export default function ResetPasswordPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Minimum 8 characters"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  className="w-full border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2.5 text-sm
+                             bg-white dark:bg-gray-800 text-gray-900 dark:text-white
+                             placeholder:text-gray-400 dark:placeholder:text-gray-500
+                             focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">
                   Confirm password
                 </label>
                 <input
@@ -93,8 +97,14 @@ export default function ResetPasswordPage() {
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
                   className={`w-full border rounded-lg px-3 py-2.5 text-sm
-                              focus:outline-none focus:ring-2 focus:ring-blue-400
-                              ${mismatch ? "border-red-300" : "border-gray-300"}`}
+                              bg-white dark:bg-gray-800 text-gray-900 dark:text-white
+                              placeholder:text-gray-400 dark:placeholder:text-gray-500
+                              focus:outline-none focus:ring-2 focus:ring-primary-500
+                              ${
+                                mismatch
+                                  ? "border-red-300 dark:border-red-700"
+                                  : "border-gray-300 dark:border-gray-700"
+                              }`}
                 />
                 {mismatch && (
                   <p className="text-xs text-red-500 mt-1">
@@ -103,22 +113,24 @@ export default function ResetPasswordPage() {
                 )}
               </div>
               {error && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <p className="text-xs text-red-600">{error}</p>
+                <div className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg">
+                  <p className="text-xs text-red-600 dark:text-red-400">
+                    {error}
+                  </p>
                 </div>
               )}
               <button
                 type="submit"
                 disabled={loading || mismatch || password.length < 8}
-                className="w-full py-2.5 bg-blue-600 text-white text-sm font-medium
-                           rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                className="w-full py-2.5 bg-primary-600 text-white text-sm font-medium
+                           rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
               >
                 {loading ? "Updating…" : "Update password"}
               </button>
               <div className="text-center">
                 <Link
                   to="/login"
-                  className="text-xs text-gray-400 hover:text-gray-600"
+                  className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                 >
                   Back to login
                 </Link>

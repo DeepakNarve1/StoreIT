@@ -156,6 +156,9 @@ router.patch("/orgs/:id", async (req: AuthRequest, res: Response) => {
       data: {
         ...(plan !== undefined && { plan }),
         ...(isActive !== undefined && { isActive }),
+        // If a superadmin manually overrides the plan, clear the Stripe
+        // subscription reference so the billing page doesn't show stale data.
+        ...(plan !== undefined && { stripeSubscriptionId: null }),
       },
       select: { id: true, name: true, slug: true, plan: true, isActive: true },
     });
@@ -218,6 +221,15 @@ router.get("/orgs/:id/stats", async (req: AuthRequest, res: Response) => {
   try {
     const tenant = await prisma.tenant.findUnique({
       where: { id: req.params.id },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        plan: true,
+        isActive: true,
+        stripeCustomerId: true,
+        stripeSubscriptionId: true,
+      },
     });
     if (!tenant) {
       res.status(404).json({ error: "Organisation not found" });

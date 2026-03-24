@@ -112,7 +112,7 @@ export default function MoveFileModal({
                     "text-xs font-medium transition-colors flex items-center gap-1",
                     i === breadcrumb.length - 1
                       ? "text-gray-800 pointer-events-none"
-                      : "text-blue-600 hover:text-blue-700",
+                      : "text-primary-500 hover:text-primary-600",
                   )}
                 >
                   {i === 0 && <Home size={11} />}
@@ -131,7 +131,7 @@ export default function MoveFileModal({
                 className={clsx(
                   "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-left mb-1",
                   selectedFolderId === "root"
-                    ? "bg-blue-50 border border-blue-200"
+                    ? "bg-primary-50 border border-primary-100"
                     : "hover:bg-gray-50 border border-transparent",
                 )}
               >
@@ -142,7 +142,7 @@ export default function MoveFileModal({
                   Root (no folder)
                 </span>
                 {selectedFolderId === "root" && (
-                  <Check size={14} className="text-blue-600 ml-auto" />
+                  <Check size={14} className="text-primary-500 ml-auto" />
                 )}
               </button>
             )}
@@ -162,7 +162,7 @@ export default function MoveFileModal({
                   className={clsx(
                     "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors mb-1",
                     selectedFolderId === folder.id
-                      ? "bg-blue-50 border border-blue-200"
+                      ? "bg-primary-50 border border-primary-100"
                       : "hover:bg-gray-50 border border-transparent",
                   )}
                 >
@@ -170,11 +170,11 @@ export default function MoveFileModal({
                     onClick={() => setSelectedFolderId(folder.id)}
                     className="flex items-center gap-3 flex-1 text-left"
                   >
-                    <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center">
+                    <div className="w-8 h-8 bg-primary-50 rounded-lg flex items-center justify-center">
                       {selectedFolderId === folder.id ? (
-                        <FolderOpen size={15} className="text-blue-500" />
+                        <FolderOpen size={15} className="text-primary-500" />
                       ) : (
-                        <Folder size={15} className="text-blue-500" />
+                        <Folder size={15} className="text-primary-500" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -186,7 +186,7 @@ export default function MoveFileModal({
                       </p>
                     </div>
                     {selectedFolderId === folder.id && (
-                      <Check size={14} className="text-blue-600" />
+                      <Check size={14} className="text-primary-500" />
                     )}
                   </button>
                   {folder._count.children > 0 && (
@@ -215,7 +215,7 @@ export default function MoveFileModal({
             <button
               onClick={() => moveFiles.mutate()}
               disabled={moveFiles.isPending}
-              className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700
+              className="flex-1 px-4 py-2 bg-primary-600 hover:bg-primary-700
                          disabled:opacity-50 text-white text-sm font-medium
                          rounded-lg transition-colors"
             >

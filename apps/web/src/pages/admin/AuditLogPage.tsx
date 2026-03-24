@@ -31,92 +31,92 @@ const ACTION_CONFIG: Record<
   "file.upload": {
     label: "File uploaded",
     icon: Upload,
-    color: "text-blue-600",
-    bg: "bg-blue-50",
+    color: "text-blue-600 dark:text-blue-400",
+    bg: "bg-blue-50 dark:bg-blue-900/20",
   },
   "file.upload.version": {
     label: "New version uploaded",
     icon: Upload,
-    color: "text-purple-600",
-    bg: "bg-purple-50",
+    color: "text-purple-600 dark:text-purple-400",
+    bg: "bg-purple-50 dark:bg-purple-900/20",
   },
   "file.delete": {
     label: "File deleted",
     icon: Trash2,
-    color: "text-red-600",
-    bg: "bg-red-50",
+    color: "text-red-600 dark:text-red-400",
+    bg: "bg-red-50 dark:bg-red-900/20",
   },
   "file.view": {
     label: "File viewed",
     icon: Eye,
-    color: "text-gray-600",
-    bg: "bg-gray-50",
+    color: "text-gray-600 dark:text-gray-400",
+    bg: "bg-gray-50 dark:bg-white/5",
   },
   "file.restore": {
     label: "Version restored",
     icon: Activity,
-    color: "text-orange-600",
-    bg: "bg-orange-50",
+    color: "text-orange-600 dark:text-orange-400",
+    bg: "bg-orange-50 dark:bg-orange-900/20",
   },
   "folder.create": {
     label: "Folder created",
     icon: FolderPlus,
-    color: "text-green-600",
-    bg: "bg-green-50",
+    color: "text-green-600 dark:text-green-400",
+    bg: "bg-green-50 dark:bg-green-900/20",
   },
   "folder.rename": {
     label: "Folder renamed",
     icon: FolderPlus,
-    color: "text-yellow-600",
-    bg: "bg-yellow-50",
+    color: "text-yellow-600 dark:text-yellow-400",
+    bg: "bg-yellow-50 dark:bg-yellow-900/20",
   },
   "folder.delete": {
     label: "Folder deleted",
     icon: Trash2,
-    color: "text-red-600",
-    bg: "bg-red-50",
+    color: "text-red-600 dark:text-red-400",
+    bg: "bg-red-50 dark:bg-red-900/20",
   },
   "permission.grant": {
     label: "Permission granted",
     icon: Shield,
-    color: "text-blue-600",
-    bg: "bg-blue-50",
+    color: "text-blue-600 dark:text-blue-400",
+    bg: "bg-blue-50 dark:bg-blue-900/20",
   },
   "permission.revoke": {
     label: "Permission revoked",
     icon: Shield,
-    color: "text-red-600",
-    bg: "bg-red-50",
+    color: "text-red-600 dark:text-red-400",
+    bg: "bg-red-50 dark:bg-red-900/20",
   },
   "link.generate": {
     label: "Share link created",
     icon: Link,
-    color: "text-indigo-600",
-    bg: "bg-indigo-50",
+    color: "text-indigo-600 dark:text-indigo-400",
+    bg: "bg-indigo-50 dark:bg-indigo-900/20",
   },
   "link.access": {
     label: "Link accessed",
     icon: Link,
-    color: "text-indigo-600",
-    bg: "bg-indigo-50",
+    color: "text-indigo-600 dark:text-indigo-400",
+    bg: "bg-indigo-50 dark:bg-indigo-900/20",
   },
   "user.login": {
     label: "User logged in",
     icon: LogIn,
-    color: "text-green-600",
-    bg: "bg-green-50",
+    color: "text-green-600 dark:text-green-400",
+    bg: "bg-green-50 dark:bg-green-900/20",
   },
   "user.invite": {
     label: "User invited",
     icon: User,
-    color: "text-blue-600",
-    bg: "bg-blue-50",
+    color: "text-blue-600 dark:text-blue-400",
+    bg: "bg-blue-50 dark:bg-blue-900/20",
   },
   "category.create": {
     label: "Category created",
     icon: FolderPlus,
-    color: "text-teal-600",
-    bg: "bg-teal-50",
+    color: "text-teal-600 dark:text-teal-400",
+    bg: "bg-teal-50 dark:bg-teal-900/20",
   },
 };
 
@@ -124,8 +124,8 @@ const getActionConfig = (action: string) =>
   ACTION_CONFIG[action] ?? {
     label: action,
     icon: Activity,
-    color: "text-gray-600",
-    bg: "bg-gray-50",
+    color: "text-gray-600 dark:text-gray-400",
+    bg: "bg-gray-50 dark:bg-white/5",
   };
 
 const timeAgo = (dateStr: string) => {
@@ -206,12 +206,14 @@ export default function AuditLogPage() {
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-9 h-9 bg-gray-100 rounded-xl flex items-center justify-center">
-            <Activity size={18} className="text-gray-600" />
+          <div className="w-9 h-9 bg-gray-100 dark:bg-white/5 rounded-xl flex items-center justify-center">
+            <Activity size={18} className="text-gray-600 dark:text-gray-400" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-gray-900">Audit Log</h1>
-            <p className="text-xs text-gray-400">
+            <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Audit Log
+            </h1>
+            <p className="text-xs text-gray-400 dark:text-gray-500">
               Complete activity history for your workspace
             </p>
           </div>
@@ -225,32 +227,36 @@ export default function AuditLogPage() {
                 label: "Total Events",
                 value: stats.total,
                 icon: Activity,
-                color: "bg-gray-50 text-gray-600",
+                color:
+                  "bg-gray-50 dark:bg-white/5 text-gray-600 dark:text-gray-400",
               },
               {
                 label: "Uploads (30d)",
                 value: stats.last30Days.uploads,
                 icon: Upload,
-                color: "bg-blue-50 text-blue-600",
+                color:
+                  "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400",
               },
               {
                 label: "Deletes (30d)",
                 value: stats.last30Days.deletes,
                 icon: Trash2,
-                color: "bg-red-50 text-red-600",
+                color:
+                  "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400",
               },
               {
                 label: "Logins (30d)",
                 value: stats.last30Days.logins,
                 icon: LogIn,
-                color: "bg-green-50 text-green-600",
+                color:
+                  "bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400",
               },
             ].map((stat) => {
               const Icon = stat.icon;
               return (
                 <div
                   key={stat.label}
-                  className="bg-white border border-gray-200 rounded-xl p-4"
+                  className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4"
                 >
                   <div
                     className={`w-8 h-8 ${stat.color} rounded-lg flex items-center
@@ -258,10 +264,10 @@ export default function AuditLogPage() {
                   >
                     <Icon size={16} />
                   </div>
-                  <div className="text-2xl font-semibold text-gray-900">
+                  <div className="text-2xl font-semibold text-gray-900 dark:text-white">
                     {stat.value}
                   </div>
-                  <div className="text-xs text-gray-500 mt-0.5">
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                     {stat.label}
                   </div>
                 </div>
@@ -272,7 +278,7 @@ export default function AuditLogPage() {
 
         {/* Filters */}
         <div className="flex items-center gap-3 mb-4 flex-wrap">
-          <div className="flex items-center gap-2 text-xs text-gray-500">
+          <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
             <Filter size={13} />
             <span>Filter:</span>
           </div>
@@ -282,8 +288,8 @@ export default function AuditLogPage() {
               setFilterAction(e.target.value);
               setPage(1);
             }}
-            className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg
-                       text-xs focus:outline-none focus:ring-2 focus:ring-blue-400"
+            className="px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg
+                       text-xs focus:outline-none focus:ring-2 focus:ring-blue-400 dark:text-gray-200"
           >
             <option value="">All actions</option>
             {ACTIONS.map((a) => (
@@ -298,8 +304,8 @@ export default function AuditLogPage() {
               setFilterType(e.target.value);
               setPage(1);
             }}
-            className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg
-                       text-xs focus:outline-none focus:ring-2 focus:ring-blue-400"
+            className="px-3 py-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg
+                       text-xs focus:outline-none focus:ring-2 focus:ring-blue-400 dark:text-gray-200"
           >
             <option value="">All types</option>
             <option value="file">Files</option>
@@ -314,13 +320,13 @@ export default function AuditLogPage() {
                 setFilterType("");
                 setPage(1);
               }}
-              className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+              className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium"
             >
               Clear filters
             </button>
           )}
           {pagination && (
-            <span className="ml-auto text-xs text-gray-400">
+            <span className="ml-auto text-xs text-gray-400 dark:text-gray-600">
               {pagination.total} events total
             </span>
           )}
@@ -328,26 +334,32 @@ export default function AuditLogPage() {
         <button
           onClick={handleExport}
           className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium
-             text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50
-             transition-colors ml-auto"
+             text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50 mb-4
+             dark:hover:bg-white/5 transition-colors ml-auto"
         >
           <Download size={14} />
           Export CSV
         </button>
 
         {/* Log table */}
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
           {isLoading ? (
             <div className="flex items-center justify-center py-16">
-              <Loader size={20} className="animate-spin text-gray-400" />
+              <Loader
+                size={20}
+                className="animate-spin text-gray-400 dark:text-gray-600"
+              />
             </div>
           ) : logs.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <Activity size={24} className="text-gray-300 mb-3" />
-              <p className="text-sm font-medium text-gray-500">
+              <Activity
+                size={24}
+                className="text-gray-300 dark:text-gray-600 mb-3"
+              />
+              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
                 No activity yet
               </p>
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                 Actions will appear here as your team uses the workspace
               </p>
             </div>
@@ -356,18 +368,18 @@ export default function AuditLogPage() {
               {/* Table header */}
               <div
                 className="grid grid-cols-12 gap-4 px-4 py-2.5
-                              border-b border-gray-100 bg-gray-50"
+                               border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-white/5"
               >
-                <div className="col-span-4 text-xs font-medium text-gray-500">
+                <div className="col-span-4 text-xs font-medium text-gray-500 dark:text-gray-400">
                   Action
                 </div>
-                <div className="col-span-3 text-xs font-medium text-gray-500">
+                <div className="col-span-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                   Resource
                 </div>
-                <div className="col-span-3 text-xs font-medium text-gray-500">
+                <div className="col-span-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                   User
                 </div>
-                <div className="col-span-2 text-xs font-medium text-gray-500">
+                <div className="col-span-2 text-xs font-medium text-gray-500 dark:text-gray-400">
                   Time
                 </div>
               </div>
@@ -380,8 +392,8 @@ export default function AuditLogPage() {
                   <div
                     key={log.id}
                     className="grid grid-cols-12 gap-4 px-4 py-3
-                               border-b border-gray-100 last:border-b-0
-                               hover:bg-gray-50 transition-colors items-center"
+                               border-b border-gray-100 dark:border-gray-800 last:border-b-0
+                               hover:bg-gray-50 dark:hover:bg-white/5 transition-colors items-center"
                   >
                     {/* Action */}
                     <div className="col-span-4 flex items-center gap-2.5">
@@ -391,7 +403,7 @@ export default function AuditLogPage() {
                       >
                         <Icon size={13} className={config.color} />
                       </div>
-                      <span className="text-sm font-medium text-gray-800">
+                      <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
                         {config.label}
                       </span>
                     </div>
@@ -400,11 +412,11 @@ export default function AuditLogPage() {
                     <div className="col-span-3">
                       {log.resourceName ? (
                         <div>
-                          <p className="text-sm text-gray-700 truncate">
+                          <p className="text-sm text-gray-700 dark:text-gray-300 truncate">
                             {log.resourceName}
                           </p>
                           {log.resourceType && (
-                            <p className="text-xs text-gray-400 capitalize">
+                            <p className="text-xs text-gray-400 dark:text-gray-500 capitalize">
                               {log.resourceType}
                             </p>
                           )}
@@ -419,14 +431,14 @@ export default function AuditLogPage() {
                       {log.user ? (
                         <div className="flex items-center gap-2">
                           <div
-                            className="w-6 h-6 bg-blue-100 rounded-full flex items-center
-                                          justify-center text-blue-700 text-xs font-semibold
+                            className="w-6 h-6 bg-blue-100 dark:bg-blue-900/40 rounded-full flex items-center
+                                          justify-center text-blue-700 dark:text-blue-400 text-xs font-semibold
                                           shrink-0"
                           >
                             {log.user.name?.charAt(0).toUpperCase()}
                           </div>
                           <div className="min-w-0">
-                            <p className="text-xs font-medium text-gray-800 truncate">
+                            <p className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">
                               {log.user.name}
                             </p>
                           </div>
@@ -438,10 +450,10 @@ export default function AuditLogPage() {
 
                     {/* Time */}
                     <div className="col-span-2">
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
                         {timeAgo(log.createdAt)}
                       </p>
-                      <p className="text-xs text-gray-400">
+                      <p className="text-xs text-gray-400 dark:text-gray-600">
                         {new Date(log.createdAt).toLocaleDateString("en-US", {
                           month: "short",
                           day: "numeric",
@@ -458,15 +470,15 @@ export default function AuditLogPage() {
         {/* Pagination */}
         {pagination && pagination.pages > 1 && (
           <div className="flex items-center justify-between mt-4">
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
               Page {pagination.page} of {pagination.pages}
             </p>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page === 1}
-                className="p-1.5 border border-gray-200 rounded-lg text-gray-500
-                           hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                className="p-1.5 border border-gray-200 dark:border-gray-800 rounded-lg text-gray-500 dark:text-gray-400
+                           hover:bg-gray-50 dark:hover:bg-white/5 disabled:opacity-50 transition-colors"
               >
                 <ChevronLeft size={14} />
               </button>
@@ -475,8 +487,8 @@ export default function AuditLogPage() {
                   setPage((p) => Math.min(pagination.pages, p + 1))
                 }
                 disabled={page === pagination.pages}
-                className="p-1.5 border border-gray-200 rounded-lg text-gray-500
-                           hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                className="p-1.5 border border-gray-200 dark:border-gray-800 rounded-lg text-gray-500 dark:text-gray-400
+                           hover:bg-gray-50 dark:hover:bg-white/5 disabled:opacity-50 transition-colors"
               >
                 <ChevronRight size={14} />
               </button>

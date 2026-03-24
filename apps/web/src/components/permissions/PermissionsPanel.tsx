@@ -1,19 +1,17 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Shield,
-  Users,
-  User,
-  Clock,
-  Trash2,
-  Plus,
+  X,
   Loader,
+  Link,
   Copy,
   Check,
-  Link,
+  Clock,
+  Trash2,
+  AlertCircle,
 } from "lucide-react";
 import api from "../../api/axios";
-import clsx from "clsx";
+import { useToast } from "../ui/Toast";
 
 interface PermissionsPanelProps {
   resourceId: string;
@@ -21,6 +19,35 @@ interface PermissionsPanelProps {
   resourceName: string;
   onClose: () => void;
 }
+
+const FOLDER_PERMS = [
+  { key: "create_folders", label: "Create folders" },
+  { key: "see_folders", label: "See folders" },
+  { key: "download_folders", label: "Download folders" },
+  { key: "edit_folders", label: "Edit folders" },
+  { key: "move_folders", label: "Move folders" },
+  { key: "delete_folders", label: "Delete folders" },
+  { key: "duplicate_folders", label: "Duplicate folders" },
+  { key: "share_folders", label: "Share folders" },
+  { key: "share_public_link_folder", label: "Share with public link" },
+  { key: "see_audit_trails", label: "See audit trails" },
+];
+
+const FILE_PERMS = [
+  { key: "add_files", label: "Add/create files" },
+  { key: "see_files", label: "See list of files" },
+  { key: "preview_files", label: "Preview files" },
+  { key: "download_files", label: "Download files" },
+  { key: "edit_file_attrs", label: "Edit file attributes" },
+  { key: "update_versions", label: "Update file versions" },
+  { key: "edit_online", label: "Edit files online" },
+  { key: "move_files", label: "Move files" },
+  { key: "delete_files", label: "Delete files" },
+  { key: "duplicate_files", label: "Duplicate files" },
+  { key: "share_files", label: "Share files" },
+  { key: "share_public_link_file", label: "Share with public link" },
+  { key: "see_audit_trails_file", label: "See audit trails" },
+];
 
 const ACTION_LABELS: Record<string, string> = {
   read: "View only",
@@ -30,11 +57,17 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 const ACTION_COLORS: Record<string, string> = {
-  read: "bg-blue-50 text-blue-700",
+  read: "bg-primary-50 text-primary-700",
   write: "bg-green-50 text-green-700",
   delete: "bg-red-50 text-red-700",
   admin: "bg-purple-50 text-purple-700",
 };
+
+// All checkbox keys that count as "something selected"
+const ALL_PERM_KEYS = [
+  ...FOLDER_PERMS.map((p) => p.key),
+  ...FILE_PERMS.map((p) => p.key),
+];
 
 export default function PermissionsPanel({
   resourceId,
@@ -43,18 +76,53 @@ export default function PermissionsPanel({
   onClose,
 }: PermissionsPanelProps) {
   const queryClient = useQueryClient();
-  const [showAddForm, setShowAddForm] = useState(false);
+  const { add } = useToast();
+  const [tab, setTab] = useState<"access" | "link">("access");
   const [grantedTo, setGrantedTo] = useState<"all" | "user" | "department">(
     "all",
   );
-  const [action, setAction] = useState("read");
   const [userId, setUserId] = useState("");
+  const [departmentId, setDepartmentId] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [copiedLink, setCopiedLink] = useState(false);
   const [generatedLink, setGeneratedLink] = useState("");
   const [expiresInHours, setExpiresInHours] = useState(24);
 
-  // Fetch existing permissions
+  // Granular permission checkboxes — derive action level from selections
+  const [checkedPerms, setCheckedPerms] = useState<Record<string, boolean>>({
+    see_folders: true,
+    see_files: true,
+    preview_files: true,
+  });
+  const togglePerm = (key: string) =>
+    setCheckedPerms((p) => ({ ...p, [key]: !p[key] }));
+
+  // Whether at least one real permission checkbox is checked
+  const hasAnyPermChecked = ALL_PERM_KEYS.some((k) => checkedPerms[k]);
+
+  // Derive action level from checked boxes
+  const deriveAction = (): string => {
+    const c = checkedPerms;
+    const adminKeys = ["manage_users", "download_all_data", "modify_account"];
+    if (adminKeys.some((k) => c[k])) return "admin";
+    const deleteKeys = ["delete_files", "delete_folders"];
+    if (deleteKeys.some((k) => c[k])) return "delete";
+    const writeKeys = [
+      "add_files",
+      "edit_file_attrs",
+      "edit_online",
+      "move_files",
+      "update_versions",
+      "create_folders",
+      "move_folders",
+      "edit_folders",
+      "duplicate_files",
+      "duplicate_folders",
+    ];
+    if (writeKeys.some((k) => c[k])) return "write";
+    return "read";
+  };
+
   const { data, isLoading } = useQuery({
     queryKey: ["permissions", resourceType, resourceId],
     queryFn: async () => {
@@ -63,45 +131,66 @@ export default function PermissionsPanel({
     },
   });
 
-  // Fetch users for user selector
-  const { data: usersData } = useQuery({
+  const {
+    data: usersData,
+    isError: usersError,
+    isLoading: usersLoading,
+  } = useQuery({
     queryKey: ["users"],
     queryFn: async () => {
       const res = await api.get("/users");
       return res.data as { users: any[] };
     },
+    retry: false,
   });
 
-  // Grant permission
+  const { data: deptsData, isLoading: deptsLoading } = useQuery({
+    queryKey: ["departments"],
+    queryFn: async () => {
+      const res = await api.get("/users/departments");
+      return res.data as {
+        departments: { id: string; name: string; _count: { users: number } }[];
+      };
+    },
+    retry: false,
+  });
+
   const grantPermission = useMutation({
     mutationFn: async () => {
-      const res = await api.post("/permissions", {
+      await api.post("/permissions", {
         resourceType,
         resourceId,
         grantedTo,
         userId: grantedTo === "user" && userId ? userId : null,
-        action,
-        expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+        departmentId:
+          grantedTo === "department" && departmentId ? departmentId : null,
+        action: deriveAction(),
+        capabilities: checkedPerms,
+        expiresAt:
+          checkedPerms["expiration"] && expiresAt
+            ? new Date(expiresAt).toISOString()
+            : null,
       });
-      return res.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["permissions", resourceType, resourceId],
       });
-      setShowAddForm(false);
-      setGrantedTo("all");
-      setAction("read");
-      setUserId("");
+      add("Permission granted successfully", "success");
+      // Keep grantedTo and userId so admins can easily grant to multiple users
       setExpiresAt("");
+      setCheckedPerms({
+        see_folders: true,
+        see_files: true,
+        preview_files: true,
+      });
     },
     onError: (err: any) => {
-      console.error("Permission error:", err.response?.data);
-      alert(err.response?.data?.error || "Failed to grant permission");
+      const msg = err.response?.data?.error || "Failed to grant permission";
+      add(msg, "error");
     },
   });
 
-  // Revoke permission
   const revokePermission = useMutation({
     mutationFn: async (permissionId: string) => {
       await api.delete(`/permissions/${permissionId}`);
@@ -110,347 +199,459 @@ export default function PermissionsPanel({
       queryClient.invalidateQueries({
         queryKey: ["permissions", resourceType, resourceId],
       });
+      add("Permission revoked", "success");
+    },
+    onError: (err: any) => {
+      const msg = err.response?.data?.error || "Failed to revoke permission";
+      add(msg, "error");
     },
   });
 
-  // Generate one-time link (files only)
   const generateLink = useMutation({
     mutationFn: async () => {
       const res = await api.post("/permissions/one-time-link", {
         fileId: resourceId,
         expiresInHours,
       });
-      return res.data as { link: string; expiresAt: string };
+      return res.data as { link: string };
     },
-    onSuccess: (data) => {
-      setGeneratedLink(data.link);
+    onSuccess: (data) => setGeneratedLink(data.link),
+    onError: (err: any) => {
+      const msg = err.response?.data?.error || "Failed to generate link";
+      add(msg, "error");
     },
   });
 
-  const copyLink = () => {
-    navigator.clipboard.writeText(generatedLink);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(generatedLink);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch {
+      add("Could not copy to clipboard", "error");
+    }
   };
+
+  // Minimum datetime for expiry = now (prevent past dates)
+  const minDatetime = new Date().toISOString().slice(0, 16);
 
   const permissions = data?.permissions ?? [];
   const users = usersData?.users ?? [];
+  const departments = deptsData?.departments ?? [];
+
+  // Whether SHARE should be disabled
+  const shareDisabled =
+    grantPermission.isPending ||
+    !hasAnyPermChecked ||
+    (grantedTo === "user" && !userId) ||
+    (grantedTo === "department" && !departmentId);
 
   return (
     <>
-      {/* Backdrop */}
-      <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
-
-      {/* Panel */}
-      <div
-        className="fixed right-0 top-0 h-full w-96 bg-white shadow-2xl z-50
-                        flex flex-col border-l border-gray-200"
-      >
+      <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
+      <div className="fixed right-0 top-0 h-full w-[480px] bg-white dark:bg-gray-900 shadow-2xl z-50 flex flex-col border-l border-gray-200 dark:border-gray-700">
         {/* Header */}
-        <div
-          className="flex items-center justify-between px-5 py-4
-                          border-b border-gray-200 shrink-0"
-        >
-          <div className="flex items-center gap-2">
-            <Shield size={16} className="text-blue-500" />
-            <div>
-              <p className="text-sm font-semibold text-gray-900">Permissions</p>
-              <p className="text-xs text-gray-400 truncate max-w-48">
-                {resourceName}
-              </p>
-            </div>
-          </div>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-primary-600 text-white shrink-0">
+          <p className="text-sm font-semibold truncate max-w-xs">
+            Share — {resourceName}
+          </p>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 p-1 rounded-lg
-                        hover:bg-gray-100 transition-colors"
+            className="p-1 rounded hover:bg-white/20 transition-colors"
           >
-            ✕
+            <X size={16} />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5">
-          {/* Current permissions */}
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-                Access ({permissions.length})
-              </h3>
-              <button
-                onClick={() => setShowAddForm(true)}
-                className="flex items-center gap-1 text-xs text-blue-600
-                            hover:text-blue-700 font-medium"
-              >
-                <Plus size={12} />
-                Add
-              </button>
-            </div>
+        {/* Tabs */}
+        <div className="flex border-b border-gray-200 dark:border-gray-700 shrink-0">
+          <button
+            onClick={() => setTab("access")}
+            className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${tab === "access" ? "border-b-2 border-primary-500 text-primary-500" : "text-gray-500 hover:text-gray-700"}`}
+          >
+            ACCESS
+          </button>
+          {resourceType === "file" && (
+            <button
+              onClick={() => setTab("link")}
+              className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${tab === "link" ? "border-b-2 border-primary-500 text-primary-500" : "text-gray-500 hover:text-gray-700"}`}
+            >
+              ONE-TIME LINK
+            </button>
+          )}
+        </div>
 
-            {isLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader size={16} className="animate-spin text-gray-400" />
-              </div>
-            ) : permissions.length === 0 ? (
-              <div className="text-center py-8 bg-gray-50 rounded-xl">
-                <Shield size={24} className="text-gray-300 mx-auto mb-2" />
-                <p className="text-xs font-medium text-gray-500">
-                  No permissions set
-                </p>
-                <p className="text-xs text-gray-400 mt-1">
-                  Only admins can access this {resourceType}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {permissions.map((perm) => (
-                  <div
-                    key={perm.id}
-                    className="flex items-center gap-3 p-3 bg-gray-50
-                                rounded-xl border border-gray-100"
-                  >
-                    {/* Icon */}
-                    <div
-                      className="w-8 h-8 bg-white rounded-lg border border-gray-200
-                                      flex items-center justify-center shrink-0"
-                    >
-                      {perm.grantedTo === "all" ? (
-                        <Users size={14} className="text-gray-500" />
-                      ) : (
-                        <User size={14} className="text-gray-500" />
-                      )}
-                    </div>
-
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-gray-800">
-                        {perm.grantedTo === "all"
-                          ? "All users"
-                          : perm.user?.name || "Unknown user"}
-                      </p>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <span
-                          className={`text-xs px-1.5 py-0.5 rounded-full font-medium
-                                          ${ACTION_COLORS[perm.action]}`}
+        <div className="flex-1 overflow-y-auto">
+          {tab === "access" && (
+            <div className="p-5">
+              {/* Existing permissions */}
+              {isLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader size={16} className="animate-spin text-gray-400" />
+                </div>
+              ) : (
+                permissions.length > 0 && (
+                  <div className="mb-5 space-y-2">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                      Current Access ({permissions.length})
+                    </p>
+                    {permissions.map((perm) => (
+                      <div
+                        key={perm.id}
+                        className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-gray-800 dark:text-gray-200">
+                            {perm.grantedTo === "all"
+                              ? "All users"
+                              : perm.grantedTo === "department"
+                                ? `Dept: ${perm.department?.name ?? "Unknown department"}`
+                                : perm.user?.name || "Unknown user"}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                            <span
+                              className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${ACTION_COLORS[perm.action]}`}
+                            >
+                              {ACTION_LABELS[perm.action]}
+                            </span>
+                            {/* Show up to 3 individual capability tags if stored */}
+                            {perm.capabilities &&
+                              typeof perm.capabilities === "object" &&
+                              Object.entries(
+                                perm.capabilities as Record<string, boolean>,
+                              )
+                                .filter(
+                                  ([k, v]) =>
+                                    v &&
+                                    k !== "expiration" &&
+                                    k !== "apply_subfolders",
+                                )
+                                .slice(0, 3)
+                                .map(([k]) => {
+                                  const meta = [
+                                    ...FOLDER_PERMS,
+                                    ...FILE_PERMS,
+                                  ].find((p) => p.key === k);
+                                  return (
+                                    <span
+                                      key={k}
+                                      className="text-xs px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full"
+                                    >
+                                      {meta?.label ?? k}
+                                    </span>
+                                  );
+                                })}
+                            {perm.expiresAt && (
+                              <span className="text-xs text-gray-400 flex items-center gap-0.5">
+                                <Clock size={10} />
+                                {new Date(perm.expiresAt).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => revokePermission.mutate(perm.id)}
+                          disabled={revokePermission.isPending}
+                          className="text-gray-400 hover:text-red-500 p-1 disabled:opacity-50"
                         >
-                          {ACTION_LABELS[perm.action]}
-                        </span>
-                        {perm.expiresAt && (
-                          <span className="text-xs text-gray-400 flex items-center gap-0.5">
-                            <Clock size={10} />
-                            {new Date(perm.expiresAt).toLocaleDateString()}
-                          </span>
-                        )}
+                          <Trash2 size={13} />
+                        </button>
                       </div>
-                    </div>
-
-                    {/* Revoke */}
-                    <button
-                      onClick={() => revokePermission.mutate(perm.id)}
-                      className="text-gray-400 hover:text-red-500 transition-colors p-1"
-                      title="Revoke permission"
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
+                )
+              )}
 
-          {/* Add permission form */}
-          {showAddForm && (
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-              <h3 className="text-xs font-semibold text-gray-900 mb-3">
-                Grant Access
-              </h3>
-
-              {/* Grant to */}
-              <div className="mb-3">
-                <label className="text-xs font-medium text-gray-600 mb-1 block">
-                  Grant to
-                </label>
-                <div className="flex gap-1.5">
-                  {(["all", "user"] as const).map((type) => (
+              {/* Who to share with — always visible */}
+              <div className="mb-5">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                  Share with
+                </p>
+                <div className="flex gap-2 mb-3">
+                  {(["all", "user", "department"] as const).map((type) => (
                     <button
                       key={type}
-                      onClick={() => setGrantedTo(type)}
-                      className={clsx(
-                        "flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors",
+                      onClick={() => {
+                        setGrantedTo(type);
+                        setUserId("");
+                        setDepartmentId("");
+                      }}
+                      className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
                         grantedTo === type
-                          ? "bg-blue-600 text-white"
-                          : "bg-white text-gray-600 border border-gray-200",
-                      )}
+                          ? "bg-primary-600 text-white"
+                          : "bg-white dark:bg-gray-800 text-gray-600 border border-gray-200 dark:border-gray-700"
+                      }`}
                     >
-                      {type === "all" ? "All Users" : "Specific User"}
+                      {type === "all"
+                        ? "All Users"
+                        : type === "user"
+                          ? "Specific User"
+                          : "Department"}
                     </button>
                   ))}
                 </div>
+                {grantedTo === "user" && (
+                  <>
+                    {usersLoading ? (
+                      <div className="flex items-center justify-center py-4">
+                        <Loader
+                          size={14}
+                          className="animate-spin text-gray-400"
+                        />
+                      </div>
+                    ) : usersError ? (
+                      <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                        <AlertCircle
+                          size={14}
+                          className="text-red-500 shrink-0"
+                        />
+                        <p className="text-xs text-red-600 dark:text-red-400">
+                          You don't have permission to view the user list. Ask
+                          an Admin to share.
+                        </p>
+                      </div>
+                    ) : (
+                      <select
+                        value={userId}
+                        onChange={(e) => setUserId(e.target.value)}
+                        className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      >
+                        <option value="">Choose a user...</option>
+                        {users.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name} ({u.email})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </>
+                )}
+                {grantedTo === "department" && (
+                  <>
+                    {deptsLoading ? (
+                      <div className="flex items-center justify-center py-4">
+                        <Loader
+                          size={14}
+                          className="animate-spin text-gray-400"
+                        />
+                      </div>
+                    ) : departments.length === 0 ? (
+                      <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                        <AlertCircle
+                          size={14}
+                          className="text-amber-500 shrink-0"
+                        />
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
+                          No departments exist yet. Create them in User
+                          Management first.
+                        </p>
+                      </div>
+                    ) : (
+                      <select
+                        value={departmentId}
+                        onChange={(e) => setDepartmentId(e.target.value)}
+                        className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      >
+                        <option value="">Choose a department...</option>
+                        {departments.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.name} ({d._count.users} member
+                            {d._count.users !== 1 ? "s" : ""})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </>
+                )}
               </div>
 
-              {/* User selector */}
-              {grantedTo === "user" && (
-                <div className="mb-3">
-                  <label className="text-xs font-medium text-gray-600 mb-1 block">
-                    Select user
-                  </label>
-                  <select
-                    value={userId}
-                    onChange={(e) => setUserId(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-gray-200
-                                rounded-lg text-xs focus:outline-none focus:ring-2
-                                focus:ring-blue-400"
-                  >
-                    <option value="">Choose a user...</option>
-                    {users.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} ({u.email})
-                      </option>
+              {/* Granular permissions */}
+              <div className="space-y-5">
+                <div>
+                  <p className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3">
+                    FOLDER
+                  </p>
+                  <div className="grid grid-cols-2 gap-y-2.5 gap-x-4">
+                    {FOLDER_PERMS.map((p) => (
+                      <label
+                        key={p.key}
+                        className="flex items-center gap-2 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!!checkedPerms[p.key]}
+                          onChange={() => togglePerm(p.key)}
+                          className="w-4 h-4 rounded border-gray-300 text-primary-500 accent-primary-500 cursor-pointer"
+                        />
+                        <span className="text-xs text-gray-600 dark:text-gray-400">
+                          {p.label}
+                        </span>
+                      </label>
                     ))}
-                  </select>
+                  </div>
                 </div>
-              )}
 
-              {/* Permission level */}
-              <div className="mb-3">
-                <label className="text-xs font-medium text-gray-600 mb-1 block">
-                  Permission level
-                </label>
-                <select
-                  value={action}
-                  onChange={(e) => setAction(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-gray-200
-                              rounded-lg text-xs focus:outline-none focus:ring-2
-                              focus:ring-blue-400"
-                >
-                  <option value="read">View only</option>
-                  <option value="write">Can edit</option>
-                  <option value="delete">Can delete</option>
-                  <option value="admin">Full access</option>
-                </select>
-              </div>
+                <div>
+                  <p className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3">
+                    FILE
+                  </p>
+                  <div className="grid grid-cols-2 gap-y-2.5 gap-x-4">
+                    {FILE_PERMS.map((p) => (
+                      <label
+                        key={p.key}
+                        className="flex items-center gap-2 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!!checkedPerms[p.key]}
+                          onChange={() => togglePerm(p.key)}
+                          className="w-4 h-4 rounded border-gray-300 text-primary-500 accent-primary-500 cursor-pointer"
+                        />
+                        <span className="text-xs text-gray-600 dark:text-gray-400">
+                          {p.label}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
 
-              {/* Expiry */}
-              <div className="mb-4">
-                <label className="text-xs font-medium text-gray-600 mb-1 block">
-                  Expires (optional)
-                </label>
-                <input
-                  type="datetime-local"
-                  value={expiresAt}
-                  onChange={(e) => setExpiresAt(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-gray-200
-                              rounded-lg text-xs focus:outline-none focus:ring-2
-                              focus:ring-blue-400"
-                />
-              </div>
+                <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={!!checkedPerms["apply_subfolders"]}
+                      onChange={() => togglePerm("apply_subfolders")}
+                      className="w-4 h-4 rounded border-gray-300 accent-primary-500 cursor-pointer"
+                    />
+                    <span className="text-xs text-gray-600 dark:text-gray-400">
+                      Apply to subfolders
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer mt-2.5">
+                    <input
+                      type="checkbox"
+                      checked={!!checkedPerms["expiration"]}
+                      onChange={() => togglePerm("expiration")}
+                      className="w-4 h-4 rounded border-gray-300 accent-primary-500 cursor-pointer"
+                    />
+                    <span className="text-xs text-gray-600 dark:text-gray-400">
+                      Expiration
+                    </span>
+                  </label>
+                  {checkedPerms["expiration"] && (
+                    <input
+                      type="datetime-local"
+                      value={expiresAt}
+                      min={minDatetime}
+                      onChange={(e) => setExpiresAt(e.target.value)}
+                      className="mt-2 w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  )}
+                </div>
 
-              {/* Actions */}
-              <div className="flex gap-2">
+                {/* No permission warning */}
+                {!hasAnyPermChecked && (
+                  <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                    <AlertCircle
+                      size={14}
+                      className="text-amber-500 shrink-0"
+                    />
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Select at least one permission to share.
+                    </p>
+                  </div>
+                )}
+
+                {/* Derived action label */}
+                {hasAnyPermChecked && (
+                  <div className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                    <span className="text-xs text-gray-500">
+                      Permission level
+                    </span>
+                    <span
+                      className={`text-xs font-semibold px-2 py-0.5 rounded-full ${ACTION_COLORS[deriveAction()]}`}
+                    >
+                      {ACTION_LABELS[deriveAction()]}
+                    </span>
+                  </div>
+                )}
+
                 <button
                   onClick={() => grantPermission.mutate()}
-                  disabled={
-                    grantPermission.isPending ||
-                    (grantedTo === "user" && !userId)
-                  }
-                  className="flex-1 py-2 bg-blue-600 hover:bg-blue-700
-                              disabled:opacity-50 text-white text-xs font-medium
-                              rounded-lg transition-colors"
+                  disabled={shareDisabled}
+                  className="w-full py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold text-sm rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {grantPermission.isPending ? "Granting..." : "Grant Access"}
-                </button>
-                <button
-                  onClick={() => setShowAddForm(false)}
-                  className="px-3 py-2 text-gray-600 hover:text-gray-800
-                              text-xs transition-colors"
-                >
-                  Cancel
+                  {grantPermission.isPending ? "Sharing..." : "SHARE"}
                 </button>
               </div>
             </div>
           )}
 
-          {/* One-time link (files only) */}
-          {resourceType === "file" && (
-            <div>
-              <h3
-                className="text-xs font-medium text-gray-400 uppercase
-                              tracking-wider mb-3"
-              >
-                One-Time View Link
-              </h3>
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-                <p className="text-xs text-gray-600 mb-3">
-                  Generate a secure link that can only be viewed once. Perfect
-                  for sharing with external users.
-                </p>
-
-                <div className="flex items-center gap-2 mb-3">
-                  <label className="text-xs font-medium text-gray-600 shrink-0">
-                    Expires in
-                  </label>
-                  <select
-                    value={expiresInHours}
-                    onChange={(e) => setExpiresInHours(Number(e.target.value))}
-                    className="flex-1 px-2 py-1.5 bg-white border border-gray-200
-                                rounded-lg text-xs focus:outline-none"
-                  >
-                    <option value={1}>1 hour</option>
-                    <option value={6}>6 hours</option>
-                    <option value={24}>24 hours</option>
-                    <option value={72}>3 days</option>
-                    <option value={168}>7 days</option>
-                  </select>
-                </div>
-
-                {!generatedLink ? (
-                  <button
-                    onClick={() => generateLink.mutate()}
-                    disabled={generateLink.isPending}
-                    className="w-full flex items-center justify-center gap-2
-                                py-2 bg-gray-800 hover:bg-gray-900 text-white
-                                text-xs font-medium rounded-lg transition-colors
-                                disabled:opacity-50"
-                  >
-                    {generateLink.isPending ? (
-                      <Loader size={12} className="animate-spin" />
-                    ) : (
-                      <Link size={12} />
-                    )}
-                    Generate Link
-                  </button>
-                ) : (
-                  <div>
-                    <div
-                      className="flex items-center gap-2 bg-white border
-                                      border-gray-200 rounded-lg px-3 py-2 mb-2"
-                    >
-                      <p className="text-xs text-gray-600 truncate flex-1">
-                        {generatedLink}
-                      </p>
-                      <button
-                        onClick={copyLink}
-                        className="shrink-0 text-gray-400 hover:text-gray-600"
-                      >
-                        {copiedLink ? (
-                          <Check size={13} className="text-green-500" />
-                        ) : (
-                          <Copy size={13} />
-                        )}
-                      </button>
-                    </div>
-                    <p className="text-xs text-amber-600 text-center">
-                      ⚠️ This link works only once
+          {tab === "link" && (
+            <div className="p-5">
+              <p className="text-xs text-gray-500 mb-4">
+                Generate a secure one-time link. It can only be viewed once.
+              </p>
+              <div className="flex items-center gap-2 mb-4">
+                <label className="text-xs font-medium text-gray-600 shrink-0">
+                  Expires in
+                </label>
+                <select
+                  value={expiresInHours}
+                  onChange={(e) => setExpiresInHours(Number(e.target.value))}
+                  className="flex-1 px-2 py-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs focus:outline-none"
+                >
+                  <option value={1}>1 hour</option>
+                  <option value={6}>6 hours</option>
+                  <option value={24}>24 hours</option>
+                  <option value={72}>3 days</option>
+                  <option value={168}>7 days</option>
+                </select>
+              </div>
+              {!generatedLink ? (
+                <button
+                  onClick={() => generateLink.mutate()}
+                  disabled={generateLink.isPending}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-xl disabled:opacity-50"
+                >
+                  {generateLink.isPending ? (
+                    <Loader size={14} className="animate-spin" />
+                  ) : (
+                    <Link size={14} />
+                  )}
+                  Generate Link
+                </button>
+              ) : (
+                <div>
+                  <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 mb-2">
+                    <p className="text-xs text-gray-600 truncate flex-1">
+                      {generatedLink}
                     </p>
                     <button
-                      onClick={() => setGeneratedLink("")}
-                      className="w-full mt-2 text-xs text-gray-500
-                                  hover:text-gray-700 transition-colors"
+                      onClick={copyLink}
+                      className="shrink-0 text-gray-400 hover:text-gray-600"
                     >
-                      Generate another
+                      {copiedLink ? (
+                        <Check size={13} className="text-green-500" />
+                      ) : (
+                        <Copy size={13} />
+                      )}
                     </button>
                   </div>
-                )}
-              </div>
+                  <p className="text-xs text-amber-600 text-center mb-2">
+                    ⚠️ This link works only once
+                  </p>
+                  <button
+                    onClick={() => {
+                      if (!generateLink.isPending) setGeneratedLink("");
+                    }}
+                    disabled={generateLink.isPending}
+                    className="w-full text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Generate another
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

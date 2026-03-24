@@ -4,7 +4,6 @@ import {
   Trash2,
   Loader,
   CheckCircle,
-  Clock,
   AlertTriangle,
 } from "lucide-react";
 import AppShell from "../../components/layout/AppShell";
@@ -26,9 +25,9 @@ function linkStatus(link: SharedLink): "used" | "expired" | "active" {
 }
 
 const statusBadge = {
-  active: "bg-green-100 text-green-700",
-  used: "bg-gray-100 text-gray-500",
-  expired: "bg-red-100 text-red-600",
+  active: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  used: "bg-gray-100 text-gray-500 dark:bg-white/5 dark:text-gray-400",
+  expired: "bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400",
 };
 
 const statusIcon = {
@@ -43,14 +42,16 @@ export default function SharedLinksPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["one-time-links"],
     queryFn: async () => {
-      const res = await api.get("/files/one-time-links");
+      // Use the permissions route which is role-checked and returns consistent data
+      const res = await api.get("/permissions/shared-links");
       return res.data as { links: SharedLink[] };
     },
   });
 
   const revoke = useMutation({
     mutationFn: async (id: string) => {
-      await api.delete(`/files/one-time-links/${id}`);
+      // Use the permissions route: marks isUsed=true and logs audit event
+      await api.delete(`/permissions/shared-links/${id}`);
     },
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["one-time-links"] }),
@@ -63,48 +64,48 @@ export default function SharedLinksPage() {
     <AppShell>
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-9 h-9 bg-purple-50 rounded-xl flex items-center justify-center">
-            <Link2 size={18} className="text-purple-600" />
+          <div className="w-9 h-9 bg-purple-50 dark:bg-purple-900/40 rounded-xl flex items-center justify-center">
+            <Link2 size={18} className="text-purple-600 dark:text-purple-400" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-gray-900">
+            <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
               Shared links
             </h1>
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-gray-400 dark:text-gray-500">
               {activeCount} active link{activeCount !== 1 ? "s" : ""}
             </p>
           </div>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
           {isLoading ? (
             <div className="flex items-center justify-center py-16">
-              <Loader size={20} className="animate-spin text-gray-400" />
+              <Loader size={20} className="animate-spin text-gray-400 dark:text-gray-500" />
             </div>
           ) : links.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <Link2 size={24} className="text-gray-300 mb-3" />
-              <p className="text-sm font-medium text-gray-500">
+              <Link2 size={24} className="text-gray-300 dark:text-gray-600 mb-3" />
+              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
                 No shared links yet
               </p>
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                 One-time links appear here when files are shared
               </p>
             </div>
           ) : (
             <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                <tr className="border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-white/5">
+                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                     File
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                     Status
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                     Created
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                     Expires
                   </th>
                   <th className="px-4 py-3" />
@@ -116,13 +117,13 @@ export default function SharedLinksPage() {
                   return (
                     <tr
                       key={link.id}
-                      className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50"
+                      className="border-b border-gray-100 dark:border-gray-800 last:border-b-0 hover:bg-gray-50 dark:hover:bg-white/5"
                     >
                       <td className="px-4 py-3">
-                        <p className="text-sm font-medium text-gray-900 truncate max-w-xs">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white truncate max-w-xs">
                           {link.file.name}
                         </p>
-                        <p className="text-xs text-gray-400 font-mono mt-0.5 truncate max-w-xs">
+                        <p className="text-xs text-gray-400 dark:text-gray-500 font-mono mt-0.5 truncate max-w-xs">
                           {link.token}
                         </p>
                       </td>
@@ -134,7 +135,7 @@ export default function SharedLinksPage() {
                           {status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-400">
+                      <td className="px-4 py-3 text-sm text-gray-400 dark:text-gray-500">
                         {new Date(link.createdAt).toLocaleDateString("en-US", {
                           month: "short",
                           day: "numeric",
@@ -143,7 +144,7 @@ export default function SharedLinksPage() {
                       </td>
                       <td className="px-4 py-3">
                         <span
-                          className={`text-sm ${new Date(link.expiresAt) < new Date() ? "text-red-400" : "text-gray-400"}`}
+                          className={`text-sm ${new Date(link.expiresAt) < new Date() ? "text-red-400" : "text-gray-400 dark:text-gray-500"}`}
                         >
                           {new Date(link.expiresAt).toLocaleDateString(
                             "en-US",

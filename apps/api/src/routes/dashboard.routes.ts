@@ -8,6 +8,39 @@ const router = Router();
 router.get("/stats", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
     const tenantId = req.user!.tenantId;
+    const { userId, role } = req.user!;
+
+    const isPrivileged = [
+      "SUPERADMIN",
+      "ORG_ADMIN",
+      "MANAGER",
+      "EDITOR",
+    ].includes(role);
+
+    // For VIEWER — get only file IDs they have permission to see
+    let allowedFileIds: string[] | null = null;
+    if (!isPrivileged) {
+      const perms = await prisma.permission.findMany({
+        where: {
+          resourceType: "file",
+          OR: [{ grantedTo: "all" }, { grantedTo: "user", userId }],
+          AND: [
+            { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+            { file: { tenantId } },
+          ],
+        },
+        select: { resourceId: true },
+      });
+      allowedFileIds = perms.map((p) => p.resourceId);
+    }
+
+    const fileWhere = {
+      tenantId,
+      isDeleted: false,
+      ...(allowedFileIds !== null
+        ? { OR: [{ id: { in: allowedFileIds } }, { uploadedById: userId }] }
+        : {}),
+    };
 
     const [
       tenantData,
@@ -22,15 +55,15 @@ router.get("/stats", verifyAuth, async (req: AuthRequest, res: Response) => {
         where: { id: tenantId },
         select: { plan: true },
       }),
-      prisma.file.count({ where: { tenantId, isDeleted: false } }),
+      prisma.file.count({ where: fileWhere }),
       prisma.folder.count({ where: { tenantId, isDeleted: false } }),
       prisma.user.count({ where: { tenantId, isActive: true } }),
       prisma.file.aggregate({
-        where: { tenantId, isDeleted: false },
+        where: fileWhere,
         _sum: { size: true },
       }),
       prisma.file.findMany({
-        where: { tenantId, isDeleted: false },
+        where: fileWhere,
         orderBy: { createdAt: "desc" },
         take: 5,
         select: {

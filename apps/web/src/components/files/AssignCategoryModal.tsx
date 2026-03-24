@@ -114,7 +114,7 @@ export default function AssignCategoryModal({
                   className={clsx(
                     "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-left mb-1 border",
                     selected === cat.id
-                      ? "bg-blue-50 border-blue-200"
+                      ? "bg-primary-50 border-primary-100"
                       : "border-transparent hover:bg-gray-50",
                   )}
                 >
@@ -125,7 +125,7 @@ export default function AssignCategoryModal({
                     {cat.name}
                   </span>
                   {selected === cat.id && (
-                    <Check size={14} className="text-blue-600" />
+                    <Check size={14} className="text-primary-500" />
                   )}
                 </button>
               ))
@@ -144,7 +144,7 @@ export default function AssignCategoryModal({
             <button
               onClick={() => assign.mutate()}
               disabled={assign.isPending}
-              className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700
+              className="flex-1 px-4 py-2 bg-primary-600 hover:bg-primary-700
                          disabled:opacity-50 text-white text-sm font-medium
                          rounded-lg transition-colors"
             >

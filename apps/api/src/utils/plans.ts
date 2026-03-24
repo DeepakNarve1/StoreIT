@@ -1,7 +1,7 @@
 export const PLAN_LIMITS = {
   free: { storageBytes: 1 * 1024 ** 3, maxUsers: 3, price: 0 },
-  starter: { storageBytes: 10 * 1024 ** 3, maxUsers: 10, price: 2700 }, // $27/mo in cents
-  pro: { storageBytes: 100 * 1024 ** 3, maxUsers: 50, price: 7900 }, // $79/mo
+  starter: { storageBytes: 150 * 1024 ** 3, maxUsers: 5, price: 400000 }, // Rs 4000 in paise
+  pro: { storageBytes: 500 * 1024 ** 3, maxUsers: 10, price: 921100 }, // Rs 9211
   enterprise: { storageBytes: Infinity, maxUsers: Infinity, price: 0 },
 } as const;
 
@@ -12,9 +12,9 @@ export function getPlanLimits(plan: string) {
 }
 
 // Map plan name → Stripe Price ID
-// You'll create these in Stripe dashboard and paste the IDs here
+// Keys must match the plan IDs used in checkout and the names in .env
 export const STRIPE_PRICE_IDS: Record<string, string> = {
-  starter: process.env.STRIPE_PRICE_STARTER ?? "",
-  pro: process.env.STRIPE_PRICE_PRO ?? "",
-  enterprise: process.env.STRIPE_PRICE_ENTERPRISE ?? "",
+  starter: process.env.STRIPE_PRICE_MINI ?? "",
+  pro: process.env.STRIPE_PRICE_MEDIUM ?? "",
+  enterprise: process.env.STRIPE_PRICE_TAILOR ?? "",
 };

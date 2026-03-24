@@ -14,6 +14,9 @@ import {
 import AppShell from "../components/layout/AppShell";
 import api from "../api/axios";
 import clsx from "clsx";
+import { useState } from "react";
+import { useAuthStore } from "../store/authStore";
+import DeleteModal from "../components/common/DeleteModal";
 
 const getFileIcon = (mimeType: string) => {
   if (mimeType.startsWith("image/"))
@@ -26,7 +29,7 @@ const getFileIcon = (mimeType: string) => {
     return { icon: FileText, color: "text-red-500" };
   if (mimeType.includes("zip"))
     return { icon: Archive, color: "text-yellow-500" };
-  return { icon: File, color: "text-blue-500" };
+  return { icon: File, color: "text-primary-500" };
 };
 
 const timeAgo = (dateStr: string) => {
@@ -39,7 +42,15 @@ const timeAgo = (dateStr: string) => {
 
 export default function TrashPage() {
   const queryClient = useQueryClient();
-
+  const { user } = useAuthStore();
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; type: "file" | "folder" } | null>(null);
+  const canRestore = ["ORG_ADMIN", "SUPERADMIN", "MANAGER", "EDITOR"].includes(
+    user?.role ?? "",
+  );
+  // Only MANAGER+ can hard-delete from trash (Editor can soft-delete files, not permanently erase them)
+  const canPermanentDelete = ["ORG_ADMIN", "SUPERADMIN", "MANAGER"].includes(
+    user?.role ?? "",
+  );
   const { data, isLoading } = useQuery({
     queryKey: ["trash"],
     queryFn: async () => {
@@ -55,6 +66,7 @@ export default function TrashPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["trash"] });
       queryClient.invalidateQueries({ queryKey: ["files"] });
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
     },
   });
 
@@ -64,7 +76,10 @@ export default function TrashPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["trash"] });
+      queryClient.invalidateQueries({ queryKey: ["recent-files"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
     },
+    onSettled: () => setDeleteTarget(null),
   });
 
   const restoreFolder = useMutation({
@@ -74,7 +89,20 @@ export default function TrashPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["trash"] });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
+      queryClient.invalidateQueries({ queryKey: ["files"] });
     },
+  });
+
+  // ── NEW: permanent delete for folders ─────────────────────────────────────
+  const deleteFolderPermanent = useMutation({
+    mutationFn: async (folderId: string) => {
+      await api.delete(`/folders/${folderId}/permanent`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["trash"] });
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
+    },
+    onSettled: () => setDeleteTarget(null),
   });
 
   const files = data?.files ?? [];
@@ -91,7 +119,9 @@ export default function TrashPage() {
               <Trash2 size={18} className="text-red-500" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold text-gray-900">Trash</h1>
+              <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Trash
+              </h1>
               <p className="text-xs text-gray-400">
                 {files.length + folders.length} item
                 {files.length + folders.length !== 1 ? "s" : ""}
@@ -102,10 +132,7 @@ export default function TrashPage() {
 
         {/* Warning banner */}
         {!isEmpty && (
-          <div
-            className="flex items-center gap-3 bg-amber-50 border border-amber-200
-                          rounded-xl px-4 py-3 mb-6"
-          >
+          <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-6">
             <AlertTriangle size={16} className="text-amber-500 shrink-0" />
             <p className="text-xs text-amber-700">
               Items in trash can be restored or permanently deleted. Permanently
@@ -116,7 +143,7 @@ export default function TrashPage() {
 
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
-            <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+            <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : isEmpty ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -131,41 +158,63 @@ export default function TrashPage() {
             {/* Folders */}
             {folders.length > 0 && (
               <div>
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">
+                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3 dark:text-gray-400">
                   Folders ({folders.length})
                 </p>
-                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden dark:bg-gray-800 dark:border-gray-700">
                   {folders.map((folder, i) => (
                     <div
                       key={folder.id}
                       className={clsx(
-                        "flex items-center gap-3 px-4 py-3",
-                        i < folders.length - 1 && "border-b border-gray-100",
+                        "flex items-center gap-3 px-4 py-3 dark:bg-gray-800",
+                        i < folders.length - 1 &&
+                          "border-b border-gray-100 dark:border-gray-700",
                       )}
                     >
-                      <div
-                        className="w-8 h-8 bg-gray-100 rounded-lg flex items-center
-                                      justify-center shrink-0"
-                      >
-                        <Folder size={15} className="text-gray-500" />
+                      <div className="w-8 h-8 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center shrink-0">
+                        <Folder
+                          size={15}
+                          className="text-gray-500 dark:text-gray-300"
+                        />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-800 truncate">
+                        <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
                           {folder.name}
                         </p>
                         <p className="text-xs text-gray-400">
                           Deleted {timeAgo(folder.updatedAt)}
                         </p>
                       </div>
-                      <button
-                        onClick={() => restoreFolder.mutate(folder.id)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs
-                                   font-medium text-blue-600 hover:bg-blue-50
-                                   rounded-lg transition-colors"
-                      >
-                        <RotateCcw size={12} />
-                        Restore
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {canRestore && (
+                          <button
+                            onClick={() => restoreFolder.mutate(folder.id)}
+                            disabled={restoreFolder.isPending}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs
+                                     font-medium text-primary-500 dark:text-primary-400
+                                     hover:bg-primary-50 dark:hover:bg-primary-900/30
+                                     rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            <RotateCcw size={12} />
+                            Restore
+                          </button>
+                        )}
+                        {canPermanentDelete && (
+                          <button
+                            onClick={() => {
+                              setDeleteTarget({ id: folder.id, name: folder.name, type: "folder" });
+                            }}
+                            disabled={deleteFolderPermanent.isPending}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs
+                                     font-medium text-red-600 dark:text-red-400
+                                     hover:bg-red-50 dark:hover:bg-red-900/20
+                                     rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            <Trash2 size={12} />
+                            Delete forever
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -175,23 +224,24 @@ export default function TrashPage() {
             {/* Files */}
             {files.length > 0 && (
               <div>
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">
+                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3 dark:text-gray-400">
                   Files ({files.length})
                 </p>
-                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden dark:bg-gray-800 dark:border-gray-700">
                   {files.map((file, i) => {
                     const { icon: Icon, color } = getFileIcon(file.mimeType);
                     return (
                       <div
                         key={file.id}
                         className={clsx(
-                          "flex items-center gap-3 px-4 py-3",
-                          i < files.length - 1 && "border-b border-gray-100",
+                          "flex items-center gap-3 px-4 py-3 dark:bg-gray-800",
+                          i < files.length - 1 &&
+                            "border-b border-gray-100 dark:border-gray-700",
                         )}
                       >
                         <Icon size={16} className={color} />
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-800 truncate">
+                          <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
                             {file.name}
                           </p>
                           <p className="text-xs text-gray-400">
@@ -199,32 +249,34 @@ export default function TrashPage() {
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => restoreFile.mutate(file.id)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs
-                                       font-medium text-blue-600 hover:bg-blue-50
-                                       rounded-lg transition-colors"
-                          >
-                            <RotateCcw size={12} />
-                            Restore
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (
-                                confirm(
-                                  `Permanently delete "${file.name}"? This cannot be undone.`,
-                                )
-                              ) {
-                                deleteFilePermanent.mutate(file.id);
-                              }
-                            }}
-                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs
-                                       font-medium text-red-600 hover:bg-red-50
-                                       rounded-lg transition-colors"
-                          >
-                            <Trash2 size={12} />
-                            Delete forever
-                          </button>
+                          {canRestore && (
+                            <button
+                              onClick={() => restoreFile.mutate(file.id)}
+                              disabled={restoreFile.isPending}
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs
+                                       font-medium text-primary-500 dark:text-primary-400
+                                       hover:bg-primary-50 dark:hover:bg-primary-900/30
+                                       rounded-lg transition-colors disabled:opacity-50"
+                            >
+                              <RotateCcw size={12} />
+                              Restore
+                            </button>
+                          )}
+                          {canPermanentDelete && (
+                            <button
+                              onClick={() => {
+                                setDeleteTarget({ id: file.id, name: file.name, type: "file" });
+                              }}
+                              disabled={deleteFilePermanent.isPending}
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs
+                                       font-medium text-red-600 dark:text-red-400
+                                       hover:bg-red-50 dark:hover:bg-red-900/20
+                                       rounded-lg transition-colors disabled:opacity-50"
+                            >
+                              <Trash2 size={12} />
+                              Delete forever
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -235,6 +287,27 @@ export default function TrashPage() {
           </div>
         )}
       </div>
+
+      <DeleteModal
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          if (deleteTarget.type === "file") {
+            deleteFilePermanent.mutate(deleteTarget.id);
+          } else {
+            deleteFolderPermanent.mutate(deleteTarget.id);
+          }
+        }}
+        title="Delete Permanently"
+        message={
+          deleteTarget?.type === "folder"
+            ? `Permanently delete folder "${deleteTarget.name}" and all its contents? This cannot be undone.`
+            : `Permanently delete "${deleteTarget?.name}"? This cannot be undone.`
+        }
+        isLoading={deleteFilePermanent.isPending || deleteFolderPermanent.isPending}
+        isPermanent={true}
+      />
     </AppShell>
   );
 }

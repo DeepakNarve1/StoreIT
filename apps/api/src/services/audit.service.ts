@@ -23,6 +23,7 @@ export type AuditAction =
   | "folder.create"
   | "folder.rename"
   | "folder.delete"
+  | "folder.delete.permanent"
   | "permission.grant"
   | "permission.revoke"
   | "link.generate"

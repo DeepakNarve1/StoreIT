@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Users,
@@ -27,6 +27,7 @@ interface User {
   isActive: boolean;
   createdAt: string;
   departmentId?: string | null;
+  department?: { id: string; name: string } | null;
 }
 
 interface Invite {
@@ -67,6 +68,8 @@ export default function UsersPage() {
     "users" | "invites" | "departments"
   >("users");
   const [newDeptName, setNewDeptName] = useState("");
+  // Controlled map of userId -> departmentId for the assignment dropdowns
+  const [deptMap, setDeptMap] = useState<Record<string, string>>({});
 
   const { data: usersData, isLoading: usersLoading } = useQuery({
     queryKey: ["users"],
@@ -75,6 +78,16 @@ export default function UsersPage() {
       return res.data as { users: User[] };
     },
   });
+
+  // Sync deptMap whenever usersData refreshes
+  useEffect(() => {
+    if (!usersData?.users) return;
+    const map: Record<string, string> = {};
+    usersData.users.forEach((u) => {
+      map[u.id] = u.departmentId ?? "";
+    });
+    setDeptMap(map);
+  }, [usersData]);
 
   const { data: invitesData, isLoading: invitesLoading } = useQuery({
     queryKey: ["invites"],
@@ -184,7 +197,15 @@ export default function UsersPage() {
       userId: string;
       departmentId: string | null;
     }) => api.patch(`/users/${userId}/department`, { departmentId }),
-    onSuccess: () => {
+    onSuccess: (
+      _data: unknown,
+      vars: { userId: string; departmentId: string | null },
+    ) => {
+      // Update local controlled state immediately so dropdown reflects change
+      setDeptMap((prev) => ({
+        ...prev,
+        [vars.userId]: vars.departmentId ?? "",
+      }));
       queryClient.invalidateQueries({ queryKey: ["users"] });
     },
   });
@@ -210,10 +231,13 @@ export default function UsersPage() {
     <AppShell>
       <div className="max-w-4xl mx-auto">
         {atLimit && (
-          <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-5">
+          <div className="flex items-center justify-between gap-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-4 py-3 mb-5">
             <div className="flex items-center gap-2.5">
-              <AlertTriangle size={15} className="text-amber-600 shrink-0" />
-              <p className="text-sm text-amber-800">
+              <AlertTriangle
+                size={15}
+                className="text-amber-600 dark:text-amber-500 shrink-0"
+              />
+              <p className="text-sm text-amber-800 dark:text-amber-200">
                 You've reached your plan's user limit ({usedUsers}/{maxUsers}).
                 Upgrade to invite more team members.
               </p>
@@ -230,10 +254,10 @@ export default function UsersPage() {
         )}
 
         {nearLimit && (
-          <div className="flex items-center justify-between gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-5">
+          <div className="flex items-center justify-between gap-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl px-4 py-3 mb-5">
             <div className="flex items-center gap-2.5">
               <AlertTriangle size={15} className="text-blue-500 shrink-0" />
-              <p className="text-sm text-blue-800">
+              <p className="text-sm text-blue-800 dark:text-blue-200">
                 Approaching user limit — {usedUsers} of {maxUsers} seats used.
               </p>
             </div>
@@ -250,14 +274,14 @@ export default function UsersPage() {
 
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center">
-              <Users size={18} className="text-blue-600" />
+            <div className="w-9 h-9 bg-blue-50 dark:bg-blue-500/10 rounded-xl flex items-center justify-center">
+              <Users size={18} className="text-blue-600 dark:text-blue-400" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold text-gray-900">
-                Team Members
+              <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
+                User Management
               </h1>
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-gray-400 dark:text-gray-500">
                 {usedUsers} member{usedUsers !== 1 ? "s" : ""}
                 {maxUsers !== null && (
                   <span className={atLimit ? "text-amber-500 font-medium" : ""}>
@@ -298,15 +322,15 @@ export default function UsersPage() {
         </div>
 
         {showInviteForm && !atLimit && (
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-            <h2 className="text-sm font-semibold text-gray-900 mb-3">
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 mb-6">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
               Send invite
             </h2>
 
             {inviteSuccess && (
               <div
-                className="flex items-center gap-2 bg-green-50 border border-green-200
-                              text-green-700 text-sm px-3 py-2 rounded-lg mb-3"
+                className="flex items-center gap-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800
+                              text-green-700 dark:text-green-400 text-sm px-3 py-2 rounded-lg mb-3"
               >
                 <Check size={14} />
                 {inviteSuccess}
@@ -317,8 +341,8 @@ export default function UsersPage() {
               <div
                 className={`border text-sm px-3 py-2.5 rounded-lg mb-3 ${
                   isLimitError
-                    ? "bg-amber-50 border-amber-200 text-amber-800"
-                    : "bg-red-50 border-red-200 text-red-700"
+                    ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-400"
+                    : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-400"
                 }`}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -326,7 +350,7 @@ export default function UsersPage() {
                     {isLimitError && (
                       <AlertTriangle
                         size={14}
-                        className="text-amber-600 mt-0.5 shrink-0"
+                        className="text-amber-600 dark:text-amber-500 mt-0.5 shrink-0"
                       />
                     )}
                     <span>{inviteError}</span>
@@ -356,18 +380,18 @@ export default function UsersPage() {
                   onChange={(e) => setInviteEmail(e.target.value)}
                   placeholder="colleague@company.com"
                   required
-                  className="w-full px-3 py-2 bg-white border border-blue-200 rounded-lg
-                             text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-blue-200 dark:border-blue-800 rounded-lg
+                             text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 dark:text-white dark:placeholder-gray-500"
                 />
               </div>
               <select
                 value={inviteRole}
                 onChange={(e) => setInviteRole(e.target.value as Role)}
-                className="px-3 py-2 bg-white border border-blue-200 rounded-lg text-sm
-                           focus:outline-none focus:ring-2 focus:ring-blue-400"
+                className="px-3 py-2 bg-white dark:bg-gray-900 border border-blue-200 dark:border-blue-800 rounded-lg text-sm
+                           focus:outline-none focus:ring-2 focus:ring-blue-400 dark:text-white appearance-none"
               >
                 {ROLES.map((r) => (
-                  <option key={r} value={r}>
+                  <option key={r} value={r} className="dark:bg-gray-900">
                     {r.replace("_", " ")}
                   </option>
                 ))}
@@ -393,7 +417,7 @@ export default function UsersPage() {
                   setInviteError("");
                   setIsLimitError(false);
                 }}
-                className="p-2 text-gray-500 hover:text-gray-700 hover:bg-white rounded-lg transition-colors"
+                className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-white dark:hover:bg-white/5 rounded-lg transition-colors"
               >
                 <X size={15} />
               </button>
@@ -402,13 +426,13 @@ export default function UsersPage() {
         )}
 
         {/* ── Tabs ── */}
-        <div className="flex gap-1 mb-4 bg-gray-100 p-1 rounded-lg w-fit">
+        <div className="flex gap-1 mb-4 bg-gray-100 dark:bg-white/5 p-1 rounded-lg w-fit">
           <button
             onClick={() => setActiveTab("users")}
             className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
               activeTab === "users"
-                ? "bg-white text-gray-900 shadow-sm"
-                : "text-gray-500 hover:text-gray-700"
+                ? "bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
             }`}
           >
             Members ({users.length})
@@ -417,8 +441,8 @@ export default function UsersPage() {
             onClick={() => setActiveTab("invites")}
             className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
               activeTab === "invites"
-                ? "bg-white text-gray-900 shadow-sm"
-                : "text-gray-500 hover:text-gray-700"
+                ? "bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
             }`}
           >
             Pending invites ({invites.length})
@@ -427,8 +451,8 @@ export default function UsersPage() {
             onClick={() => setActiveTab("departments")}
             className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
               activeTab === "departments"
-                ? "bg-white text-gray-900 shadow-sm"
-                : "text-gray-500 hover:text-gray-700"
+                ? "bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
             }`}
           >
             Departments ({departments.length})
@@ -437,25 +461,28 @@ export default function UsersPage() {
 
         {/* ── Members tab ── */}
         {activeTab === "users" && (
-          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
             {usersLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader size={20} className="animate-spin text-gray-400" />
+              <div className="flex items-center justify-center py-12 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200">
+                <Loader
+                  size={20}
+                  className="animate-spin text-gray-400 dark:text-gray-200"
+                />
               </div>
             ) : (
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50">
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                  <tr className="border-b border-gray-100 dark:border-[#1e1e1e] bg-gray-50 dark:bg-white/5">
+                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                       Member
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                       Role
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                       Status
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                       Joined
                     </th>
                     <th className="px-4 py-3" />
@@ -465,13 +492,13 @@ export default function UsersPage() {
                   {users.map((user) => (
                     <tr
                       key={user.id}
-                      className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors"
+                      className="border-b border-gray-100 dark:border-[#1e1e1e] last:border-b-0 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
                     >
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           <div
-                            className="w-8 h-8 bg-blue-100 rounded-full flex items-center
-                                          justify-center text-blue-700 text-xs font-semibold"
+                            className="w-8 h-8 bg-blue-100 dark:bg-blue-900/40 rounded-full flex items-center
+                                          justify-center text-blue-700 dark:text-blue-400 text-xs font-semibold"
                           >
                             {user.name
                               ?.split(" ")
@@ -481,10 +508,10 @@ export default function UsersPage() {
                               .toUpperCase()}
                           </div>
                           <div>
-                            <p className="text-sm font-medium text-gray-900">
+                            <p className="text-sm font-medium text-gray-900 dark:text-white">
                               {user.name}
                             </p>
-                            <p className="text-xs text-gray-400">
+                            <p className="text-xs text-gray-400 dark:text-gray-500">
                               {user.email}
                             </p>
                           </div>
@@ -492,23 +519,32 @@ export default function UsersPage() {
                       </td>
                       <td className="px-4 py-3">
                         <span
-                          className={`text-xs font-medium px-2 py-1 rounded-full ${roleColors[user.role] || "bg-gray-100 text-gray-600"}`}
+                          className={`text-xs font-medium px-2 py-1 rounded-full ${roleColors[user.role] || "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}
                         >
                           {user.role?.replace("_", " ")}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          {user.department?.name ?? (
+                            <span className="italic text-gray-300 dark:text-gray-600">
+                              —
+                            </span>
+                          )}
                         </span>
                       </td>
                       <td className="px-4 py-3">
                         <span
                           className={`text-xs font-medium px-2 py-1 rounded-full ${
                             user.isActive
-                              ? "bg-green-100 text-green-700"
-                              : "bg-red-100 text-red-600"
+                              ? "bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-400"
+                              : "bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400"
                           }`}
                         >
                           {user.isActive ? "Active" : "Disabled"}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-400">
+                      <td className="px-4 py-3 text-sm text-gray-400 dark:text-gray-500">
                         {new Date(user.createdAt).toLocaleDateString("en-US", {
                           month: "short",
                           day: "numeric",
@@ -523,13 +559,19 @@ export default function UsersPage() {
                               isActive: !user.isActive,
                             })
                           }
-                          className="text-gray-400 hover:text-gray-600 transition-colors"
+                          className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                           title={user.isActive ? "Disable user" : "Enable user"}
                         >
                           {user.isActive ? (
-                            <ToggleRight size={18} className="text-green-500" />
+                            <ToggleRight
+                              size={18}
+                              className="text-green-500 dark:text-green-400"
+                            />
                           ) : (
-                            <ToggleLeft size={18} />
+                            <ToggleLeft
+                              size={18}
+                              className="dark:text-gray-500"
+                            />
                           )}
                         </button>
                       </td>
@@ -543,35 +585,41 @@ export default function UsersPage() {
 
         {/* ── Invites tab ── */}
         {activeTab === "invites" && (
-          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
             {invitesLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader size={20} className="animate-spin text-gray-400" />
+              <div className="flex items-center justify-center py-12 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-200">
+                <Loader
+                  size={20}
+                  className="animate-spin text-gray-400 dark:text-gray-200"
+                />
               </div>
             ) : invites.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
-                <Mail size={24} className="text-gray-300 mb-3" />
-                <p className="text-sm font-medium text-gray-500">
+                <Mail
+                  size={24}
+                  className="text-gray-300 dark:text-gray-600 mb-3"
+                />
+                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
                   No pending invites
                 </p>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                   Invite a team member using the button above
                 </p>
               </div>
             ) : (
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50">
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                  <tr className="border-b border-gray-100 dark:border-[#1e1e1e] bg-gray-50 dark:bg-white/5">
+                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                       Email
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                       Role
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                       Invited by
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                       Expires
                     </th>
                     <th className="px-4 py-3" />
@@ -581,27 +629,30 @@ export default function UsersPage() {
                   {invites.map((invite) => (
                     <tr
                       key={invite.id}
-                      className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50 transition-colors"
+                      className="border-b border-gray-100 dark:border-gray-800 last:border-b-0 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
                     >
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <Mail size={14} className="text-gray-400" />
-                          <span className="text-sm text-gray-800">
+                          <Mail
+                            size={14}
+                            className="text-gray-400 dark:text-gray-500"
+                          />
+                          <span className="text-sm text-gray-800 dark:text-gray-200">
                             {invite.email}
                           </span>
                         </div>
                       </td>
                       <td className="px-4 py-3">
                         <span
-                          className={`text-xs font-medium px-2 py-1 rounded-full ${roleColors[invite.role] || "bg-gray-100 text-gray-600"}`}
+                          className={`text-xs font-medium px-2 py-1 rounded-full ${roleColors[invite.role] || "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}
                         >
                           {invite.role?.replace("_", " ")}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-500">
+                      <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
                         {invite.invitedBy?.name || "—"}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-400">
+                      <td className="px-4 py-3 text-sm text-gray-400 dark:text-gray-500">
                         {new Date(invite.expiresAt).toLocaleDateString(
                           "en-US",
                           { month: "short", day: "numeric" },
@@ -610,7 +661,7 @@ export default function UsersPage() {
                       <td className="px-4 py-3">
                         <button
                           onClick={() => cancelInvite.mutate(invite.id)}
-                          className="text-gray-400 hover:text-red-500 transition-colors"
+                          className="text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
                           title="Cancel invite"
                         >
                           <Trash2 size={14} />
@@ -638,8 +689,8 @@ export default function UsersPage() {
                   createDept.mutate(newDeptName.trim())
                 }
                 placeholder="New department name…"
-                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm
-                           focus:outline-none focus:ring-2 focus:ring-blue-400"
+                className="flex-1 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-800 rounded-lg px-3 py-2 text-sm
+                           focus:outline-none focus:ring-2 focus:ring-blue-400 dark:text-white dark:placeholder-gray-500"
               />
               <button
                 onClick={() =>
@@ -663,25 +714,28 @@ export default function UsersPage() {
                 No departments yet. Create one above.
               </div>
             ) : (
-              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
                 {departments.map((dept, i) => (
                   <div
                     key={dept.id}
                     className={`flex items-center justify-between px-4 py-3 ${
                       i < departments.length - 1
-                        ? "border-b border-gray-100"
+                        ? "border-b border-gray-100 dark:border-gray-800"
                         : ""
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center">
-                        <Building2 size={14} className="text-blue-600" />
+                      <div className="w-8 h-8 bg-blue-50 dark:bg-blue-900/40 rounded-lg flex items-center justify-center">
+                        <Building2
+                          size={14}
+                          className="text-blue-600 dark:text-blue-400"
+                        />
                       </div>
                       <div>
-                        <p className="text-sm font-medium text-gray-800">
+                        <p className="text-sm font-medium text-gray-800 dark:text-white">
                           {dept.name}
                         </p>
-                        <p className="text-xs text-gray-400">
+                        <p className="text-xs text-gray-400 dark:text-gray-500">
                           {dept._count.users} member
                           {dept._count.users !== 1 ? "s" : ""}
                         </p>
@@ -696,7 +750,7 @@ export default function UsersPage() {
                         )
                           deleteDept.mutate(dept.id);
                       }}
-                      className="text-gray-300 hover:text-red-500 transition-colors p-1"
+                      className="text-gray-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 transition-colors p-1"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -708,39 +762,49 @@ export default function UsersPage() {
             {/* Assign users to departments */}
             {departments.length > 0 && (
               <>
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mt-6">
+                <p className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-6">
                   Assign users to departments
                 </p>
-                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
                   {(usersData?.users ?? []).map((user, i) => (
                     <div
                       key={user.id}
                       className={`flex items-center justify-between px-4 py-3 ${
                         i < (usersData?.users ?? []).length - 1
-                          ? "border-b border-gray-100"
+                          ? "border-b border-gray-100 dark:border-gray-800"
                           : ""
                       }`}
                     >
                       <div>
-                        <p className="text-sm font-medium text-gray-800">
+                        <p className="text-sm font-medium text-gray-800 dark:text-white">
                           {user.name}
                         </p>
-                        <p className="text-xs text-gray-400">{user.email}</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500">
+                          {user.email}
+                        </p>
                       </div>
                       <select
-                        defaultValue={user.departmentId ?? ""}
-                        onChange={(e) =>
+                        value={deptMap[user.id] ?? ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setDeptMap((prev) => ({ ...prev, [user.id]: val }));
                           assignDept.mutate({
                             userId: user.id,
-                            departmentId: e.target.value || null,
-                          })
-                        }
-                        className="text-xs border border-gray-300 rounded-lg px-2 py-1.5
-                                   focus:outline-none focus:ring-2 focus:ring-blue-400"
+                            departmentId: val || null,
+                          });
+                        }}
+                        className="text-xs bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-800 rounded-lg px-2 py-1.5
+                                   focus:outline-none focus:ring-2 focus:ring-blue-400 dark:text-white appearance-none"
                       >
-                        <option value="">No department</option>
+                        <option value="" className="dark:bg-gray-900">
+                          No department
+                        </option>
                         {departments.map((d) => (
-                          <option key={d.id} value={d.id}>
+                          <option
+                            key={d.id}
+                            value={d.id}
+                            className="dark:bg-[#0f0f0f]"
+                          >
                             {d.name}
                           </option>
                         ))}

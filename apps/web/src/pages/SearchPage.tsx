@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Search,
   FileText,
@@ -30,16 +30,40 @@ const formatBytes = (bytes: number) => {
 
 const getFileIcon = (mimeType: string) => {
   if (mimeType.startsWith("image/"))
-    return { icon: Image, color: "text-green-500", bg: "bg-green-50" };
+    return {
+      icon: Image,
+      color: "text-green-500 dark:text-green-400",
+      bg: "bg-green-50 dark:bg-green-900/20",
+    };
   if (mimeType.startsWith("video/"))
-    return { icon: Film, color: "text-purple-500", bg: "bg-purple-50" };
+    return {
+      icon: Film,
+      color: "text-purple-500 dark:text-purple-400",
+      bg: "bg-purple-50 dark:bg-purple-900/20",
+    };
   if (mimeType.startsWith("audio/"))
-    return { icon: Music, color: "text-pink-500", bg: "bg-pink-50" };
+    return {
+      icon: Music,
+      color: "text-pink-500 dark:text-pink-400",
+      bg: "bg-pink-50 dark:bg-pink-900/20",
+    };
   if (mimeType.includes("pdf"))
-    return { icon: FileText, color: "text-red-500", bg: "bg-red-50" };
+    return {
+      icon: FileText,
+      color: "text-red-500 dark:text-red-400",
+      bg: "bg-red-50 dark:bg-red-900/20",
+    };
   if (mimeType.includes("zip"))
-    return { icon: Archive, color: "text-yellow-500", bg: "bg-yellow-50" };
-  return { icon: File, color: "text-blue-500", bg: "bg-blue-50" };
+    return {
+      icon: Archive,
+      color: "text-yellow-500 dark:text-yellow-400",
+      bg: "bg-yellow-50 dark:bg-yellow-900/20",
+    };
+  return {
+    icon: File,
+    color: "text-primary-500 dark:text-primary-400",
+    bg: "bg-primary-50 dark:bg-primary-900/20",
+  };
 };
 
 const timeAgo = (dateStr: string) => {
@@ -63,23 +87,35 @@ export default function SearchPage() {
   const [previewFile, setPreviewFile] = useState<any>(null);
 
   const query = searchParams.get("q") || "";
+  const queryClient = useQueryClient();
 
   // Update URL when input changes (debounced)
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (input.trim()) {
+    if (input.trim()) {
+      const timer = setTimeout(() => {
         setSearchParams({ q: input.trim(), type: typeFilter });
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [input, typeFilter]);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [input]);
 
-  const { data, isLoading } = useQuery({
+  useEffect(() => {
+    if (query) {
+      setSearchParams({ q: query, type: typeFilter });
+    } else {
+      setSearchParams({});
+    }
+  }, [typeFilter]);
+
+  const { data, isLoading, isFetching } = useQuery({
     queryKey: ["search", query, typeFilter],
     queryFn: async () => {
       if (!query) return { files: [], folders: [], categories: [], total: 0 };
       const res = await api.get("/search", {
-        params: { q: query, type: typeFilter },
+        params: {
+          q: query,
+          type: typeFilter,
+        },
       });
       return res.data as {
         files: any[];
@@ -98,19 +134,22 @@ export default function SearchPage() {
   const total = data?.total ?? 0;
   const hasResults = total > 0;
   const searched = query.length > 0;
+  const showResults = hasResults && query.length > 0;
 
   return (
     <AppShell>
       <div className="max-w-4xl mx-auto">
         {/* Search header */}
         <div className="mb-6">
-          <h1 className="text-lg font-semibold text-gray-900 mb-4">Search</h1>
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            Search
+          </h1>
 
           {/* Search input */}
           <div className="relative">
             <Search
               size={18}
-              className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
+              className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
             />
             <input
               autoFocus
@@ -118,18 +157,20 @@ export default function SearchPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Search files, folders, categories..."
-              className="w-full pl-11 pr-10 py-3 bg-white border border-gray-200
+              className="w-full pl-11 pr-10 py-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800
                          rounded-xl text-sm focus:outline-none focus:ring-2
-                         focus:ring-blue-500 focus:border-transparent shadow-sm"
+                         focus:ring-primary-500 focus:border-transparent shadow-sm dark:text-white dark:placeholder-gray-600"
             />
             {input && (
               <button
                 onClick={() => {
                   setInput("");
+                  setTypeFilter("all");
                   setSearchParams({});
+                  queryClient.removeQueries({ queryKey: ["search"] });
                 }}
                 className="absolute right-4 top-1/2 -translate-y-1/2
-                           text-gray-400 hover:text-gray-600"
+                           text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
               >
                 <X size={16} />
               </button>
@@ -137,24 +178,52 @@ export default function SearchPage() {
           </div>
 
           {/* Type filters */}
-          <div className="flex items-center gap-2 mt-3">
-            <Filter size={13} className="text-gray-400" />
-            {(["all", "file", "folder"] as const).map((t) => (
+          <div className="flex items-center gap-2 mt-3 flex-wrap">
+            <Filter size={13} className="text-gray-400 dark:text-gray-500" />
+            {(
+              [
+                "all",
+                "file",
+                "folder",
+                "pdf",
+                "image",
+                "video",
+                "audio",
+                "excel",
+                "zip",
+              ] as const
+            ).map((t) => (
               <button
                 key={t}
                 onClick={() => setTypeFilter(t)}
                 className={clsx(
                   "px-3 py-1.5 text-xs font-medium rounded-lg transition-colors",
                   typeFilter === t
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200",
+                    ? "bg-primary-600 text-white"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-white/5 dark:text-gray-400 dark:hover:bg-white/10",
                 )}
               >
-                {t === "all" ? "All" : t === "file" ? "Files" : "Folders"}
+                {t === "all"
+                  ? "All"
+                  : t === "file"
+                    ? "Files"
+                    : t === "folder"
+                      ? "Folders"
+                      : t === "pdf"
+                        ? "PDF"
+                        : t === "image"
+                          ? "Images"
+                          : t === "video"
+                            ? "Video"
+                            : t === "audio"
+                              ? "Audio"
+                              : t === "excel"
+                                ? "Excel"
+                                : "ZIP"}
               </button>
             ))}
             {searched && !isLoading && (
-              <span className="ml-auto text-xs text-gray-400">
+              <span className="ml-auto text-xs text-gray-400 dark:text-gray-500">
                 {total} result{total !== 1 ? "s" : ""} for "{query}"
               </span>
             )}
@@ -162,10 +231,15 @@ export default function SearchPage() {
         </div>
 
         {/* Loading */}
-        {isLoading && (
+        {(isLoading || isFetching) && (
           <div className="flex items-center justify-center py-16">
-            <Loader size={20} className="animate-spin text-gray-400 mr-3" />
-            <span className="text-sm text-gray-500">Searching...</span>
+            <Loader
+              size={20}
+              className="animate-spin text-gray-400 dark:text-gray-500 mr-3"
+            />
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              Searching...
+            </span>
           </div>
         )}
 
@@ -188,7 +262,7 @@ export default function SearchPage() {
         )}
 
         {/* No results */}
-        {searched && !isLoading && !hasResults && (
+        {searched && !isLoading && !isFetching && !hasResults && (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <div
               className="w-16 h-16 bg-gray-100 rounded-full flex items-center
@@ -206,7 +280,7 @@ export default function SearchPage() {
         )}
 
         {/* Results */}
-        {hasResults && !isLoading && (
+        {showResults && !isLoading && (
           <div className="space-y-6">
             {/* Categories */}
             {categories.length > 0 && (
@@ -223,7 +297,7 @@ export default function SearchPage() {
                       key={cat.id}
                       onClick={() => navigate(`/category/${cat.id}`)}
                       className="w-full flex items-center gap-3 p-3 bg-white
-                                 border border-gray-200 rounded-xl hover:border-blue-300
+                                 border border-gray-200 rounded-xl hover:border-primary-300
                                  hover:shadow-sm transition-all text-left"
                     >
                       <div
@@ -261,26 +335,29 @@ export default function SearchPage() {
                     <button
                       key={folder.id}
                       onClick={() => navigate(`/browse/${folder.id}`)}
-                      className="w-full flex items-center gap-3 p-3 bg-white
-                                 border border-gray-200 rounded-xl hover:border-blue-300
-                                 hover:shadow-sm transition-all text-left"
+                      className="w-full flex items-center gap-3 p-3 bg-white dark:bg-gray-900
+                                 border border-gray-200 dark:border-gray-800 rounded-xl hover:border-primary-300
+                                 dark:hover:border-primary-800 hover:shadow-sm transition-all text-left"
                     >
                       <div
-                        className="w-9 h-9 bg-blue-50 rounded-lg flex items-center
+                        className="w-9 h-9 bg-primary-50 dark:bg-primary-900/40 rounded-lg flex items-center
                                       justify-center shrink-0"
                       >
-                        <Folder size={16} className="text-blue-500" />
+                        <Folder
+                          size={16}
+                          className="text-primary-500 dark:text-primary-400"
+                        />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">
                           {folder.name}
                         </p>
-                        <p className="text-xs text-gray-400">
+                        <p className="text-xs text-gray-400 dark:text-gray-500">
                           {folder._count.files} files
                           {folder.category && ` · ${folder.category.name}`}
                         </p>
                       </div>
-                      <span className="text-xs text-gray-400 shrink-0">
+                      <span className="text-xs text-gray-400 dark:text-gray-600 shrink-0">
                         {timeAgo(folder.createdAt)}
                       </span>
                     </button>
@@ -298,7 +375,7 @@ export default function SearchPage() {
                 >
                   Files ({files.length})
                 </p>
-                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
                   {files.map((file, i) => {
                     const {
                       icon: Icon,
@@ -311,8 +388,9 @@ export default function SearchPage() {
                         onClick={() => setPreviewFile(file)}
                         className={clsx(
                           "w-full flex items-center gap-3 px-4 py-3 text-left",
-                          "hover:bg-gray-50 transition-colors",
-                          i < files.length - 1 && "border-b border-gray-100",
+                          "hover:bg-gray-50 dark:hover:bg-white/5 transition-colors",
+                          i < files.length - 1 &&
+                            "border-b border-gray-100 dark:border-gray-800",
                         )}
                       >
                         <div
@@ -322,10 +400,10 @@ export default function SearchPage() {
                           <Icon size={16} className={color} />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate">
+                          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
                             {file.name}
                           </p>
-                          <p className="text-xs text-gray-400">
+                          <p className="text-xs text-gray-400 dark:text-gray-500">
                             {formatBytes(file.size)}
                             {file.folder && ` · ${file.folder.name}`}
                             {file.category && ` · ${file.category.name}`}
@@ -333,10 +411,10 @@ export default function SearchPage() {
                           </p>
                         </div>
                         <div className="text-right shrink-0">
-                          <p className="text-xs text-gray-400">
+                          <p className="text-xs text-gray-400 dark:text-gray-500">
                             {timeAgo(file.createdAt)}
                           </p>
-                          <p className="text-xs text-gray-300 mt-0.5">
+                          <p className="text-xs text-gray-300 dark:text-gray-600 mt-0.5">
                             {file.mimeType.split("/")[1]?.toUpperCase()}
                           </p>
                         </div>

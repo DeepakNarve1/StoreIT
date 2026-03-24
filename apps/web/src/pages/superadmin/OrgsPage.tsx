@@ -15,6 +15,8 @@ import {
   X,
   Eye,
   EyeOff,
+  AlertTriangle,
+  CreditCard,
 } from "lucide-react";
 import AppShell from "../../components/layout/AppShell";
 import { useAuthStore } from "../../store/authStore";
@@ -45,11 +47,18 @@ interface RecentFile {
 const PLANS = ["free", "starter", "pro", "enterprise"] as const;
 type Plan = (typeof PLANS)[number];
 
+const PLAN_LABELS: Record<Plan, string> = {
+  free: "Free",
+  starter: "Mini",
+  pro: "Medium",
+  enterprise: "Tailor",
+};
+
 const planColors: Record<Plan, string> = {
-  free: "bg-gray-100 text-gray-600",
-  starter: "bg-blue-100 text-blue-700",
-  pro: "bg-purple-100 text-purple-700",
-  enterprise: "bg-amber-100 text-amber-700",
+  free: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
+  starter: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
+  pro: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300",
+  enterprise: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
 };
 
 const formatBytes = (bytes: number) => {
@@ -133,15 +142,30 @@ export default function OrgsPage() {
     },
   });
 
-  // Change plan
+  // Change plan (manual override — superadmin only)
   const changePlan = useMutation({
     mutationFn: async ({ id, plan }: { id: string; plan: string }) => {
       await api.patch(`/superadmin/orgs/${id}`, { plan });
     },
-    onSuccess: () => {
+    onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ["superadmin", "orgs"] });
+      // Update selected org in panel if it's the one that changed
+      if (selectedOrg?.id === vars.id) {
+        setSelectedOrg((o) => o ? { ...o, plan: vars.plan as Plan } : o);
+      }
     },
   });
+
+  const handlePlanChange = (org: Org, newPlan: string) => {
+    if (newPlan === org.plan) return;
+    const label = PLAN_LABELS[newPlan as Plan] ?? newPlan;
+    const confirmed = window.confirm(
+      `Manually set plan to "${label}" for "${org.name}"?\n\n` +
+      `⚠️ This will clear any active Stripe subscription link. ` +
+      `Use the Billing page to manage live subscriptions.`
+    );
+    if (confirmed) changePlan.mutate({ id: org.id, plan: newPlan });
+  };
 
   // Impersonate org admin
   const impersonate = useMutation({
@@ -189,14 +213,14 @@ export default function OrgsPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-purple-50 rounded-xl flex items-center justify-center">
-              <Shield size={18} className="text-purple-600" />
+            <div className="w-9 h-9 bg-purple-50 dark:bg-purple-900/20 rounded-xl flex items-center justify-center">
+              <Shield size={18} className="text-purple-600 dark:text-purple-400" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold text-gray-900">
+              <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
                 Superadmin Portal
               </h1>
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-gray-400 dark:text-gray-500">
                 {orgs.length} organisations
               </p>
             </div>
@@ -218,32 +242,32 @@ export default function OrgsPage() {
               label: "Total Orgs",
               value: orgs.length,
               icon: Building2,
-              color: "bg-blue-50 text-blue-600",
+              color: "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400",
             },
             {
               label: "Active Orgs",
               value: orgs.filter((o) => o.isActive).length,
               icon: CheckCircle,
-              color: "bg-green-50 text-green-600",
+              color: "bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400",
             },
             {
               label: "Total Users",
               value: orgs.reduce((sum, o) => sum + o._count.users, 0),
               icon: Users,
-              color: "bg-purple-50 text-purple-600",
+              color: "bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400",
             },
             {
               label: "Total Files",
               value: orgs.reduce((sum, o) => sum + o._count.files, 0),
               icon: FileText,
-              color: "bg-orange-50 text-orange-600",
+              color: "bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400",
             },
           ].map((stat) => {
             const Icon = stat.icon;
             return (
               <div
                 key={stat.label}
-                className="bg-white border border-gray-200 rounded-xl p-4"
+                className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4"
               >
                 <div
                   className={`w-8 h-8 ${stat.color} rounded-lg flex items-center
@@ -251,10 +275,10 @@ export default function OrgsPage() {
                 >
                   <Icon size={16} />
                 </div>
-                <div className="text-2xl font-semibold text-gray-900">
+                <div className="text-2xl font-semibold text-gray-900 dark:text-white">
                   {stat.value}
                 </div>
-                <div className="text-xs text-gray-500 mt-0.5">{stat.label}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{stat.label}</div>
               </div>
             );
           })}
@@ -263,7 +287,7 @@ export default function OrgsPage() {
         <div className="flex gap-4">
           {/* Org list */}
           <div className="flex-1 min-w-0">
-            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
               {isLoading ? (
                 <div className="flex items-center justify-center py-16">
                   <Loader size={20} className="animate-spin text-gray-400" />
@@ -271,20 +295,20 @@ export default function OrgsPage() {
               ) : (
                 <table className="w-full">
                   <thead>
-                    <tr className="border-b border-gray-100 bg-gray-50">
-                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                    <tr className="border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-white/5">
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                         Organisation
                       </th>
-                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                         Plan
                       </th>
-                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                         Users
                       </th>
-                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                         Storage
                       </th>
-                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">
+                      <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
                         Status
                       </th>
                       <th className="px-4 py-3" />
@@ -296,25 +320,25 @@ export default function OrgsPage() {
                         key={org.id}
                         onClick={() => setSelectedOrg(org)}
                         className={clsx(
-                          "border-b border-gray-100 last:border-b-0 cursor-pointer transition-colors",
+                          "border-b border-gray-100 dark:border-gray-800 last:border-b-0 cursor-pointer transition-colors",
                           selectedOrg?.id === org.id
-                            ? "bg-blue-50"
-                            : "hover:bg-gray-50",
+                            ? "bg-blue-50 dark:bg-white/10"
+                            : "hover:bg-gray-50 dark:hover:bg-white/5",
                         )}
                       >
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <div
-                              className="w-8 h-8 bg-gray-100 rounded-lg flex items-center
-                                            justify-center text-gray-600 text-xs font-bold"
+                              className="w-8 h-8 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center
+                                            justify-center text-gray-600 dark:text-gray-400 text-xs font-bold"
                             >
                               {org.name.slice(0, 2).toUpperCase()}
                             </div>
                             <div>
-                              <p className="text-sm font-medium text-gray-900">
+                              <p className="text-sm font-medium text-gray-900 dark:text-white">
                                 {org.name}
                               </p>
-                              <p className="text-xs text-gray-400">
+                              <p className="text-xs text-gray-400 dark:text-gray-500">
                                 {org.slug}
                               </p>
                             </div>
@@ -324,30 +348,27 @@ export default function OrgsPage() {
                           <select
                             value={org.plan}
                             onClick={(e) => e.stopPropagation()}
-                            onChange={(e) =>
-                              changePlan.mutate({
-                                id: org.id,
-                                plan: e.target.value,
-                              })
-                            }
-                            className={`text-xs font-medium px-2 py-1 rounded-full
-                                       border-0 cursor-pointer
+                            onChange={(e) => handlePlanChange(org, e.target.value)}
+                            title="Manual override — clears Stripe subscription link"
+                            className={`text-xs font-medium px-3 py-1 rounded-full
+                                       border-0 cursor-pointer outline-none
+                                       focus:ring-2 focus:ring-blue-500/50 transition-all
                                        ${planColors[org.plan as Plan]}`}
                           >
                             {PLANS.map((p) => (
-                              <option key={p} value={p}>
-                                {p}
+                              <option key={p} value={p} className="bg-white text-gray-900 dark:bg-gray-800 dark:text-white">
+                                {PLAN_LABELS[p]}
                               </option>
                             ))}
                           </select>
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex items-center gap-1 text-sm text-gray-600">
-                            <Users size={13} className="text-gray-400" />
+                          <div className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-400">
+                            <Users size={13} className="text-gray-400 dark:text-gray-500" />
                             {org._count.users}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-500">
+                        <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
                           {formatBytes(org.storageBytes)}
                         </td>
                         <td className="px-4 py-3">
@@ -362,8 +383,8 @@ export default function OrgsPage() {
                             className={clsx(
                               "flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full transition-colors",
                               org.isActive
-                                ? "bg-green-100 text-green-700 hover:bg-green-200"
-                                : "bg-red-100 text-red-600 hover:bg-red-200",
+                                ? "bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/40"
+                                : "bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/40",
                             )}
                           >
                             {org.isActive ? (
@@ -391,13 +412,13 @@ export default function OrgsPage() {
           {/* Org detail panel */}
           {selectedOrg && (
             <div className="w-72 shrink-0">
-              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
                 {/* Panel header */}
                 <div
                   className="flex items-center justify-between px-4 py-3
-                                border-b border-gray-100 bg-gray-50"
+                                border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-white/5"
                 >
-                  <span className="text-sm font-medium text-gray-900 truncate">
+                  <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
                     {selectedOrg.name}
                   </span>
                   <button
@@ -438,16 +459,16 @@ export default function OrgsPage() {
                         return (
                           <div
                             key={s.label}
-                            className="bg-gray-50 rounded-lg p-3 text-center"
+                            className="bg-gray-50 dark:bg-white/5 rounded-lg p-3 text-center"
                           >
                             <Icon
                               size={14}
-                              className="text-gray-400 mx-auto mb-1"
+                              className="text-gray-400 dark:text-gray-500 mx-auto mb-1"
                             />
-                            <div className="text-sm font-semibold text-gray-900">
+                            <div className="text-sm font-semibold text-gray-900 dark:text-white">
                               {s.value}
                             </div>
-                            <div className="text-xs text-gray-400">
+                            <div className="text-xs text-gray-400 dark:text-gray-500">
                               {s.label}
                             </div>
                           </div>
@@ -463,11 +484,35 @@ export default function OrgsPage() {
                     </div>
                   )}
 
+                  {/* Stripe info */}
+                  {(statsData?.tenant?.stripeCustomerId || statsData?.tenant?.stripeSubscriptionId) && (
+                    <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3">
+                      <p className="text-xs font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1.5 mb-2">
+                        <CreditCard size={11} /> Stripe
+                      </p>
+                      {statsData.tenant.stripeSubscriptionId ? (
+                        <p className="text-xs text-gray-600 dark:text-gray-400 font-mono truncate">
+                          {statsData.tenant.stripeSubscriptionId}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-gray-400">No active subscription</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Manual plan override warning */}
+                  <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3">
+                    <AlertTriangle size={12} className="text-amber-500 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      Changing the plan here is a manual DB override. Use the org's Billing page to manage live Stripe subscriptions.
+                    </p>
+                  </div>
+
                   {/* Recent files */}
                   {statsData?.recentFiles?.length > 0 && (
                     <div>
                       <p
-                        className="text-xs font-medium text-gray-400 uppercase
+                        className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase
                                     tracking-wider mb-2"
                       >
                         Recent Files
@@ -480,12 +525,12 @@ export default function OrgsPage() {
                           >
                             <FileText
                               size={12}
-                              className="text-gray-400 shrink-0"
+                              className="text-gray-400 dark:text-gray-500 shrink-0"
                             />
-                            <span className="text-xs text-gray-700 truncate flex-1">
+                            <span className="text-xs text-gray-700 dark:text-gray-300 truncate flex-1">
                               {file.name}
                             </span>
-                            <span className="text-xs text-gray-400 shrink-0">
+                            <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0">
                               {formatBytes(file.size)}
                             </span>
                           </div>
@@ -495,7 +540,7 @@ export default function OrgsPage() {
                   )}
 
                   {/* Actions */}
-                  <div className="space-y-2 pt-2 border-t border-gray-100">
+                  <div className="space-y-2 pt-2 border-t border-gray-100 dark:border-gray-800">
                     <button
                       onClick={() => impersonate.mutate(selectedOrg.id)}
                       disabled={impersonate.isPending || !selectedOrg.isActive}
@@ -511,21 +556,21 @@ export default function OrgsPage() {
                       Login as Org Admin
                     </button>
 
-                    <button
-                      onClick={() =>
-                        toggleOrg.mutate({
-                          id: selectedOrg.id,
-                          isActive: !selectedOrg.isActive,
-                        })
-                      }
-                      className={clsx(
-                        "w-full flex items-center justify-center gap-2 px-3 py-2",
-                        "text-xs font-medium rounded-lg transition-colors border",
-                        selectedOrg.isActive
-                          ? "border-red-200 text-red-600 hover:bg-red-50"
-                          : "border-green-200 text-green-600 hover:bg-green-50",
-                      )}
-                    >
+                      <button
+                        onClick={() =>
+                          toggleOrg.mutate({
+                            id: selectedOrg.id,
+                            isActive: !selectedOrg.isActive,
+                          })
+                        }
+                        className={clsx(
+                          "w-full flex items-center justify-center gap-2 px-3 py-2",
+                          "text-xs font-medium rounded-lg transition-colors border",
+                          selectedOrg.isActive
+                            ? "border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                            : "border-green-200 dark:border-green-900 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20",
+                        )}
+                      >
                       {selectedOrg.isActive ? (
                         <>
                           <XCircle size={12} /> Suspend Organisation
@@ -552,14 +597,14 @@ export default function OrgsPage() {
             />
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
               <div
-                className="bg-white rounded-2xl shadow-xl w-full max-w-md
-                              overflow-hidden"
+                className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-md
+                              overflow-hidden border border-gray-200 dark:border-gray-800"
               >
                 <div
                   className="flex items-center justify-between px-6 py-4
-                                border-b border-gray-200"
+                                border-b border-gray-200 dark:border-gray-800"
                 >
-                  <h2 className="text-base font-semibold text-gray-900">
+                  <h2 className="text-base font-semibold text-gray-900 dark:text-white">
                     Create Organisation
                   </h2>
                   <button
@@ -573,7 +618,7 @@ export default function OrgsPage() {
                 <form onSubmit={handleCreateSubmit} className="p-6 space-y-4">
                   {formError && (
                     <div
-                      className="bg-red-50 border border-red-200 text-red-700
+                      className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400
                                     text-sm px-4 py-3 rounded-lg"
                     >
                       {formError}
@@ -581,7 +626,7 @@ export default function OrgsPage() {
                   )}
 
                   <div className="space-y-3">
-                    <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    <p className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
                       Organisation
                     </p>
                     <input
@@ -589,8 +634,8 @@ export default function OrgsPage() {
                       value={form.name}
                       onChange={(e) => handleNameChange(e.target.value)}
                       required
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg
-                                 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg
+                                 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
                     />
                     <input
                       placeholder="slug (e.g. acme-corp)"
@@ -599,8 +644,8 @@ export default function OrgsPage() {
                         setForm((f) => ({ ...f, slug: e.target.value }))
                       }
                       required
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg
-                                 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg
+                                 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
                     />
                     <select
                       value={form.plan}
@@ -610,19 +655,19 @@ export default function OrgsPage() {
                           plan: e.target.value as Plan,
                         }))
                       }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg
-                                 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg
+                                 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white transition-all cursor-pointer"
                     >
                       {PLANS.map((p) => (
-                        <option key={p} value={p}>
-                          {p.charAt(0).toUpperCase() + p.slice(1)}
+                        <option key={p} value={p} className="bg-white text-gray-900 dark:bg-gray-800 dark:text-white">
+                          {PLAN_LABELS[p]}
                         </option>
                       ))}
                     </select>
                   </div>
 
                   <div className="space-y-3">
-                    <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                    <p className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
                       Admin User
                     </p>
                     <input
@@ -632,8 +677,8 @@ export default function OrgsPage() {
                         setForm((f) => ({ ...f, adminName: e.target.value }))
                       }
                       required
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg
-                                 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg
+                                 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
                     />
                     <input
                       type="email"
@@ -643,8 +688,8 @@ export default function OrgsPage() {
                         setForm((f) => ({ ...f, adminEmail: e.target.value }))
                       }
                       required
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg
-                                 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg
+                                 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
                     />
                     <div className="relative">
                       <input
@@ -658,8 +703,8 @@ export default function OrgsPage() {
                           }))
                         }
                         required
-                        className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg
-                                   text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full px-3 py-2 pr-10 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg
+                                   text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
                       />
                       <button
                         type="button"

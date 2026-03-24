@@ -68,6 +68,7 @@ model Department {
   tenant    Tenant   @relation(fields: [tenantId], references: [id])
   createdAt DateTime @default(now())
   users     User[]   @relation("UserDepartment")
+  permissions Permission[]
 
   @@unique([name, tenantId])
   @@index([tenantId])
@@ -221,7 +222,8 @@ model FileTag {
 // ─── PERMISSION ──────────────────────────────────────────────────────────────
 model Permission {
   id             String    @id @default(uuid())
-  action         String    // read | write | delete | admin
+  action         String    // read | write | delete | admin  (coarse level — derived)
+  capabilities   Json?     // granular keys: { "see_files": true, "delete_folders": true, ... }
   resourceType   String    // file | folder
   resourceId     String    // fileId or folderId
   grantedTo      String    // all | user | department
@@ -232,6 +234,10 @@ model Permission {
   userId         String?
   user           User?     @relation(fields: [userId], references: [id])
 
+  // optional link to a department (if grantedTo = department)
+  departmentId   String?
+  department     Department? @relation(fields: [departmentId], references: [id])
+
   // optional link to folder or file directly
   folderId       String?
   folder         Folder?   @relation(fields: [folderId], references: [id])
@@ -240,6 +246,7 @@ model Permission {
 
   @@index([resourceId, resourceType])
   @@index([userId])
+  @@index([departmentId])
 }
 
 // ─── INVITE TOKEN (email invite system — no self-registration) ───────────────

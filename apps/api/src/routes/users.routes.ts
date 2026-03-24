@@ -9,6 +9,9 @@ import { getPlanLimits } from "../utils/plans";
 
 const router = Router();
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isValidUUID = (v: unknown): v is string => typeof v === "string" && UUID_REGEX.test(v);
+
 const inviteSchema = z.object({
   email: z.string().email(),
   role: z.enum(["ORG_ADMIN", "MANAGER", "EDITOR", "VIEWER"]).default("VIEWER"),
@@ -31,6 +34,8 @@ router.get(
           role: true,
           isActive: true,
           createdAt: true,
+          departmentId: true,
+          department: { select: { id: true, name: true } },
         },
       });
       res.json({ users });
@@ -173,6 +178,10 @@ router.delete(
   requireRole("ORG_ADMIN", "SUPERADMIN"),
   async (req: AuthRequest, res: Response) => {
     try {
+      if (!isValidUUID(req.params.id)) {
+        res.status(400).json({ error: "Invalid ID" });
+        return;
+      }
       const invite = await prisma.inviteToken.findFirst({
         where: { id: req.params.id, tenantId: req.user!.tenantId },
       });
@@ -288,88 +297,8 @@ router.patch(
   },
 );
 
-// ─── PATCH /api/users/:id — update user role or status ───────────────────────
-router.patch(
-  "/:id",
-  verifyAuth,
-  requireRole("ORG_ADMIN", "SUPERADMIN"),
-  async (req: AuthRequest, res: Response) => {
-    try {
-      const { role, isActive } = z
-        .object({
-          role: z.enum(["ORG_ADMIN", "MANAGER", "EDITOR", "VIEWER"]).optional(),
-          isActive: z.boolean().optional(),
-        })
-        .parse(req.body);
-
-      const user = await prisma.user.findFirst({
-        where: { id: req.params.id, tenantId: req.user!.tenantId },
-      });
-      if (!user) {
-        res.status(404).json({ error: "User not found" });
-        return;
-      }
-
-      const updated = await prisma.user.update({
-        where: { id: req.params.id },
-        data: {
-          ...(role !== undefined && { role }),
-          ...(isActive !== undefined && { isActive }),
-        },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          role: true,
-          isActive: true,
-        },
-      });
-
-      res.json({ user: updated });
-    } catch (err: any) {
-      if (err.name === "ZodError") {
-        res.status(400).json({ error: "Invalid input" });
-        return;
-      }
-      res.status(500).json({ error: "Failed to update user" });
-    }
-  },
-);
-
-// ─── DELETE /api/users/:id — remove user from tenant ─────────────────────────
-router.delete(
-  "/:id",
-  verifyAuth,
-  requireRole("ORG_ADMIN", "SUPERADMIN"),
-  async (req: AuthRequest, res: Response) => {
-    try {
-      // Prevent self-deletion
-      if (req.params.id === req.user!.userId) {
-        res.status(400).json({ error: "You cannot remove yourself" });
-        return;
-      }
-
-      const user = await prisma.user.findFirst({
-        where: { id: req.params.id, tenantId: req.user!.tenantId },
-      });
-      if (!user) {
-        res.status(404).json({ error: "User not found" });
-        return;
-      }
-
-      await prisma.user.update({
-        where: { id: req.params.id },
-        data: { isActive: false },
-      });
-
-      res.json({ message: "User removed successfully" });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to remove user" });
-    }
-  },
-);
-
 // ─── GET /api/users/departments ───────────────────────────────────────────────
+// IMPORTANT: Must be before /:id to prevent Express matching "departments" as :id
 router.get(
   "/departments",
   verifyAuth,
@@ -428,6 +357,10 @@ router.delete(
   requireRole("ORG_ADMIN", "SUPERADMIN"),
   async (req: AuthRequest, res: Response) => {
     try {
+      if (!isValidUUID(req.params.id)) {
+        res.status(400).json({ error: "Invalid ID" });
+        return;
+      }
       const dept = await prisma.department.findFirst({
         where: { id: req.params.id, tenantId: req.user!.tenantId },
       });
@@ -445,6 +378,96 @@ router.delete(
       res.json({ message: "Department deleted" });
     } catch {
       res.status(500).json({ error: "Failed to delete department" });
+    }
+  },
+);
+
+// ─── PATCH /api/users/:id — update user role or status ───────────────────────
+router.patch(
+  "/:id",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { role, isActive } = z
+        .object({
+          role: z.enum(["ORG_ADMIN", "MANAGER", "EDITOR", "VIEWER"]).optional(),
+          isActive: z.boolean().optional(),
+        })
+        .parse(req.body);
+
+      if (!isValidUUID(req.params.id)) {
+        res.status(400).json({ error: "Invalid ID" });
+        return;
+      }
+
+      const user = await prisma.user.findFirst({
+        where: { id: req.params.id, tenantId: req.user!.tenantId },
+      });
+      if (!user) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+
+      const updated = await prisma.user.update({
+        where: { id: req.params.id },
+        data: {
+          ...(role !== undefined && { role }),
+          ...(isActive !== undefined && { isActive }),
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          isActive: true,
+        },
+      });
+
+      res.json({ user: updated });
+    } catch (err: any) {
+      if (err.name === "ZodError") {
+        res.status(400).json({ error: "Invalid input" });
+        return;
+      }
+      res.status(500).json({ error: "Failed to update user" });
+    }
+  },
+);
+
+// ─── DELETE /api/users/:id — remove user from tenant ─────────────────────────
+router.delete(
+  "/:id",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      // Prevent self-deletion
+      if (!isValidUUID(req.params.id)) {
+        res.status(400).json({ error: "Invalid ID" });
+        return;
+      }
+      if (req.params.id === req.user!.userId) {
+        res.status(400).json({ error: "You cannot remove yourself" });
+        return;
+      }
+
+      const user = await prisma.user.findFirst({
+        where: { id: req.params.id, tenantId: req.user!.tenantId },
+      });
+      if (!user) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+
+      await prisma.user.update({
+        where: { id: req.params.id },
+        data: { isActive: false },
+      });
+
+      res.json({ message: "User removed successfully" });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to remove user" });
     }
   },
 );

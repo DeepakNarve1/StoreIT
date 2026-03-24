@@ -106,8 +106,8 @@ export default function UploadZone({
         className={clsx(
           "border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all",
           isDragActive
-            ? "border-blue-400 bg-blue-50"
-            : "border-gray-300 hover:border-gray-400 hover:bg-gray-50",
+            ? "border-pink-400 bg-pink-50 dark:bg-pink-900/30"
+            : "border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800",
         )}
       >
         {/* ✅ No webkitdirectory here — lets users pick individual files normally */}
@@ -115,22 +115,25 @@ export default function UploadZone({
         <div
           className={clsx(
             "w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3",
-            isDragActive ? "bg-blue-100" : "bg-gray-100",
+            isDragActive
+              ? "bg-pink-100 dark:bg-pink-900/50"
+              : "bg-gray-100 dark:bg-gray-800",
           )}
         >
           <Upload
             size={22}
-            className={isDragActive ? "text-blue-500" : "text-gray-400"}
+            className={isDragActive ? "text-primary-500" : "text-gray-400"}
           />
         </div>
-        <p className="text-sm font-medium text-gray-700">
+        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
           {isDragActive ? "Drop files here" : "Drag & drop files here"}
         </p>
         {/* ✅ Single, unified browse line */}
         <p className="text-xs text-gray-400 mt-1">
-          or <span className="text-blue-600 hover:underline">browse files</span>{" "}
           or{" "}
-          <label className="text-blue-600 hover:underline cursor-pointer">
+          <span className="text-primary-500 hover:underline">browse files</span>{" "}
+          or{" "}
+          <label className="text-primary-500 hover:underline cursor-pointer">
             upload a folder
             <input
               type="file"
@@ -150,13 +153,13 @@ export default function UploadZone({
       {uploads.length > 0 && (
         <div className="mt-4 space-y-2">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-gray-600">
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
               {uploads.filter((u) => u.status === "done").length}/
               {uploads.length} uploaded
             </span>
             <button
               onClick={clearDone}
-              className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+              className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
             >
               Clear done
             </button>
@@ -165,7 +168,7 @@ export default function UploadZone({
           {uploads.map((upload) => (
             <div
               key={upload.id}
-              className="flex items-center gap-3 bg-white border border-gray-200
+              className="flex items-center gap-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700
                          rounded-lg px-3 py-2.5"
             >
               {/* Status icon */}
@@ -178,14 +181,14 @@ export default function UploadZone({
                 )}
                 {(upload.status === "uploading" ||
                   upload.status === "pending") && (
-                  <Loader size={16} className="text-blue-500 animate-spin" />
+                  <Loader size={16} className="text-primary-500 animate-spin" />
                 )}
               </div>
 
               {/* File info + progress */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-medium text-gray-800 truncate">
+                  <span className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">
                     {upload.file.name}
                   </span>
                   <span className="text-xs text-gray-400 shrink-0">
@@ -194,9 +197,9 @@ export default function UploadZone({
                 </div>
 
                 {upload.status === "uploading" && (
-                  <div className="mt-1.5 h-1 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="mt-1.5 h-1 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                      className="h-full bg-primary-500 rounded-full transition-all duration-300"
                       style={{ width: `${upload.progress}%` }}
                     />
                   </div>
@@ -217,7 +220,7 @@ export default function UploadZone({
               {(upload.status === "done" || upload.status === "error") && (
                 <button
                   onClick={() => removeUpload(upload.id)}
-                  className="shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+                  className="shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                 >
                   <X size={14} />
                 </button>

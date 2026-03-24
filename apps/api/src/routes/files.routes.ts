@@ -16,6 +16,7 @@ import archiver from "archiver";
 import https from "https";
 import http from "http";
 import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
+import { userHasCapability } from "./permissions.routes";
 
 const router = Router();
 
@@ -44,6 +45,7 @@ async function userCanAccessFile(
   tenantId: string,
   role: string,
   uploadedById: string | null,
+  folderId?: string | null,
 ): Promise<boolean> {
   const isPrivileged = [
     "SUPERADMIN",
@@ -55,17 +57,143 @@ async function userCanAccessFile(
   if (isPrivileged) return true;
   if (uploadedById === userId) return true;
 
-  const permission = await prisma.permission.findFirst({
+  // Check file-level permission
+  const userRecord = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { departmentId: true },
+  });
+
+  const fileOrClauses: any[] = [
+    { grantedTo: "all" },
+    { grantedTo: "user", userId },
+  ];
+  if (userRecord?.departmentId) {
+    fileOrClauses.push({
+      grantedTo: "department",
+      departmentId: userRecord.departmentId,
+    });
+  }
+
+  const filePerm = await prisma.permission.findFirst({
     where: {
       resourceType: "file",
       resourceId: fileId,
-      OR: [{ grantedTo: "all" }, { grantedTo: "user", userId }],
+      OR: fileOrClauses,
+      AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
+    },
+  });
+  if (filePerm) return true;
+
+  // Check folder-level permission (propagate to files inside)
+  if (folderId) {
+    const folderPerm = await prisma.permission.findFirst({
+      where: {
+        resourceType: "folder",
+        resourceId: folderId,
+        OR: fileOrClauses,
+        AND: [
+          { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+          { folder: { tenantId } },
+        ],
+      },
+    });
+    if (folderPerm) return true;
+  }
+
+  return false;
+}
+
+// ─── Helper: enforce lock — returns true if the request should be blocked ────
+// Managers and above can always bypass locks.
+// The locker themselves can also bypass (so they can unlock or edit their own lock).
+function isBlockedByLock(
+  file: { isLocked: boolean; lockedById: string | null },
+  userId: string,
+  role: string,
+  action?: "delete" | "edit"
+): boolean {
+  if (!file.isLocked) return false;
+  const isPrivileged = ["SUPERADMIN", "ORG_ADMIN", "MANAGER"].includes(role);
+  if (isPrivileged) return false;
+  
+  if (action === "delete") return true; // Locker cannot bypass lock for delete.
+  
+  if (file.lockedById === userId) return false;
+  return true;
+}
+
+// ─── Helper: check if user has at least the required action on a file ─────────
+async function userHasFilePermission(
+  fileId: string,
+  userId: string,
+  uploadedById: string | null,
+  role: string,
+  requiredAction: "write" | "delete" | "admin",
+): Promise<boolean> {
+  // SUPERADMIN, ORG_ADMIN, MANAGER — full trust on all actions
+  if (["SUPERADMIN", "ORG_ADMIN", "MANAGER"].includes(role)) return true;
+  // EDITOR — can write/delete but NOT admin (and still subject to lock guard at route level)
+  if (role === "EDITOR" && requiredAction !== "admin") return true;
+  if (uploadedById === userId) return true;
+
+  const actionRank: Record<string, number> = {
+    read: 1,
+    write: 2,
+    delete: 3,
+    admin: 4,
+  };
+  const required = actionRank[requiredAction];
+
+  const userRec = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { departmentId: true },
+  });
+  const permOrClauses: any[] = [
+    { grantedTo: "all" },
+    { grantedTo: "user", userId },
+  ];
+  if (userRec?.departmentId) {
+    permOrClauses.push({
+      grantedTo: "department",
+      departmentId: userRec.departmentId,
+    });
+  }
+
+  const perm = await prisma.permission.findFirst({
+    where: {
+      resourceType: "file",
+      resourceId: fileId,
+      fileId,
+      OR: permOrClauses,
       AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
     },
   });
 
-  return !!permission;
+  if (!perm) return false;
+  return (actionRank[perm.action] ?? 0) >= required;
 }
+
+// ─── Shared file select fields ────────────────────────────────────────────────
+const fileSelect = {
+  id: true,
+  name: true,
+  mimeType: true,
+  size: true,
+  storageKey: true,
+  createdAt: true,
+  folderId: true,
+  version: true,
+  isStarred: true,
+  isLocked: true,
+  lockedById: true,
+  approvalStatus: true,
+  approvalNote: true,
+  approvedAt: true,
+  approvedBy: { select: { name: true } },
+  tags: {
+    select: { tag: { select: { id: true, name: true, color: true } } },
+  },
+} as const;
 
 // ─── GET /api/files ───────────────────────────────────────────────────────────
 router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
@@ -90,61 +218,82 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
           isDeleted: false,
         },
         orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          name: true,
-          mimeType: true,
-          size: true,
-          storageKey: true,
-          createdAt: true,
-          folderId: true,
-          version: true,
-          isStarred: true,
-          tags: {
-            select: { tag: { select: { id: true, name: true, color: true } } },
-          },
-          isLocked: true,
-          lockedById: true,
-          approvalStatus: true,
-        },
+        select: fileSelect,
       });
     } else {
-      const permissions = await prisma.permission.findMany({
+      // Collect file IDs the user can access:
+      // 1. Direct file-level permissions
+      const filePerms = await prisma.permission.findMany({
         where: {
           resourceType: "file",
           action: { in: ["read", "write", "delete", "admin"] },
-          OR: [{ grantedTo: "all" }, { grantedTo: "user", userId }],
+          OR: [
+            { grantedTo: "all" },
+            { grantedTo: "user", userId },
+            ...(await prisma.user
+              .findUnique({
+                where: { id: userId },
+                select: { departmentId: true },
+              })
+              .then((u) =>
+                u?.departmentId
+                  ? [{ grantedTo: "department", departmentId: u.departmentId }]
+                  : [],
+              )),
+          ],
           AND: [
             { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+            { file: { tenantId } },
           ],
         },
         select: { resourceId: true },
       });
 
-      const allowedFileIds = permissions.map((p) => p.resourceId);
+      // 2. Folder-level permissions → include all files inside those folders
+      const folderPerms = await prisma.permission.findMany({
+        where: {
+          resourceType: "folder",
+          action: { in: ["read", "write", "delete", "admin"] },
+          OR: [
+            { grantedTo: "all" },
+            { grantedTo: "user", userId },
+            ...(await prisma.user
+              .findUnique({
+                where: { id: userId },
+                select: { departmentId: true },
+              })
+              .then((u) =>
+                u?.departmentId
+                  ? [{ grantedTo: "department", departmentId: u.departmentId }]
+                  : [],
+              )),
+          ],
+          AND: [
+            { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+            { folder: { tenantId } },
+          ],
+        },
+        select: { resourceId: true },
+      });
+
+      const allowedFileIds = filePerms.map((p) => p.resourceId);
+      const allowedFolderIds = folderPerms.map((p) => p.resourceId);
 
       files = await prisma.file.findMany({
         where: {
           tenantId,
           folderId: isValidUUID(folderId) ? folderId : null,
           isDeleted: false,
-          OR: [{ id: { in: allowedFileIds } }, { uploadedById: userId }],
+          OR: [
+            { id: { in: allowedFileIds } },
+            { uploadedById: userId },
+            ...(allowedFolderIds.length > 0
+              ? [{ folderId: { in: allowedFolderIds } }]
+              : []),
+          ],
         },
         orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          name: true,
-          mimeType: true,
-          size: true,
-          storageKey: true,
-          createdAt: true,
-          folderId: true,
-          version: true,
-          isStarred: true,
-          tags: {
-            select: { tag: { select: { id: true, name: true, color: true } } },
-          },
-        },
+        select: fileSelect,
       });
     }
 
@@ -165,6 +314,49 @@ router.post(
     try {
       const files = req.files as Express.Multer.File[];
       const { folderId, categoryId } = req.body;
+      const { userId, role } = req.user!;
+      const isPrivileged = [
+        "SUPERADMIN",
+        "ORG_ADMIN",
+        "MANAGER",
+        "EDITOR",
+      ].includes(role);
+
+      // VIEWERs can only upload into folders they have write permission on
+      if (!isPrivileged) {
+        if (!isValidUUID(folderId)) {
+          res
+            .status(403)
+            .json({ error: "You don't have permission to upload files here." });
+          return;
+        }
+        const canDropFiles = await userHasCapability(
+          userId,
+          req.user!.tenantId,
+          role,
+          "folder",
+          folderId,
+          "add_files"
+        );
+        const perm = await prisma.permission.findFirst({
+          where: {
+            resourceType: "folder",
+            resourceId: folderId,
+            OR: [{ grantedTo: "all" }, { grantedTo: "user", userId }],
+            AND: [
+              { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+            ],
+          },
+        });
+        const hasCoarseWrite = perm && ["write", "delete", "admin"].includes(perm.action);
+
+        if (!canDropFiles && !hasCoarseWrite) {
+          res
+            .status(403)
+            .json({ error: "You don't have permission to upload files here." });
+          return;
+        }
+      }
 
       if (!files || files.length === 0) {
         res.status(400).json({ error: "No files provided" });
@@ -199,7 +391,7 @@ router.post(
 
       const savedFiles = [];
 
-      // ── Quota check ──────────────────────────────────────────────────────────
+      // ── Quota check ───────────────────────────────────────────────────────
       const tenant = await prisma.tenant.findUnique({
         where: { id: req.user!.tenantId },
         select: { plan: true },
@@ -236,6 +428,18 @@ router.post(
             isDeleted: false,
           },
         });
+
+        // ── LOCK GUARD: block uploading a new version over a locked file ──
+        if (
+          existingFile &&
+          isBlockedByLock(existingFile, req.user!.userId, req.user!.role)
+        ) {
+          res.status(423).json({
+            error: `"${safeName}" is locked and cannot be overwritten.`,
+            code: "FILE_LOCKED",
+          });
+          return;
+        }
 
         await uploadFile(storageKey, file.buffer, file.mimetype);
 
@@ -337,11 +541,38 @@ router.post(
 
 router.get("/starred", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
+    const { userId, tenantId, role } = req.user!;
+    const isPrivileged = [
+      "SUPERADMIN",
+      "ORG_ADMIN",
+      "MANAGER",
+      "EDITOR",
+    ].includes(role);
+
+    let allowedFileIds: string[] | null = null;
+    if (!isPrivileged) {
+      const perms = await prisma.permission.findMany({
+        where: {
+          resourceType: "file",
+          OR: [{ grantedTo: "all" }, { grantedTo: "user", userId }],
+          AND: [
+            { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+            { file: { tenantId } },
+          ],
+        },
+        select: { resourceId: true },
+      });
+      allowedFileIds = perms.map((p) => p.resourceId);
+    }
+
     const files = await prisma.file.findMany({
       where: {
-        tenantId: req.user!.tenantId,
+        tenantId,
         isStarred: true,
         isDeleted: false,
+        ...(allowedFileIds !== null
+          ? { OR: [{ id: { in: allowedFileIds } }, { uploadedById: userId }] }
+          : {}),
       },
       orderBy: { updatedAt: "desc" },
       select: {
@@ -364,8 +595,38 @@ router.get("/starred", verifyAuth, async (req: AuthRequest, res: Response) => {
 
 router.get("/recent", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
+    const { userId, tenantId, role } = req.user!;
+    const isPrivileged = [
+      "SUPERADMIN",
+      "ORG_ADMIN",
+      "MANAGER",
+      "EDITOR",
+    ].includes(role);
+
+    let allowedFileIds: string[] | null = null;
+    if (!isPrivileged) {
+      const perms = await prisma.permission.findMany({
+        where: {
+          resourceType: "file",
+          OR: [{ grantedTo: "all" }, { grantedTo: "user", userId }],
+          AND: [
+            { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+            { file: { tenantId } },
+          ],
+        },
+        select: { resourceId: true },
+      });
+      allowedFileIds = perms.map((p) => p.resourceId);
+    }
+
     const files = await prisma.file.findMany({
-      where: { tenantId: req.user!.tenantId, isDeleted: false },
+      where: {
+        tenantId,
+        isDeleted: false,
+        ...(allowedFileIds !== null
+          ? { OR: [{ id: { in: allowedFileIds } }, { uploadedById: userId }] }
+          : {}),
+      },
       orderBy: { updatedAt: "desc" },
       take: 50,
       select: {
@@ -390,9 +651,39 @@ router.get("/recent", verifyAuth, async (req: AuthRequest, res: Response) => {
 
 router.get("/trash", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
+    const { userId, tenantId, role } = req.user!;
+    const isPrivileged = [
+      "SUPERADMIN",
+      "ORG_ADMIN",
+      "MANAGER",
+      "EDITOR",
+    ].includes(role);
+
+    let allowedFileIds: string[] | null = null;
+    if (!isPrivileged) {
+      const perms = await prisma.permission.findMany({
+        where: {
+          resourceType: "file",
+          OR: [{ grantedTo: "all" }, { grantedTo: "user", userId }],
+          AND: [
+            { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+            { file: { tenantId } },
+          ],
+        },
+        select: { resourceId: true },
+      });
+      allowedFileIds = perms.map((p) => p.resourceId);
+    }
+
     const [files, folders] = await Promise.all([
       prisma.file.findMany({
-        where: { tenantId: req.user!.tenantId, isDeleted: true },
+        where: {
+          tenantId,
+          isDeleted: true,
+          ...(allowedFileIds !== null
+            ? { OR: [{ id: { in: allowedFileIds } }, { uploadedById: userId }] }
+            : {}),
+        },
         orderBy: { updatedAt: "desc" },
         select: {
           id: true,
@@ -403,11 +694,14 @@ router.get("/trash", verifyAuth, async (req: AuthRequest, res: Response) => {
           folderId: true,
         },
       }),
-      prisma.folder.findMany({
-        where: { tenantId: req.user!.tenantId, isDeleted: true },
-        orderBy: { updatedAt: "desc" },
-        select: { id: true, name: true, updatedAt: true },
-      }),
+      // Folders in trash: only privileged users see all; viewers see none (no folder permissions in trash)
+      isPrivileged
+        ? prisma.folder.findMany({
+            where: { tenantId, isDeleted: true },
+            orderBy: { updatedAt: "desc" },
+            select: { id: true, name: true, updatedAt: true },
+          })
+        : Promise.resolve([]),
     ]);
     res.json({ files, folders });
   } catch (err) {
@@ -422,15 +716,69 @@ router.post(
   async (req: AuthRequest, res: Response) => {
     try {
       const { ids } = z
-        .object({
-          ids: z.array(z.string().uuid()).min(1).max(100),
-        })
+        .object({ ids: z.array(z.string().uuid()).min(1).max(100) })
         .parse(req.body);
+
+      const { userId, tenantId, role } = req.user!;
+      const isPrivileged = [
+        "SUPERADMIN",
+        "ORG_ADMIN",
+        "MANAGER",
+        "EDITOR",
+      ].includes(role);
+
+      // ── PERMISSION GUARD: verify the caller has delete permission on all files
+      if (!isPrivileged) {
+        const filesToCheck = await prisma.file.findMany({
+          where: { id: { in: ids }, tenantId, isDeleted: false },
+          select: { id: true, name: true, uploadedById: true },
+        });
+        for (const file of filesToCheck) {
+          const allowed = await userHasFilePermission(
+            file.id,
+            userId,
+            file.uploadedById,
+            role,
+            "delete",
+          );
+          if (!allowed) {
+            res.status(403).json({
+              error: `You don't have permission to delete "${file.name}".`,
+            });
+            return;
+          }
+        }
+      }
+
+      // ── LOCK GUARD: reject the whole batch if any file is locked ─────────
+      const lockedFiles = await prisma.file.findMany({
+        where: {
+          id: { in: ids },
+          tenantId,
+          isDeleted: false,
+          isLocked: true,
+        },
+        select: { id: true, name: true, lockedById: true },
+      });
+      const isLockPrivileged = ["SUPERADMIN", "ORG_ADMIN", "MANAGER"].includes(
+        role,
+      );
+      const blocked = lockedFiles.filter(
+        (f) => !isLockPrivileged,
+      );
+      if (blocked.length > 0) {
+        res.status(423).json({
+          error: `${blocked.length} file(s) are locked and cannot be deleted.`,
+          code: "FILE_LOCKED",
+          lockedFiles: blocked.map((f) => f.name),
+        });
+        return;
+      }
 
       await prisma.file.updateMany({
         where: {
           id: { in: ids },
-          tenantId: req.user!.tenantId,
+          tenantId,
           isDeleted: false,
         },
         data: { isDeleted: true },
@@ -469,6 +817,62 @@ router.post(
           folderId: z.string().uuid().nullable(),
         })
         .parse(req.body);
+
+      const { userId, tenantId, role } = req.user!;
+      const isPrivileged = [
+        "SUPERADMIN",
+        "ORG_ADMIN",
+        "MANAGER",
+        "EDITOR",
+      ].includes(role);
+
+      // ── PERMISSION GUARD: verify the caller has write permission on all files
+      if (!isPrivileged) {
+        const filesToCheck = await prisma.file.findMany({
+          where: { id: { in: ids }, tenantId, isDeleted: false },
+          select: { id: true, name: true, uploadedById: true },
+        });
+        for (const file of filesToCheck) {
+          const allowed = await userHasFilePermission(
+            file.id,
+            userId,
+            file.uploadedById,
+            role,
+            "write",
+          );
+          if (!allowed) {
+            res.status(403).json({
+              error: `You don't have permission to move "${file.name}".`,
+            });
+            return;
+          }
+        }
+      }
+
+      // ── LOCK GUARD: reject if any file in the batch is locked ────────────
+      const lockedFiles = await prisma.file.findMany({
+        where: {
+          id: { in: ids },
+          tenantId,
+          isDeleted: false,
+          isLocked: true,
+        },
+        select: { id: true, name: true, lockedById: true },
+      });
+      const isLockPrivileged = ["SUPERADMIN", "ORG_ADMIN", "MANAGER"].includes(
+        role,
+      );
+      const blocked = lockedFiles.filter(
+        (f) => !isLockPrivileged && f.lockedById !== userId,
+      );
+      if (blocked.length > 0) {
+        res.status(423).json({
+          error: `${blocked.length} file(s) are locked and cannot be moved.`,
+          code: "FILE_LOCKED",
+          lockedFiles: blocked.map((f) => f.name),
+        });
+        return;
+      }
 
       let resolvedFolderId: string | null = null;
       if (isValidUUID(folderId)) {
@@ -513,15 +917,21 @@ router.post(
   async (req: AuthRequest, res: Response) => {
     try {
       const { ids } = z
-        .object({
-          ids: z.array(z.string().uuid()).min(1).max(50),
-        })
+        .object({ ids: z.array(z.string().uuid()).min(1).max(50) })
         .parse(req.body);
+
+      const { userId, tenantId, role } = req.user!;
+      const isPrivileged = [
+        "SUPERADMIN",
+        "ORG_ADMIN",
+        "MANAGER",
+        "EDITOR",
+      ].includes(role);
 
       const files = await prisma.file.findMany({
         where: {
           id: { in: ids },
-          tenantId: req.user!.tenantId,
+          tenantId,
           isDeleted: false,
         },
         select: { id: true, name: true, storageKey: true },
@@ -530,6 +940,26 @@ router.post(
       if (files.length === 0) {
         res.status(404).json({ error: "No files found" });
         return;
+      }
+
+      // ── GRANULAR DOWNLOAD CHECK for VIEWERs ──────────────────────────────
+      if (!isPrivileged) {
+        for (const file of files) {
+          const canDownload = await userHasCapability(
+            userId,
+            tenantId,
+            role,
+            "file",
+            file.id,
+            "download_files",
+          );
+          if (!canDownload) {
+            res.status(403).json({
+              error: `You don't have permission to download "${file.name}".`,
+            });
+            return;
+          }
+        }
       }
 
       res.setHeader("Content-Type", "application/zip");
@@ -567,10 +997,6 @@ router.post(
   },
 );
 
-// ─── FIX #5: one-time-links static routes moved ABOVE /:id ───────────────────
-// These were previously at the bottom of the file, causing Express to match
-// "one-time-links" as the :id param and never reaching these handlers.
-
 // ─── GET /api/files/one-time-links ───────────────────────────────────────────
 router.get(
   "/one-time-links",
@@ -581,9 +1007,7 @@ router.get(
       const links = await prisma.oneTimeLink.findMany({
         where: { tenantId: req.user!.tenantId },
         orderBy: { createdAt: "desc" },
-        include: {
-          file: { select: { id: true, name: true, mimeType: true } },
-        },
+        include: { file: { select: { id: true, name: true, mimeType: true } } },
       });
       res.json({ links });
     } catch (err) {
@@ -611,7 +1035,6 @@ router.delete(
         return;
       }
       await prisma.oneTimeLink.delete({ where: { id: req.params.linkId } });
-
       await createAuditLog({
         action: "file.link.revoked",
         userId: req.user!.userId,
@@ -620,7 +1043,6 @@ router.delete(
         resourceId: link.fileId,
         req,
       });
-
       res.json({ message: "Link revoked" });
     } catch (err) {
       res.status(500).json({ error: "Failed to revoke link" });
@@ -630,7 +1052,6 @@ router.delete(
 
 // ─── PARAMETERIZED ROUTES ─────────────────────────────────────────────────────
 
-// ─── GET /api/files/:id/download ─────────────────────────────────────────────
 router.get(
   "/:id/download",
   verifyAuth,
@@ -641,16 +1062,13 @@ router.get(
     }
     try {
       const { userId, tenantId, role } = req.user!;
-
       const file = await prisma.file.findFirst({
         where: { id: req.params.id, tenantId, isDeleted: false },
       });
-
       if (!file) {
         res.status(404).json({ error: "File not found" });
         return;
       }
-
       const canAccess = await userCanAccessFile(
         file.id,
         userId,
@@ -663,11 +1081,34 @@ router.get(
         return;
       }
 
+      // ── GRANULAR DOWNLOAD CHECK: VIEWERs need explicit download_files capability ──
+      const isPrivileged = [
+        "SUPERADMIN",
+        "ORG_ADMIN",
+        "MANAGER",
+        "EDITOR",
+      ].includes(role);
+      if (!isPrivileged) {
+        const canDownload = await userHasCapability(
+          userId,
+          tenantId,
+          role,
+          "file",
+          file.id,
+          "download_files",
+        );
+        if (!canDownload) {
+          res.status(403).json({
+            error: "You don't have permission to download this file.",
+          });
+          return;
+        }
+      }
+
       const downloadUrl = await getFileViewUrl(
         file.storageKey,
         SIGNED_URL_TTL.DOWNLOAD,
       );
-
       await createAuditLog({
         action: "file.download",
         userId: req.user!.userId,
@@ -677,7 +1118,6 @@ router.get(
         resourceName: file.name,
         req,
       });
-
       res.json({ downloadUrl, name: file.name, mimeType: file.mimeType });
     } catch (err) {
       res.status(500).json({ error: "Download failed" });
@@ -685,7 +1125,6 @@ router.get(
   },
 );
 
-// ─── GET /api/files/:id/versions ─────────────────────────────────────────────
 router.get(
   "/:id/versions",
   verifyAuth,
@@ -709,12 +1148,10 @@ router.get(
           },
         },
       });
-
       if (!file) {
         res.status(404).json({ error: "File not found" });
         return;
       }
-
       const allVersions = [
         {
           id: "current",
@@ -727,7 +1164,6 @@ router.get(
         },
         ...file.versions.map((v) => ({ ...v, isCurrent: false })),
       ];
-
       res.json({ versions: allVersions, currentVersion: file.version });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch versions" });
@@ -735,7 +1171,6 @@ router.get(
   },
 );
 
-// ─── POST /api/files/:id/versions/:versionId/restore ─────────────────────────
 router.post(
   "/:id/versions/:versionId/restore",
   verifyAuth,
@@ -752,21 +1187,27 @@ router.post(
           isDeleted: false,
         },
       });
-
       if (!file) {
         res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      // ── LOCK GUARD ────────────────────────────────────────────────────────
+      if (isBlockedByLock(file, req.user!.userId, req.user!.role)) {
+        res.status(423).json({
+          error: "File is locked and cannot be restored to a previous version.",
+          code: "FILE_LOCKED",
+        });
         return;
       }
 
       const versionRecord = await prisma.fileVersion.findFirst({
         where: { id: req.params.versionId, fileId: file.id },
       });
-
       if (!versionRecord) {
         res.status(404).json({ error: "Version not found" });
         return;
       }
-
       await prisma.fileVersion.create({
         data: {
           version: file.version,
@@ -776,7 +1217,6 @@ router.post(
           uploadedById: file.uploadedById,
         },
       });
-
       const newVersion = file.version + 1;
       await prisma.file.update({
         where: { id: file.id },
@@ -787,7 +1227,6 @@ router.post(
           updatedAt: new Date(),
         },
       });
-
       await createAuditLog({
         action: "file.restore",
         userId: req.user!.userId,
@@ -798,7 +1237,6 @@ router.post(
         metadata: { restoredVersion: versionRecord.version, newVersion },
         req,
       });
-
       res.json({ message: `Restored to version ${versionRecord.version}` });
     } catch (err) {
       res.status(500).json({ error: "Failed to restore version" });
@@ -806,7 +1244,7 @@ router.post(
   },
 );
 
-// ─── PATCH /api/files/:id/rename ─────────────────────────────────────────────
+// ─── PATCH /api/files/:id/rename — LOCK GUARD ────────────────────────────────
 router.patch(
   "/:id/rename",
   verifyAuth,
@@ -819,7 +1257,6 @@ router.patch(
       const { name } = z
         .object({ name: z.string().min(1).max(255) })
         .parse(req.body);
-
       const file = await prisma.file.findFirst({
         where: {
           id: req.params.id,
@@ -827,9 +1264,33 @@ router.patch(
           isDeleted: false,
         },
       });
-
       if (!file) {
         res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      // ── LOCK GUARD ────────────────────────────────────────────────────────
+      if (isBlockedByLock(file, req.user!.userId, req.user!.role)) {
+        res.status(423).json({
+          error: "File is locked and cannot be renamed.",
+          code: "FILE_LOCKED",
+        });
+        return;
+      }
+
+      // ── PERMISSION GUARD ──────────────────────────────────────────────────
+      if (
+        !(await userHasFilePermission(
+          file.id,
+          req.user!.userId,
+          file.uploadedById,
+          req.user!.role,
+          "write",
+        ))
+      ) {
+        res
+          .status(403)
+          .json({ error: "You don't have permission to rename this file." });
         return;
       }
 
@@ -839,7 +1300,6 @@ router.patch(
         data: { name: safeName, updatedAt: new Date() },
         select: { id: true, name: true, updatedAt: true },
       });
-
       await createAuditLog({
         action: "file.rename",
         userId: req.user!.userId,
@@ -850,7 +1310,6 @@ router.patch(
         metadata: { oldName: file.name, newName: safeName },
         req,
       });
-
       res.json({ file: updated });
     } catch (err: any) {
       if (err.name === "ZodError") {
@@ -862,6 +1321,35 @@ router.patch(
   },
 );
 
+// ─── GET /api/files/:id/tags — must be above GET /:id ────────────────────────
+router.get("/:id/tags", verifyAuth, async (req: AuthRequest, res: Response) => {
+  if (!isValidUUID(req.params.id)) {
+    res.status(400).json({ error: "Invalid ID" });
+    return;
+  }
+  try {
+    const file = await prisma.file.findFirst({
+      where: {
+        id: req.params.id,
+        tenantId: req.user!.tenantId,
+        isDeleted: false,
+      },
+      select: { id: true },
+    });
+    if (!file) {
+      res.status(404).json({ error: "File not found" });
+      return;
+    }
+    const tags = await prisma.fileTag.findMany({
+      where: { fileId: req.params.id },
+      include: { tag: true },
+    });
+    res.json({ tags });
+  } catch {
+    res.status(500).json({ error: "Failed to fetch file tags" });
+  }
+});
+
 // ─── GET /api/files/:id ───────────────────────────────────────────────────────
 router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
   if (!isValidUUID(req.params.id)) {
@@ -870,16 +1358,13 @@ router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
   }
   try {
     const { userId, tenantId, role } = req.user!;
-
     const file = await prisma.file.findFirst({
       where: { id: req.params.id, tenantId, isDeleted: false },
     });
-
     if (!file) {
       res.status(404).json({ error: "File not found" });
       return;
     }
-
     const canAccess = await userCanAccessFile(
       file.id,
       userId,
@@ -891,9 +1376,7 @@ router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
       res.status(403).json({ error: "Access denied" });
       return;
     }
-
     const viewUrl = await getFileViewUrl(file.storageKey, SIGNED_URL_TTL.VIEW);
-
     await createAuditLog({
       action: "file.view",
       userId: req.user!.userId,
@@ -903,7 +1386,6 @@ router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
       resourceName: file.name,
       req,
     });
-
     res.json({
       file: {
         id: file.id,
@@ -921,7 +1403,7 @@ router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
   }
 });
 
-// ─── PATCH /api/files/:id/move ────────────────────────────────────────────────
+// ─── PATCH /api/files/:id/move — LOCK GUARD ───────────────────────────────────
 router.patch(
   "/:id/move",
   verifyAuth,
@@ -932,7 +1414,6 @@ router.patch(
     }
     try {
       const { folderId } = req.body;
-
       const file = await prisma.file.findFirst({
         where: {
           id: req.params.id,
@@ -940,9 +1421,33 @@ router.patch(
           isDeleted: false,
         },
       });
-
       if (!file) {
         res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      // ── LOCK GUARD ────────────────────────────────────────────────────────
+      if (isBlockedByLock(file, req.user!.userId, req.user!.role)) {
+        res.status(423).json({
+          error: "File is locked and cannot be moved.",
+          code: "FILE_LOCKED",
+        });
+        return;
+      }
+
+      // ── PERMISSION GUARD ──────────────────────────────────────────────────
+      if (
+        !(await userHasFilePermission(
+          file.id,
+          req.user!.userId,
+          file.uploadedById,
+          req.user!.role,
+          "write",
+        ))
+      ) {
+        res
+          .status(403)
+          .json({ error: "You don't have permission to move this file." });
         return;
       }
 
@@ -961,12 +1466,10 @@ router.patch(
         }
         resolvedFolderId = folder.id;
       }
-
       const updated = await prisma.file.update({
         where: { id: req.params.id },
         data: { folderId: resolvedFolderId },
       });
-
       await createAuditLog({
         action: "file.move",
         userId: req.user!.userId,
@@ -977,7 +1480,6 @@ router.patch(
         metadata: { movedFrom: file.folderId, movedTo: resolvedFolderId },
         req,
       });
-
       res.json({ file: updated });
     } catch (err) {
       res.status(500).json({ error: "Failed to move file" });
@@ -985,7 +1487,6 @@ router.patch(
   },
 );
 
-// ─── PATCH /api/files/:id/category ───────────────────────────────────────────
 router.patch(
   "/:id/category",
   verifyAuth,
@@ -996,7 +1497,6 @@ router.patch(
     }
     try {
       const { categoryId } = req.body;
-
       const file = await prisma.file.findFirst({
         where: {
           id: req.params.id,
@@ -1004,12 +1504,10 @@ router.patch(
           isDeleted: false,
         },
       });
-
       if (!file) {
         res.status(404).json({ error: "File not found" });
         return;
       }
-
       let resolvedCategoryId: string | null = null;
       if (isValidUUID(categoryId)) {
         const cat = await prisma.category.findFirst({
@@ -1017,12 +1515,10 @@ router.patch(
         });
         if (cat) resolvedCategoryId = cat.id;
       }
-
       const updated = await prisma.file.update({
         where: { id: req.params.id },
         data: { categoryId: resolvedCategoryId },
       });
-
       res.json({ file: updated });
     } catch (err) {
       res.status(500).json({ error: "Failed to assign category" });
@@ -1030,7 +1526,6 @@ router.patch(
   },
 );
 
-// ─── PATCH /api/files/:id/star ────────────────────────────────────────────────
 router.patch(
   "/:id/star",
   verifyAuth,
@@ -1051,7 +1546,6 @@ router.patch(
         res.status(404).json({ error: "File not found" });
         return;
       }
-
       const updated = await prisma.file.update({
         where: { id: req.params.id },
         data: { isStarred: !file.isStarred },
@@ -1063,7 +1557,6 @@ router.patch(
   },
 );
 
-// ─── PATCH /api/files/:id/restore (from trash) ────────────────────────────────
 router.patch(
   "/:id/restore",
   verifyAuth,
@@ -1084,11 +1577,36 @@ router.patch(
         res.status(404).json({ error: "File not found in trash" });
         return;
       }
-
       await prisma.file.update({
         where: { id: req.params.id },
         data: { isDeleted: false },
       });
+
+      if (file.folderId) {
+        let currentFolderId: string | null = file.folderId;
+        while (currentFolderId) {
+          const folder: {
+            id: string;
+            parentId: string | null;
+            isDeleted: boolean;
+          } | null = await prisma.folder.findFirst({
+            where: {
+              id: currentFolderId,
+              tenantId: req.user!.tenantId,
+            },
+            select: { id: true, parentId: true, isDeleted: true },
+          });
+          if (!folder) break;
+          if (folder.isDeleted) {
+            await prisma.folder.update({
+              where: { id: folder.id },
+              data: { isDeleted: false },
+            });
+          }
+          currentFolderId = folder.parentId;
+        }
+      }
+
       res.json({ message: "File restored" });
     } catch (err) {
       res.status(500).json({ error: "Failed to restore file" });
@@ -1096,7 +1614,7 @@ router.patch(
   },
 );
 
-// ─── DELETE /api/files/:id (soft delete) ─────────────────────────────────────
+// ─── DELETE /api/files/:id — LOCK GUARD ──────────────────────────────────────
 router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
   if (!isValidUUID(req.params.id)) {
     res.status(400).json({ error: "Invalid file ID" });
@@ -1110,9 +1628,50 @@ router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
         isDeleted: false,
       },
     });
-
     if (!file) {
       res.status(404).json({ error: "File not found" });
+      return;
+    }
+
+    // ── LOCK GUARD ────────────────────────────────────────────────────────
+    if (isBlockedByLock(file, req.user!.userId, req.user!.role, "delete")) {
+      res.status(423).json({
+        error: "File is locked and cannot be deleted.",
+        code: "FILE_LOCKED",
+      });
+      return;
+    }
+
+    // ── PERMISSION GUARD (coarse) ──────────────────────────────────────────
+    if (
+      !(await userHasFilePermission(
+        file.id,
+        req.user!.userId,
+        file.uploadedById,
+        req.user!.role,
+        "delete",
+      ))
+    ) {
+      res
+        .status(403)
+        .json({ error: "You don't have permission to delete this file." });
+      return;
+    }
+
+    // ── GRANULAR CAPABILITY CHECK ──────────────────────────────────────────
+    if (
+      !(await userHasCapability(
+        req.user!.userId,
+        req.user!.tenantId,
+        req.user!.role,
+        "file",
+        file.id,
+        "delete_files",
+      ))
+    ) {
+      res.status(403).json({
+        error: "Your permission does not include deleting files.",
+      });
       return;
     }
 
@@ -1120,7 +1679,6 @@ router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
       where: { id: req.params.id, tenantId: req.user!.tenantId },
       data: { isDeleted: true },
     });
-
     await createAuditLog({
       action: "file.delete",
       userId: req.user!.userId,
@@ -1130,17 +1688,16 @@ router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
       resourceName: file.name,
       req,
     });
-
     res.json({ message: "File deleted successfully" });
   } catch (err) {
     res.status(500).json({ error: "Failed to delete file" });
   }
 });
 
-// ─── DELETE /api/files/:id/permanent ─────────────────────────────────────────
 router.delete(
   "/:id/permanent",
   verifyAuth,
+  requireRole("ORG_ADMIN", "MANAGER", "SUPERADMIN"),
   async (req: AuthRequest, res: Response) => {
     if (!isValidUUID(req.params.id)) {
       res.status(400).json({ error: "Invalid file ID" });
@@ -1160,12 +1717,36 @@ router.delete(
         return;
       }
 
+      // ── LOCK GUARD ────────────────────────────────────────────────────────
+      if (isBlockedByLock(file as any, req.user!.userId, req.user!.role, "delete")) {
+        res.status(423).json({
+          error: "File is locked and cannot be permanently deleted.",
+          code: "FILE_LOCKED",
+        });
+        return;
+      }
+
+      // ── PERMISSION GUARD ──────────────────────────────────────────────────
+      if (
+        !(await userHasFilePermission(
+          file.id,
+          req.user!.userId,
+          file.uploadedById,
+          req.user!.role,
+          "delete",
+        ))
+      ) {
+        res.status(403).json({
+          error: "You don't have permission to permanently delete this file.",
+        });
+        return;
+      }
+
       const allKeys = [
         file.storageKey,
         ...file.versions.map((v) => v.storageKey),
       ];
       await Promise.allSettled(allKeys.map((key) => deleteFile(key)));
-
       await prisma.$transaction([
         prisma.fileTag.deleteMany({ where: { fileId: file.id } }),
         prisma.permission.deleteMany({ where: { fileId: file.id } }),
@@ -1173,7 +1754,6 @@ router.delete(
         prisma.fileVersion.deleteMany({ where: { fileId: file.id } }),
         prisma.file.delete({ where: { id: file.id } }),
       ]);
-
       await createAuditLog({
         action: "file.delete.permanent",
         userId: req.user!.userId,
@@ -1184,7 +1764,6 @@ router.delete(
         metadata: { versionsDeleted: file.versions.length },
         req,
       });
-
       res.json({ message: "File permanently deleted" });
     } catch (err) {
       console.error(err);
@@ -1193,9 +1772,6 @@ router.delete(
   },
 );
 
-// ─── GET /api/files/:id/metadata ─────────────────────────────────────────────
-// FIX #6: scope through file first to enforce tenant isolation —
-// FileMetadata has no tenantId column so the join is required
 router.get(
   "/:id/metadata",
   verifyAuth,
@@ -1217,7 +1793,6 @@ router.get(
         res.status(404).json({ error: "File not found" });
         return;
       }
-
       const metadata = await prisma.fileMetadata.findMany({
         where: { fileId: req.params.id },
         orderBy: { createdAt: "asc" },
@@ -1229,7 +1804,6 @@ router.get(
   },
 );
 
-// ─── PUT /api/files/:id/metadata ─────────────────────────────────────────────
 router.put(
   "/:id/metadata",
   verifyAuth,
@@ -1251,7 +1825,6 @@ router.put(
             .max(20),
         })
         .parse(req.body);
-
       const file = await prisma.file.findFirst({
         where: {
           id: req.params.id,
@@ -1264,6 +1837,37 @@ router.put(
         return;
       }
 
+      const isPrivileged = [
+        "SUPERADMIN",
+        "ORG_ADMIN",
+        "MANAGER",
+        "EDITOR",
+      ].includes(req.user!.role);
+
+      if (!isPrivileged) {
+        const canEditAttrs = await userHasCapability(
+          req.user!.userId,
+          req.user!.tenantId,
+          req.user!.role,
+          "file",
+          file.id,
+          "edit_file_attrs"
+        );
+        if (!canEditAttrs) {
+          const hasCoarseWrite = await userHasFilePermission(
+            file.id,
+            req.user!.userId,
+            file.uploadedById,
+            req.user!.role,
+            "write"
+          );
+          if (!hasCoarseWrite) {
+            res.status(403).json({ error: "Permission denied" });
+            return;
+          }
+        }
+      }
+
       await prisma.$transaction([
         prisma.fileMetadata.deleteMany({ where: { fileId: req.params.id } }),
         ...fields.map((f) =>
@@ -1272,7 +1876,6 @@ router.put(
           }),
         ),
       ]);
-
       res.json({ message: "Metadata updated" });
     } catch (err: any) {
       if (err.name === "ZodError") {
@@ -1284,8 +1887,6 @@ router.put(
   },
 );
 
-// ─── GET /api/files/:id/comments ─────────────────────────────────────────────
-// FIX #7: scope through file first — FileComment has no tenantId column
 router.get(
   "/:id/comments",
   verifyAuth,
@@ -1307,7 +1908,6 @@ router.get(
         res.status(404).json({ error: "File not found" });
         return;
       }
-
       const comments = await prisma.fileComment.findMany({
         where: { fileId: req.params.id },
         orderBy: { createdAt: "asc" },
@@ -1320,7 +1920,6 @@ router.get(
   },
 );
 
-// ─── POST /api/files/:id/comments ────────────────────────────────────────────
 router.post(
   "/:id/comments",
   verifyAuth,
@@ -1333,7 +1932,6 @@ router.post(
       const { content } = z
         .object({ content: z.string().min(1).max(1000) })
         .parse(req.body);
-
       const file = await prisma.file.findFirst({
         where: {
           id: req.params.id,
@@ -1345,7 +1943,6 @@ router.post(
         res.status(404).json({ error: "File not found" });
         return;
       }
-
       const comment = await prisma.fileComment.create({
         data: { content, fileId: req.params.id, userId: req.user!.userId },
         include: { user: { select: { id: true, name: true } } },
@@ -1361,8 +1958,6 @@ router.post(
   },
 );
 
-// ─── DELETE /api/files/:id/comments/:commentId ────────────────────────────────
-// FIX #8: verify the file belongs to this tenant before touching the comment
 router.delete(
   "/:id/comments/:commentId",
   verifyAuth,
@@ -1376,7 +1971,6 @@ router.delete(
         res.status(404).json({ error: "File not found" });
         return;
       }
-
       const comment = await prisma.fileComment.findFirst({
         where: {
           id: req.params.commentId,
@@ -1396,7 +1990,6 @@ router.delete(
   },
 );
 
-// ─── POST /api/files/:id/submit-approval ─────────────────────────────────────
 router.post(
   "/:id/submit-approval",
   verifyAuth,
@@ -1418,6 +2011,37 @@ router.post(
         return;
       }
 
+      const isPrivileged = [
+        "SUPERADMIN",
+        "ORG_ADMIN",
+        "MANAGER",
+        "EDITOR",
+      ].includes(req.user!.role);
+
+      if (!isPrivileged) {
+        const canEditAttrs = await userHasCapability(
+          req.user!.userId,
+          req.user!.tenantId,
+          req.user!.role,
+          "file",
+          file.id,
+          "edit_file_attrs"
+        );
+        if (!canEditAttrs) {
+          const hasCoarseWrite = await userHasFilePermission(
+            file.id,
+            req.user!.userId,
+            file.uploadedById,
+            req.user!.role,
+            "write"
+          );
+          if (!hasCoarseWrite) {
+            res.status(403).json({ error: "Permission denied" });
+            return;
+          }
+        }
+      }
+
       await prisma.file.update({
         where: { id: req.params.id },
         data: {
@@ -1427,7 +2051,6 @@ router.post(
           approvalNote: null,
         },
       });
-
       await createAuditLog({
         action: "file.approval.submitted",
         userId: req.user!.userId,
@@ -1437,7 +2060,6 @@ router.post(
         resourceName: file.name,
         req,
       });
-
       res.json({ message: "File submitted for approval" });
     } catch {
       res.status(500).json({ error: "Failed to submit for approval" });
@@ -1445,7 +2067,6 @@ router.post(
   },
 );
 
-// ─── POST /api/files/:id/approve ─────────────────────────────────────────────
 router.post(
   "/:id/approve",
   verifyAuth,
@@ -1462,7 +2083,6 @@ router.post(
           note: z.string().max(500).optional(),
         })
         .parse(req.body);
-
       const file = await prisma.file.findFirst({
         where: {
           id: req.params.id,
@@ -1478,7 +2098,6 @@ router.post(
         res.status(400).json({ error: "File is not pending approval" });
         return;
       }
-
       await prisma.file.update({
         where: { id: req.params.id },
         data: {
@@ -1488,12 +2107,9 @@ router.post(
           approvalNote: note ?? null,
         },
       });
-
-      // FIX #4: cast to the specific union the AuditAction type expects
       const auditAction = `file.approval.${action}` as
         | "file.approval.approved"
         | "file.approval.rejected";
-
       await createAuditLog({
         action: auditAction,
         userId: req.user!.userId,
@@ -1504,7 +2120,6 @@ router.post(
         metadata: { note },
         req,
       });
-
       res.json({ message: `File ${action}` });
     } catch (err: any) {
       if (err.name === "ZodError") {
@@ -1516,11 +2131,14 @@ router.post(
   },
 );
 
-// ─── POST /api/files/:id/lock ─────────────────────────────────────────────────
 router.post(
   "/:id/lock",
   verifyAuth,
   async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.id)) {
+      res.status(400).json({ error: "Invalid file ID" });
+      return;
+    }
     try {
       const file = await prisma.file.findFirst({
         where: {
@@ -1537,7 +2155,6 @@ router.post(
         res.status(400).json({ error: "File is already locked" });
         return;
       }
-
       await prisma.file.update({
         where: { id: file.id },
         data: {
@@ -1562,11 +2179,14 @@ router.post(
   },
 );
 
-// ─── POST /api/files/:id/unlock ───────────────────────────────────────────────
 router.post(
   "/:id/unlock",
   verifyAuth,
   async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.id)) {
+      res.status(400).json({ error: "Invalid file ID" });
+      return;
+    }
     try {
       const file = await prisma.file.findFirst({
         where: {
@@ -1583,7 +2203,6 @@ router.post(
         res.status(400).json({ error: "File is not locked" });
         return;
       }
-
       const canUnlock =
         ["SUPERADMIN", "ORG_ADMIN", "MANAGER"].includes(req.user!.role) ||
         file.lockedById === req.user!.userId;
@@ -1593,7 +2212,6 @@ router.post(
           .json({ error: "Only the locker or a manager can unlock" });
         return;
       }
-
       await prisma.file.update({
         where: { id: file.id },
         data: { isLocked: false, lockedById: null, lockedAt: null },
