@@ -3,7 +3,6 @@ import {
   X,
   Clock,
   RotateCcw,
-  Download,
   CheckCircle,
   Loader,
   History,

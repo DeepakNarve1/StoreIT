@@ -126,7 +126,7 @@ export default function FilePreviewModal({
   const fileType = getFileType(file.mimeType);
   const { icon: Icon, color, bg } = getFileIcon(file.mimeType);
   const [viewUrl, setViewUrl] = useState<string | null>(file?.viewUrl || null);
-  const [loadingUrl, setLoadingUrl] = useState(false);
+  const [, setLoadingUrl] = useState(false);
 
   useEffect(() => {
     if (!file?.id) return;
