@@ -210,7 +210,7 @@ export default function UsersPage() {
     },
   });
 
-  const users = usersData?.users ?? [];
+  const users = (usersData?.users ?? []).filter((u) => u.role !== "SUPERADMIN");
   const invites = invitesData?.invites ?? [];
 
   const maxUsers = billing?.limits?.maxUsers ?? null;

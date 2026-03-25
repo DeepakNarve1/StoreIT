@@ -408,6 +408,23 @@ router.patch(
         res.status(404).json({ error: "User not found" });
         return;
       }
+      
+      if (user.role === "SUPERADMIN" && req.user!.role !== "SUPERADMIN") {
+        res.status(403).json({ error: "Cannot modify a Superadmin" });
+        return;
+      }
+
+      // If they are trying to strip the SUPERADMIN role, block it
+      if (user.role === "SUPERADMIN" && role) {
+        res.status(403).json({ error: "Cannot downgrade a Superadmin" });
+        return;
+      }
+
+      // If they are trying to disable a SUPERADMIN, block it
+      if (user.role === "SUPERADMIN" && isActive === false) {
+        res.status(403).json({ error: "Cannot disable a Superadmin" });
+        return;
+      }
 
       const updated = await prisma.user.update({
         where: { id: req.params.id },
@@ -457,6 +474,11 @@ router.delete(
       });
       if (!user) {
         res.status(404).json({ error: "User not found" });
+        return;
+      }
+
+      if (user.role === "SUPERADMIN") {
+        res.status(403).json({ error: "Cannot remove a Superadmin" });
         return;
       }
 
