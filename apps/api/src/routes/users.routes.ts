@@ -452,20 +452,19 @@ router.patch(
   },
 );
 
-// ─── DELETE /api/users/:id — remove user from tenant ─────────────────────────
+// ─── DELETE /api/users/:id — deactivate user (soft-delete) ───────────────────
 router.delete(
   "/:id",
   verifyAuth,
   requireRole("ORG_ADMIN", "SUPERADMIN"),
   async (req: AuthRequest, res: Response) => {
     try {
-      // Prevent self-deletion
       if (!isValidUUID(req.params.id)) {
         res.status(400).json({ error: "Invalid ID" });
         return;
       }
       if (req.params.id === req.user!.userId) {
-        res.status(400).json({ error: "You cannot remove yourself" });
+        res.status(400).json({ error: "You cannot deactivate yourself" });
         return;
       }
 
@@ -478,7 +477,7 @@ router.delete(
       }
 
       if (user.role === "SUPERADMIN") {
-        res.status(403).json({ error: "Cannot remove a Superadmin" });
+        res.status(403).json({ error: "Cannot deactivate a Superadmin" });
         return;
       }
 
@@ -487,9 +486,56 @@ router.delete(
         data: { isActive: false },
       });
 
-      res.json({ message: "User removed successfully" });
+      res.json({ message: "User deactivated successfully" });
     } catch (err) {
-      res.status(500).json({ error: "Failed to remove user" });
+      res.status(500).json({ error: "Failed to deactivate user" });
+    }
+  },
+);
+
+// ─── DELETE /api/users/:id/permanent — full cleanup and delete ────────────────
+router.delete(
+  "/:id/permanent",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!isValidUUID(req.params.id)) {
+        res.status(400).json({ error: "Invalid ID" });
+        return;
+      }
+      if (req.params.id === req.user!.userId) {
+        res.status(400).json({ error: "You cannot delete yourself" });
+        return;
+      }
+
+      const user = await prisma.user.findFirst({
+        where: { id: req.params.id, tenantId: req.user!.tenantId },
+      });
+      if (!user) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+
+      if (user.role === "SUPERADMIN") {
+        res.status(403).json({ error: "Cannot delete a Superadmin" });
+        return;
+      }
+
+      // Cleanup related records that might block deletion
+      await prisma.$transaction([
+        // Delete permissions granted to this user
+        prisma.permission.deleteMany({ where: { userId: req.params.id } }),
+        // Unlink or delete invitations
+        prisma.inviteToken.deleteMany({ where: { invitedById: req.params.id } }),
+        // Actually delete the user
+        prisma.user.delete({ where: { id: req.params.id } }),
+      ]);
+
+      res.json({ message: "User permanently deleted" });
+    } catch (err) {
+      console.error("[DELETE_USER]", err);
+      res.status(500).json({ error: "Failed to permanently delete user. They may have active dependencies." });
     }
   },
 );

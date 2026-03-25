@@ -174,6 +174,16 @@ export default function UsersPage() {
     },
   });
 
+  const deleteUser = useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/users/${id}/permanent`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["billing-status"] });
+    },
+  });
+
   const createDept = useMutation({
     mutationFn: async (name: string) =>
       api.post("/users/departments", { name }),
@@ -552,28 +562,47 @@ export default function UsersPage() {
                         })}
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={() =>
-                            toggleUser.mutate({
-                              id: user.id,
-                              isActive: !user.isActive,
-                            })
-                          }
-                          className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                          title={user.isActive ? "Disable user" : "Enable user"}
-                        >
-                          {user.isActive ? (
-                            <ToggleRight
-                              size={18}
-                              className="text-green-500 dark:text-green-400"
-                            />
-                          ) : (
-                            <ToggleLeft
-                              size={18}
-                              className="dark:text-gray-500"
-                            />
-                          )}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() =>
+                              toggleUser.mutate({
+                                id: user.id,
+                                isActive: !user.isActive,
+                              })
+                            }
+                            className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                            title={
+                              user.isActive ? "Disable user" : "Enable user"
+                            }
+                          >
+                            {user.isActive ? (
+                              <ToggleRight
+                                size={18}
+                                className="text-green-500 dark:text-green-400"
+                              />
+                            ) : (
+                              <ToggleLeft
+                                size={18}
+                                className="dark:text-gray-500"
+                              />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (
+                                confirm(
+                                  `Are you sure you want to PERMANENTLY delete ${user.name}? This cannot be undone.`,
+                                )
+                              ) {
+                                deleteUser.mutate(user.id);
+                              }
+                            }}
+                            className="text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                            title="Permanently delete user"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

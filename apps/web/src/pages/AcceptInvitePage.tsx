@@ -174,11 +174,14 @@ export default function AcceptInvitePage() {
               {inviteData.role.replace("_", " ")}
             </span>
           </div>
-          <p className="text-lg font-bold text-gray-900 dark:text-primary-400 leading-tight">
+          <p className="text-lg font-bold text-white-900 dark:text-primary-400 leading-tight">
             {inviteData.tenantName}
           </p>
           <div className="flex items-center gap-2 mt-1">
-            <Mail size={12} className="text-primary-400 dark:text-primary-500" />
+            <Mail
+              size={12}
+              className="text-primary-400 dark:text-primary-500"
+            />
             <span className="text-xs text-gray-500 dark:text-gray-500 font-medium">
               {inviteData.email}
             </span>
