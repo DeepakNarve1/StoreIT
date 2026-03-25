@@ -3,7 +3,8 @@ import { Resend } from "resend";
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 const FROM = process.env.FROM_EMAIL || "noreply@StoreIT.com";
-const APP_URL = process.env.APP_URL || "http://localhost:5173";
+const rawUrl = process.env.FRONTEND_URL || process.env.APP_URL || "http://localhost:5173";
+const APP_URL = rawUrl.endsWith("/") ? rawUrl.slice(0, -1) : rawUrl;
 
 // ─── INVITE EMAIL ─────────────────────────────────────────────────────────────
 export const sendInviteEmail = async ({
