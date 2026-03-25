@@ -151,6 +151,11 @@ router.patch("/orgs/:id", async (req: AuthRequest, res: Response) => {
       return;
     }
 
+    if (tenant.slug === "superadmin" && isActive === false) {
+      res.status(400).json({ error: "The Platform Admin organisation cannot be suspended" });
+      return;
+    }
+
     const updated = await prisma.tenant.update({
       where: { id: req.params.id },
       data: {
@@ -192,6 +197,11 @@ router.delete("/orgs/:id", async (req: AuthRequest, res: Response) => {
     });
     if (!tenant) {
       res.status(404).json({ error: "Organisation not found" });
+      return;
+    }
+
+    if (tenant.slug === "superadmin") {
+      res.status(400).json({ error: "The Platform Admin organisation cannot be suspended" });
       return;
     }
 

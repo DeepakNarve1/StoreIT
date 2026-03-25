@@ -375,19 +375,27 @@ export default function OrgsPage() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
+                              if (org.slug === "superadmin") return;
                               toggleOrg.mutate({
                                 id: org.id,
                                 isActive: !org.isActive,
                               });
                             }}
+                            disabled={org.slug === "superadmin"}
                             className={clsx(
                               "flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full transition-colors",
-                              org.isActive
+                              org.slug === "superadmin"
+                                ? "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 opacity-80 cursor-default"
+                                : org.isActive
                                 ? "bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/40"
                                 : "bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/40",
                             )}
                           >
-                            {org.isActive ? (
+                            {org.slug === "superadmin" ? (
+                              <>
+                                <Shield size={11} /> Platform Admin
+                              </>
+                            ) : org.isActive ? (
                               <>
                                 <CheckCircle size={11} /> Active
                               </>
@@ -557,21 +565,29 @@ export default function OrgsPage() {
                     </button>
 
                       <button
-                        onClick={() =>
+                        onClick={() => {
+                          if (selectedOrg.slug === "superadmin") return;
                           toggleOrg.mutate({
                             id: selectedOrg.id,
                             isActive: !selectedOrg.isActive,
-                          })
-                        }
+                          });
+                        }}
+                        disabled={selectedOrg.slug === "superadmin"}
                         className={clsx(
                           "w-full flex items-center justify-center gap-2 px-3 py-2",
                           "text-xs font-medium rounded-lg transition-colors border",
-                          selectedOrg.isActive
+                          selectedOrg.slug === "superadmin"
+                            ? "border-purple-200 dark:border-purple-900 text-purple-600 dark:text-purple-400 opacity-50 cursor-not-allowed"
+                            : selectedOrg.isActive
                             ? "border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
                             : "border-green-200 dark:border-green-900 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20",
                         )}
                       >
-                      {selectedOrg.isActive ? (
+                      {selectedOrg.slug === "superadmin" ? (
+                        <>
+                          <Shield size={12} /> Platform Protected
+                        </>
+                      ) : selectedOrg.isActive ? (
                         <>
                           <XCircle size={12} /> Suspend Organisation
                         </>
