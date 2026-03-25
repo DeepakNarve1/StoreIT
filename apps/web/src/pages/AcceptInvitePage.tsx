@@ -165,21 +165,21 @@ export default function AcceptInvitePage() {
         </div>
 
         {/* Invite info card */}
-        <div className="bg-primary-50 dark:bg-primary-950/30 border border-primary-100 dark:border-primary-900/30 rounded-2xl p-5 mb-8">
+        <div className="bg-primary-50 dark:bg-primary-900/10 border border-primary-100 dark:border-primary-800/20 rounded-2xl p-5 mb-8">
           <div className="flex justify-between items-start mb-2">
             <p className="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider">
               Organization Invite
             </p>
-            <span className="text-[10px] font-bold bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-300 px-2 py-0.5 rounded-full">
+            <span className="text-[10px] font-bold bg-primary-100 dark:bg-primary-800 text-primary-700 dark:text-primary-200 px-2 py-0.5 rounded-full">
               {inviteData.role.replace("_", " ")}
             </span>
           </div>
-          <p className="text-lg font-bold text-gray-900 dark:text-white leading-tight">
+          <p className="text-lg font-bold text-gray-900 dark:text-primary-400 leading-tight">
             {inviteData.tenantName}
           </p>
           <div className="flex items-center gap-2 mt-1">
-            <Mail size={12} className="text-primary-400" />
-            <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+            <Mail size={12} className="text-primary-400 dark:text-primary-500" />
+            <span className="text-xs text-gray-500 dark:text-gray-500 font-medium">
               {inviteData.email}
             </span>
           </div>
