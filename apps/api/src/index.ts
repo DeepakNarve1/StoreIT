@@ -26,6 +26,8 @@ import { prisma, pool } from "./utils/prisma";
 import path from "path";
 
 const app = express();
+app.set("trust proxy", 1);
+
 const PORT = process.env.PORT || 5000;
 
 // ─── SECURITY MIDDLEWARE ─────────────────────────────────────────────────────
