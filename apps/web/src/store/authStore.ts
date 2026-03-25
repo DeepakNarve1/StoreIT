@@ -7,6 +7,7 @@ interface User {
   email: string;
   role: string;
   tenantId: string;
+  tenantName: string;
 }
 
 interface AuthState {

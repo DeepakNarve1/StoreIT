@@ -300,14 +300,23 @@ export default function Sidebar({ isOpen }: SidebarProps) {
 
   return (
     <aside className="w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col h-full shrink-0">
-      {/* Logo */}
-      <div className="h-14 flex items-center gap-2 px-4 border-b border-gray-200 dark:border-gray-800 shrink-0">
-        <div className="w-7 h-7 bg-primary-500 rounded-lg flex items-center justify-center">
-          <span className="text-white text-xs font-bold">S</span>
+      {/* Brand / Tenant Info */}
+      <div className="h-16 flex flex-col justify-center px-4 border-b border-gray-200 dark:border-gray-800 shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-primary-600 rounded-xl flex items-center justify-center shadow-lg shadow-primary-500/20">
+            <span className="text-white text-sm font-extrabold">
+              {user?.tenantName?.charAt(0).toUpperCase() || "S"}
+            </span>
+          </div>
+          <div className="min-w-0">
+            <h2 className="font-bold text-gray-900 dark:text-white text-sm truncate leading-tight">
+              {user?.tenantName || "StoreIT"}
+            </h2>
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 font-bold uppercase tracking-widest">
+              Organization
+            </p>
+          </div>
         </div>
-        <span className="font-semibold text-gray-900 dark:text-white text-sm">
-          StoreIT
-        </span>
       </div>
 
       <div className="flex-1 overflow-y-auto py-3">
