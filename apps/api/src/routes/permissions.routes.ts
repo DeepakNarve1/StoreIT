@@ -425,7 +425,10 @@ router.post(
         req,
       });
 
-      const link = `${process.env.APP_URL}/view/${token}`;
+      const base = process.env.FRONTEND_URL || process.env.APP_URL || "http://localhost:5173";
+      // Ensure no trailing slash
+      const cleanBase = base.endsWith("/") ? base.slice(0, -1) : base;
+      const link = `${cleanBase}/view/${token}`;
       res.json({ link, expiresAt });
     } catch (err: unknown) {
       if (err instanceof Error && err.name === "ZodError") {
