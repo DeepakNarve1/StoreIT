@@ -22,6 +22,7 @@ import ResetPasswordPage from "./pages/ResetPasswordPage";
 import BillingPage from "./pages/admin/BillingPage";
 import SharedLinksPage from "./pages/admin/SharedLinksPage";
 import PermissionsOverviewPage from "./pages/admin/PermissionsOverviewPage";
+import GuestAccessPage from "./pages/GuestAccessPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -147,23 +148,10 @@ export default function App() {
               </AdminRoute>
             }
           />
-          <Route
-            path="/superadmin/orgs"
-            element={
-              <SuperadminRoute>
-                <OrgsPage />
-              </SuperadminRoute>
-            }
-          />
+          <Route path="/superadmin/orgs" element={<SuperadminRoute><OrgsPage /></SuperadminRoute>} />
           <Route path="/view/:token" element={<OneTimeViewPage />} />
-          <Route
-            path="/admin/audit"
-            element={
-              <AdminRoute>
-                <AuditLogPage />
-              </AdminRoute>
-            }
-          />
+          <Route path="/guest/:token" element={<GuestAccessPage />} />
+          <Route path="/admin/audit" element={<AdminRoute><AuditLogPage /></AdminRoute>} />
           <Route
             path="/search"
             element={

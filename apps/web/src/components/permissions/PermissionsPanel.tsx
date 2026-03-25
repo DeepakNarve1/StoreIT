@@ -9,6 +9,8 @@ import {
   Clock,
   Trash2,
   AlertCircle,
+  Mail,
+  Send,
 } from "lucide-react";
 import api from "../../api/axios";
 import { useToast } from "../ui/Toast";
@@ -77,7 +79,7 @@ export default function PermissionsPanel({
 }: PermissionsPanelProps) {
   const queryClient = useQueryClient();
   const { add } = useToast();
-  const [tab, setTab] = useState<"access" | "link">("access");
+  const [tab, setTab] = useState<"access" | "link" | "guest">("access");
   const [grantedTo, setGrantedTo] = useState<"all" | "user" | "department">(
     "all",
   );
@@ -87,6 +89,16 @@ export default function PermissionsPanel({
   const [copiedLink, setCopiedLink] = useState(false);
   const [generatedLink, setGeneratedLink] = useState("");
   const [expiresInHours, setExpiresInHours] = useState(24);
+
+  // Guest State
+  const [guestEmail, setGuestEmail] = useState("");
+  const [guestLabel, setGuestLabel] = useState("");
+  const [guestExpiresInDays, setGuestExpiresInDays] = useState(7);
+  const [guestPerms, setGuestPerms] = useState<Record<string, boolean>>({
+    preview_files: true,
+    download_files: false,
+    see_files: true,
+  });
 
   // Granular permission checkboxes — derive action level from selections
   const [checkedPerms, setCheckedPerms] = useState<Record<string, boolean>>({
@@ -222,6 +234,34 @@ export default function PermissionsPanel({
     },
   });
 
+  const generateGuestLink = useMutation({
+    mutationFn: async () => {
+      const res = await api.post("/guest", {
+        fileId: resourceId,
+        email: guestEmail,
+        label: guestLabel,
+        capabilities: guestPerms,
+        expiresInDays: guestExpiresInDays,
+      });
+      return res.data;
+    },
+    onSuccess: () => {
+      add(`Guest link sent to ${guestEmail}!`, "success");
+      setGuestEmail("");
+      setGuestLabel("");
+      setGuestPerms({
+        preview_files: true,
+        download_files: false,
+        see_files: true,
+      });
+      setTab("access"); // return to access panel
+    },
+    onError: (err: any) => {
+      const msg = err.response?.data?.error || "Failed to create guest share";
+      add(msg, "error");
+    },
+  });
+
   const copyLink = async () => {
     try {
       await navigator.clipboard.writeText(generatedLink);
@@ -272,12 +312,20 @@ export default function PermissionsPanel({
             ACCESS
           </button>
           {resourceType === "file" && (
-            <button
-              onClick={() => setTab("link")}
-              className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${tab === "link" ? "border-b-2 border-primary-500 text-primary-500" : "text-gray-500 hover:text-gray-700"}`}
-            >
-              ONE-TIME LINK
-            </button>
+            <>
+              <button
+                onClick={() => setTab("link")}
+                className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${tab === "link" ? "border-b-2 border-primary-500 text-primary-500" : "text-gray-500 hover:text-gray-700"}`}
+              >
+                ONE-TIME LINK
+              </button>
+              <button
+                onClick={() => setTab("guest")}
+                className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${tab === "guest" ? "border-b-2 text-primary-600 border-primary-600 bg-primary-50" : "text-gray-500 hover:text-gray-700"}`}
+              >
+                GUEST INVITE
+              </button>
+            </>
           )}
         </div>
 
@@ -652,6 +700,118 @@ export default function PermissionsPanel({
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {tab === "guest" && (
+            <div className="p-5 flex flex-col h-full">
+              <div className="mb-4">
+                <div className="w-12 h-12 bg-primary-100 dark:bg-primary-900/30 rounded-xl flex items-center justify-center mb-3">
+                  <Mail size={24} className="text-primary-600 dark:text-primary-400" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">
+                  Invite External Guest
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Send a secure viewing portal link directly to someone outside your organization. No account required.
+                </p>
+              </div>
+
+              <div className="space-y-4 mb-6 relative">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Guest Email
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="guest@example.com"
+                    value={guestEmail}
+                    onChange={(e) => setGuestEmail(e.target.value)}
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Optional Note / Label
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Q4 Financial Report Review"
+                    value={guestLabel}
+                    onChange={(e) => setGuestLabel(e.target.value)}
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+                
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Link Expires In
+                    </label>
+                    <select
+                      value={guestExpiresInDays}
+                      onChange={(e) => setGuestExpiresInDays(Number(e.target.value))}
+                      className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    >
+                      <option value={1}>1 Day</option>
+                      <option value={3}>3 Days</option>
+                      <option value={7}>7 Days</option>
+                      <option value={14}>14 Days</option>
+                      <option value={30}>30 Days</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-gray-50 dark:bg-gray-800">
+                  <p className="text-xs font-bold text-gray-500 mb-3 uppercase tracking-wider">
+                    Guest Capabilities
+                  </p>
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={guestPerms.preview_files}
+                        onChange={(e) =>
+                          setGuestPerms({ ...guestPerms, preview_files: e.target.checked })
+                        }
+                        className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Preview file in browser
+                      </span>
+                    </label>
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={guestPerms.download_files}
+                        onChange={(e) =>
+                          setGuestPerms({ ...guestPerms, download_files: e.target.checked })
+                        }
+                        className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Download original file
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-auto">
+                <button
+                  onClick={() => generateGuestLink.mutate()}
+                  disabled={!guestEmail || generateGuestLink.isPending}
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-primary-600 hover:bg-primary-700 text-white text-sm font-bold rounded-xl transition-all disabled:opacity-50"
+                >
+                  {generateGuestLink.isPending ? (
+                    <Loader size={16} className="animate-spin" />
+                  ) : (
+                    <Send size={16} />
+                  )}
+                  {generateGuestLink.isPending ? "Sending..." : "Send Invitation via Email"}
+                </button>
+              </div>
             </div>
           )}
         </div>

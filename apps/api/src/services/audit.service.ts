@@ -29,6 +29,7 @@ export type AuditAction =
   | "link.generate"
   | "link.access"
   | "user.invite"
+  | "guest.share"
   | "user.login"
   | "user.logout"
   | "category.create"

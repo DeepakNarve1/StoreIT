@@ -20,6 +20,7 @@ import auditRoutes from "./routes/audit.routes";
 import searchRoutes from "./routes/search.routes";
 import tagsRoutes from "./routes/tags.routes";
 import billingRoutes from "./routes/billing.routes";
+import guestRoutes from "./routes/guest.routes";
 import { globalErrorHandler } from "./middleware/errorHandler";
 import { prisma, pool } from "./utils/prisma";
 
@@ -99,6 +100,7 @@ app.use("/api/audit", auditRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/tags", tagsRoutes);
 app.use("/api/billing", billingRoutes);
+app.use("/api/guest", guestRoutes);
 
 // ─── 404 HANDLER ─────────────────────────────────────────────────────────────
 app.use("*", (_req: Request, res: Response) => {

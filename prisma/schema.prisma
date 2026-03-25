@@ -29,6 +29,7 @@ model Tenant {
   tags    Tag[] 
   stripeCustomerId     String?   // ← add
   stripeSubscriptionId String?   // ← add
+  guestAccesses        GuestAccess[]
 }
 
 // ─── USER ────────────────────────────────────────────────────────────────────
@@ -172,6 +173,7 @@ comments FileComment[]
   permissions  Permission[]
   metadata     FileMetadata[]
   oneTimeLinks OneTimeLink[]
+  guestFiles   GuestAccess[]  @relation("GuestAccessFile")
 
   @@index([tenantId])
   @@index([tenantId, folderId])
@@ -347,4 +349,32 @@ model AuditLog {
   @@index([tenantId, createdAt])
   @@index([userId])
   @@index([action])
+}
+
+// ─── GUEST ACCESS (external share with granular permissions) ──────────────────
+model GuestAccess {
+  id           String    @id @default(uuid())
+  token        String    @unique @default(uuid())
+  email        String
+  label        String?
+
+  resourceType String
+  resourceId   String
+
+  capabilities Json?
+
+  isRevoked    Boolean   @default(false)
+  expiresAt    DateTime
+  createdAt    DateTime  @default(now())
+
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+
+  fileId       String?
+  file         File?     @relation("GuestAccessFile", fields: [fileId], references: [id])
+
+  @@index([token])
+  @@index([tenantId])
+  @@index([fileId])
+  @@map("guest_access")
 }
