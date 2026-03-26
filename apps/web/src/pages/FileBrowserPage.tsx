@@ -457,7 +457,7 @@ export default function FileBrowserPage() {
       });
       queryClient.invalidateQueries({ queryKey: ["recent-files"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
-      useToast.getState().add('File deleted successfully');
+      useToast.getState().add("File deleted successfully");
     } catch (e: any) {
       if (e.response?.data?.error) {
         useToast.getState().add(e.response.data.error, "error");
@@ -485,663 +485,688 @@ export default function FileBrowserPage() {
 
   return (
     <AppShell>
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl max-w-6xl mx-auto p-6">
-        {/* Breadcrumb */}
-        <div className="flex items-center gap-1 text-sm text-gray-500 mb-4 flex-wrap">
-          <Home size={14} className="shrink-0" />
-          <span
-            onClick={() => navigate("/browse")}
-            className={clsx(
-              "cursor-pointer hover:text-gray-800 transition-colors px-1 dark:text-white",
-              !folderId && "text-gray-800 font-medium pointer-events-none",
-            )}
-          >
-            All Files
-          </span>
-          {ancestors.map((ancestor, i) => (
-            <span key={ancestor.id} className="flex items-center gap-1">
-              <ChevronRight size={13} className="text-gray-300 shrink-0" />
-              <span
-                onClick={() => navigate(`/browse/${ancestor.id}`)}
-                className={clsx(
-                  "cursor-pointer hover:text-gray-800 transition-colors px-1 truncate max-w-[140px]",
-                  i === ancestors.length - 1
-                    ? "text-gray-800 font-medium pointer-events-none"
-                    : "hover:text-gray-800",
-                )}
-              >
-                {ancestor.name}
-              </span>
+      <div className="flex max-w-6xl mx-auto gap-0 min-h-0">
+        <div
+          className={`bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 transition-all duration-200 ${metadataFile ? "flex-1 min-w-0 rounded-r-none border-r-0" : "w-full"}`}
+        >
+          {/* Breadcrumb */}
+          <div className="flex items-center gap-1 text-sm text-gray-500 mb-4 flex-wrap">
+            <Home size={14} className="shrink-0" />
+            <span
+              onClick={() => navigate("/browse")}
+              className={clsx(
+                "cursor-pointer hover:text-gray-800 transition-colors px-1 dark:text-white",
+                !folderId && "text-gray-800 font-medium pointer-events-none",
+              )}
+            >
+              All Files
             </span>
-          ))}
-        </div>
+            {ancestors.map((ancestor, i) => (
+              <span key={ancestor.id} className="flex items-center gap-1">
+                <ChevronRight size={13} className="text-gray-300 shrink-0" />
+                <span
+                  onClick={() => navigate(`/browse/${ancestor.id}`)}
+                  className={clsx(
+                    "cursor-pointer hover:text-gray-800 transition-colors px-1 truncate max-w-[140px]",
+                    i === ancestors.length - 1
+                      ? "text-gray-800 font-medium pointer-events-none"
+                      : "hover:text-gray-800",
+                  )}
+                >
+                  {ancestor.name}
+                </span>
+              </span>
+            ))}
+          </div>
 
-        {/* Toolbar */}
-        <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-          <h1 className="text-base font-semibold text-gray-900 dark:text-white">
-            {ancestors.length > 0
-              ? ancestors[ancestors.length - 1].name
-              : "All Files"}
-          </h1>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-1 gap-0.5">
-              <button
-                onClick={() => setViewMode("grid")}
-                className={clsx(
-                  "p-1.5 rounded-md transition-colors",
-                  viewMode === "grid"
-                    ? "bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200",
-                )}
-              >
-                <LayoutGrid size={15} />
-              </button>
-              <button
-                onClick={() => setViewMode("list")}
-                className={clsx(
-                  "p-1.5 rounded-md transition-colors",
-                  viewMode === "list"
-                    ? "bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200",
-                )}
-              >
-                <List size={15} />
-              </button>
-            </div>
-            {canWrite && (
-              <button
-                onClick={() => setShowNewFolder(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm
+          {/* Toolbar */}
+          <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+            <h1 className="text-base font-semibold text-gray-900 dark:text-white">
+              {ancestors.length > 0
+                ? ancestors[ancestors.length - 1].name
+                : "All Files"}
+            </h1>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-1 gap-0.5">
+                <button
+                  onClick={() => setViewMode("grid")}
+                  className={clsx(
+                    "p-1.5 rounded-md transition-colors",
+                    viewMode === "grid"
+                      ? "bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200",
+                  )}
+                >
+                  <LayoutGrid size={15} />
+                </button>
+                <button
+                  onClick={() => setViewMode("list")}
+                  className={clsx(
+                    "p-1.5 rounded-md transition-colors",
+                    viewMode === "list"
+                      ? "bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200",
+                  )}
+                >
+                  <List size={15} />
+                </button>
+              </div>
+              {canWrite && (
+                <button
+                  onClick={() => setShowNewFolder(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm
                            text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg
                            hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors font-medium"
-              >
-                <FolderPlus size={15} /> New Folder
-              </button>
-            )}
-            {(canWrite ||
-              // VIEWERs with an add_files capability on ANY file in this folder
-              // (checked via capMap on already-loaded files — good enough signal)
-              fileIds.some((id) => capMap[id]?.add_files === true)) && (
-              <button
-                onClick={() => setShowUpload(!showUpload)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm
+                >
+                  <FolderPlus size={15} /> New Folder
+                </button>
+              )}
+              {(canWrite ||
+                // VIEWERs with an add_files capability on ANY file in this folder
+                // (checked via capMap on already-loaded files — good enough signal)
+                fileIds.some((id) => capMap[id]?.add_files === true)) && (
+                <button
+                  onClick={() => setShowUpload(!showUpload)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm
                            bg-primary-500 hover:bg-primary-600 text-white rounded-lg
                            transition-colors font-medium"
-              >
-                <Upload size={15} /> Upload
-              </button>
-            )}
+                >
+                  <Upload size={15} /> Upload
+                </button>
+              )}
+            </div>
           </div>
-        </div>
 
-        {/* New Folder dialog */}
-        {showNewFolder && (
-          <form
-            onSubmit={handleCreateFolder}
-            className="flex items-center gap-2 mb-4 p-3 bg-pink-50 dark:bg-pink-900/20
+          {/* New Folder dialog */}
+          {showNewFolder && (
+            <form
+              onSubmit={handleCreateFolder}
+              className="flex items-center gap-2 mb-4 p-3 bg-pink-50 dark:bg-pink-900/20
                border border-pink-100 dark:border-pink-800 rounded-xl flex-wrap"
-          >
-            <Folder size={16} className="text-primary-500 shrink-0" />
-            <input
-              autoFocus
-              value={newFolderName}
-              onChange={(e) => setNewFolderName(e.target.value)}
-              placeholder="Folder name…"
-              className="flex-1 min-w-32 bg-white dark:bg-gray-800 border border-pink-100 dark:border-gray-700
+            >
+              <Folder size={16} className="text-primary-500 shrink-0" />
+              <input
+                autoFocus
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                placeholder="Folder name…"
+                className="flex-1 min-w-32 bg-white dark:bg-gray-800 border border-pink-100 dark:border-gray-700
                          dark:text-gray-100 rounded-lg px-3 py-1.5 text-sm focus:outline-none
                          focus:ring-2 focus:ring-primary-500 dark:focus:ring-pink-500"
-            />
-            <select
-              value={newFolderCategoryId}
-              onChange={(e) => setNewFolderCategoryId(e.target.value)}
-              className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-pink-100 dark:border-gray-700
+              />
+              <select
+                value={newFolderCategoryId}
+                onChange={(e) => setNewFolderCategoryId(e.target.value)}
+                className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-pink-100 dark:border-gray-700
                          dark:text-gray-100 rounded-lg text-sm focus:outline-none
                          focus:ring-2 focus:ring-primary-500 dark:focus:ring-pink-500"
-            >
-              <option value="">No category</option>
-              {categories.map((cat) => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="submit"
-              disabled={!newFolderName.trim() || createFolder.isPending}
-              className="px-3 py-1.5 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600
+              >
+                <option value="">No category</option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="submit"
+                disabled={!newFolderName.trim() || createFolder.isPending}
+                className="px-3 py-1.5 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600
                          dark:bg-primary-500 dark:hover:bg-primary-600 disabled:opacity-50 transition-colors font-medium"
-            >
-              {createFolder.isPending ? "Creating…" : "Create"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setShowNewFolder(false);
-                setNewFolderName("");
-                setNewFolderCategoryId("");
-              }}
-              className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 transition-colors"
-            >
-              Cancel
-            </button>
-          </form>
-        )}
+              >
+                {createFolder.isPending ? "Creating…" : "Create"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowNewFolder(false);
+                  setNewFolderName("");
+                  setNewFolderCategoryId("");
+                }}
+                className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100 transition-colors"
+              >
+                Cancel
+              </button>
+            </form>
+          )}
 
-        {/* Upload zone */}
-        {showUpload && (
-          <div className="mb-6">
-            <UploadZone
-              folderId={folderId}
-              onUploadComplete={handleUploadComplete}
-            />
-          </div>
-        )}
-
-        {/* Bulk action bar */}
-        {selectedFiles.length > 0 && (
-          <div className="mb-4 rounded-xl border border-pink-100 dark:border-pink-800 overflow-hidden">
-            <div className="flex items-center gap-3 px-4 py-2.5 bg-pink-50 dark:bg-pink-900/20">
-              <span className="text-sm font-medium text-primary-500 dark:text-pink-400">
-                {selectedFiles.length} selected
-              </span>
-              <div className="flex items-center gap-2 ml-auto">
-                {canWrite && (
-                  <button
-                    onClick={() =>
-                      setMoveFiles(
-                        files.filter((f) => selectedFiles.includes(f.id)),
-                      )
-                    }
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-primary-500 dark:text-pink-400
-                               bg-white dark:bg-gray-800 border border-pink-100 dark:border-pink-800 rounded-lg
-                               hover:bg-pink-50 dark:hover:bg-gray-700 font-medium"
-                  >
-                    <FolderInput size={14} /> Move
-                  </button>
-                )}
-                {canWrite && (
-                  <button
-                    onClick={() => setShowBulkDelete(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 dark:text-red-400
-                               bg-white dark:bg-gray-800 border border-red-200 dark:border-red-800 rounded-lg
-                               hover:bg-red-50 dark:hover:bg-gray-700 font-medium"
-                  >
-                    <Trash2 size={14} /> Delete
-                  </button>
-                )}
-                {canWrite && (
-                  <button
-                    onClick={bulkDownload}
-                    disabled={isZipping}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300
-                               bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg
-                               hover:bg-gray-50 dark:hover:bg-gray-700 font-medium disabled:opacity-60
-                               disabled:cursor-not-allowed transition-colors"
-                  >
-                    {isZipping ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Download size={14} />
-                    )}
-                    {isZipping
-                      ? zipProgress === "downloading"
-                        ? "Downloading…"
-                        : "Zipping…"
-                      : "Download ZIP"}
-                  </button>
-                )}
-                <button
-                  onClick={() => setSelectedFiles([])}
-                  className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-            {isZipping && (
-              <div className="h-1 w-full bg-pink-100 dark:bg-pink-900/40">
-                <div
-                  className={clsx(
-                    "h-full transition-all duration-500",
-                    zipProgress === "downloading"
-                      ? "bg-green-500 w-full"
-                      : "bg-primary-500 w-2/3 animate-pulse",
-                  )}
-                />
-              </div>
-            )}
-            {isZipping && (
-              <div className="px-4 py-2 bg-pink-50 dark:bg-pink-900/20 border-t border-pink-100 dark:border-pink-900">
-                <p className="text-xs text-primary-500 dark:text-pink-400 flex items-center gap-1.5">
-                  <Loader2 size={11} className="animate-spin shrink-0" />
-                  {zipProgress === "downloading"
-                    ? "ZIP ready — saving to your device…"
-                    : `Building ZIP for ${selectedFiles.length} file${selectedFiles.length !== 1 ? "s" : ""}…`}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Type filter */}
-        {allFiles.length > 0 && (
-          <div className="flex items-center gap-2 mb-4 flex-wrap">
-            {["all", "pdf", "image", "video", "word", "excel", "zip"].map(
-              (type) => (
-                <button
-                  key={type}
-                  onClick={() => setTypeFilter(type)}
-                  className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${
-                    typeFilter === type
-                      ? "bg-primary-500 text-white border-primary-500"
-                      : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-500"
-                  }`}
-                >
-                  {type === "all" ? "All" : type.toUpperCase()}
-                </button>
-              ),
-            )}
-          </div>
-        )}
-
-        {/* Pending approvals badge */}
-        {(user?.role === "ORG_ADMIN" ||
-          user?.role === "MANAGER" ||
-          user?.role === "SUPERADMIN") &&
-          files.some((f) => f.approvalStatus === "pending") && (
-            <div className="flex items-center gap-2 mb-4 p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-xl">
-              <span className="text-sm text-amber-700 dark:text-amber-400 font-medium">
-                {files.filter((f) => f.approvalStatus === "pending").length}{" "}
-                file(s) pending approval
-              </span>
-              <div className="flex gap-1.5 ml-auto flex-wrap">
-                {files
-                  .filter((f) => f.approvalStatus === "pending")
-                  .map((f) => (
-                    <button
-                      key={f.id}
-                      onClick={() => setApprovalFile(f)}
-                      className="text-xs px-2.5 py-1 bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-800 font-medium truncate max-w-[140px]"
-                    >
-                      Review: {f.name}
-                    </button>
-                  ))}
-              </div>
+          {/* Upload zone */}
+          {showUpload && (
+            <div className="mb-6">
+              <UploadZone
+                folderId={folderId}
+                onUploadComplete={handleUploadComplete}
+              />
             </div>
           )}
 
-        {/* Main content */}
-        {isLoading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-6 h-6 border-2 border-primary-500 dark:border-pink-500 border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : isFilteredEmpty ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
-              No files match the selected filter.
-            </p>
-            <button
-              onClick={() => setTypeFilter("all")}
-              className="mt-3 text-xs text-primary-500 dark:text-pink-400 hover:underline"
-            >
-              Clear filter
-            </button>
-          </div>
-        ) : isEmpty ? (
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl">
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              {!filesLoading &&
-                !foldersLoading &&
-                (filesData?.files?.length ?? 0) === 0 &&
-                (foldersData?.folders?.length ?? 0) === 0 && (
-                  <div className="flex flex-col items-center justify-center text-center">
-                    <div className="w-16 h-16 bg-pink-50 dark:bg-pink-900/20 rounded-full flex items-center justify-center mb-4">
-                      <Upload size={28} className="text-primary-500" />
-                    </div>
-                    <h3 className="text-gray-700 dark:text-gray-300 font-medium mb-1">
-                      This folder is empty
-                    </h3>
-                    <p className="text-gray-400 text-sm mb-4">
-                      {canWrite
-                        ? "Upload files or create a folder to get started"
-                        : "No files have been shared with you here yet"}
-                    </p>
-                    {canWrite && (
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => setShowNewFolder(true)}
-                          className="text-sm text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600
-                                         hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-1.5 rounded-lg transition-colors font-medium"
-                        >
-                          New Folder
-                        </button>
-                        <button
-                          onClick={() => setShowUpload(true)}
-                          className="px-4 py-2 bg-primary-500 text-white text-sm rounded-lg hover:bg-primary-600 dark:bg-primary-500 dark:hover:bg-primary-600"
-                        >
-                          Upload files
-                        </button>
-                      </div>
+          {/* Bulk action bar */}
+          {selectedFiles.length > 0 && (
+            <div className="mb-4 rounded-xl border border-pink-100 dark:border-pink-800 overflow-hidden">
+              <div className="flex items-center gap-3 px-4 py-2.5 bg-pink-50 dark:bg-pink-900/20">
+                <span className="text-sm font-medium text-primary-500 dark:text-pink-400">
+                  {selectedFiles.length} selected
+                </span>
+                <div className="flex items-center gap-2 ml-auto">
+                  {canWrite && (
+                    <button
+                      onClick={() =>
+                        setMoveFiles(
+                          files.filter((f) => selectedFiles.includes(f.id)),
+                        )
+                      }
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-primary-500 dark:text-pink-400
+                               bg-white dark:bg-gray-800 border border-pink-100 dark:border-pink-800 rounded-lg
+                               hover:bg-pink-50 dark:hover:bg-gray-700 font-medium"
+                    >
+                      <FolderInput size={14} /> Move
+                    </button>
+                  )}
+                  {canWrite && (
+                    <button
+                      onClick={() => setShowBulkDelete(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 dark:text-red-400
+                               bg-white dark:bg-gray-800 border border-red-200 dark:border-red-800 rounded-lg
+                               hover:bg-red-50 dark:hover:bg-gray-700 font-medium"
+                    >
+                      <Trash2 size={14} /> Delete
+                    </button>
+                  )}
+                  {canWrite && (
+                    <button
+                      onClick={bulkDownload}
+                      disabled={isZipping}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300
+                               bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg
+                               hover:bg-gray-50 dark:hover:bg-gray-700 font-medium disabled:opacity-60
+                               disabled:cursor-not-allowed transition-colors"
+                    >
+                      {isZipping ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Download size={14} />
+                      )}
+                      {isZipping
+                        ? zipProgress === "downloading"
+                          ? "Downloading…"
+                          : "Zipping…"
+                        : "Download ZIP"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setSelectedFiles([])}
+                    className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+              {isZipping && (
+                <div className="h-1 w-full bg-pink-100 dark:bg-pink-900/40">
+                  <div
+                    className={clsx(
+                      "h-full transition-all duration-500",
+                      zipProgress === "downloading"
+                        ? "bg-green-500 w-full"
+                        : "bg-primary-500 w-2/3 animate-pulse",
                     )}
-                  </div>
-                )}
+                  />
+                </div>
+              )}
+              {isZipping && (
+                <div className="px-4 py-2 bg-pink-50 dark:bg-pink-900/20 border-t border-pink-100 dark:border-pink-900">
+                  <p className="text-xs text-primary-500 dark:text-pink-400 flex items-center gap-1.5">
+                    <Loader2 size={11} className="animate-spin shrink-0" />
+                    {zipProgress === "downloading"
+                      ? "ZIP ready — saving to your device…"
+                      : `Building ZIP for ${selectedFiles.length} file${selectedFiles.length !== 1 ? "s" : ""}…`}
+                  </p>
+                </div>
+              )}
             </div>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {/* Subfolders */}
-            {folders.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">
-                  Folders ({folders.length})
-                </p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                  {folders.map((folder) => (
-                    <div key={folder.id} className="relative group">
-                      <button
-                        onClick={() => navigate(`/browse/${folder.id}`)}
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          setDragOverFolderId(folder.id);
-                        }}
-                        onDragLeave={() => setDragOverFolderId(null)}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          setDragOverFolderId(null);
-                          if (draggedFileId) {
-                            dragMove.mutate({
-                              fileId: draggedFileId,
-                              targetFolderId: folder.id,
-                            });
-                            setDraggedFileId(null);
-                          }
-                        }}
-                        className={clsx(
-                          "w-full border rounded-xl transition-all text-left",
-                          viewMode === "list"
-                            ? "flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/50"
-                            : "flex flex-col items-center p-4 hover:shadow-sm text-center",
-                          dragOverFolderId === folder.id
-                            ? "border-blue-400 bg-blue-50 dark:bg-blue-900/30 scale-105"
-                            : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500",
-                        )}
-                      >
-                        <div
-                          className={clsx(
-                            "bg-blue-50 dark:bg-blue-900/40 rounded-xl flex items-center justify-center shrink-0 transition-colors group-hover:bg-blue-100 dark:group-hover:bg-blue-800/60",
-                            viewMode === "list" ? "w-8 h-8" : "w-12 h-12 mb-3",
-                          )}
-                        >
-                          <Folder
-                            size={viewMode === "list" ? 16 : 22}
-                            className="text-blue-500"
-                          />
-                        </div>
-                        <div
-                          className={
-                            viewMode === "list"
-                              ? "flex-1 min-w-0 flex items-center justify-between pr-6"
-                              : "w-full"
-                          }
-                        >
-                          <span
-                            className={clsx(
-                              "text-xs font-medium text-gray-800 dark:text-gray-200 truncate",
-                              viewMode !== "list" && "w-full text-center block",
-                            )}
-                          >
-                            {folder.name}
-                          </span>
-                          <span
-                            className={clsx(
-                              "text-xs text-gray-400 shrink-0",
-                              viewMode !== "list" && "mt-1 block",
-                            )}
-                          >
-                            {folder._count.files} file
-                            {folder._count.files !== 1 ? "s" : ""}
-                          </span>
-                        </div>
-                      </button>
-                      {/* Grid view: icon buttons on hover */}
-                      {viewMode === "grid" && (
-                        <div className="absolute top-2 right-2 hidden group-hover:flex items-center gap-1">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleFolderAssignCategory(folder);
-                            }}
-                            className="p-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg
-                                       text-gray-400 hover:text-purple-600 dark:hover:text-purple-400
-                                       hover:border-purple-300 dark:hover:border-purple-500 shadow-sm transition-colors"
-                            title="Assign category"
-                          >
-                            <Hash size={12} />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (
-                                confirm(
-                                  `Delete folder "${folder.name}" and all its contents?`,
-                                )
-                              ) {
-                                api
-                                  .delete(`/folders/${folder.id}`)
-                                  .then(() => {
-                                    queryClient.invalidateQueries({
-                                      queryKey: ["folders", folderId ?? "root"],
-                                    });
-                                    queryClient.invalidateQueries({
-                                      queryKey: ["folders", "root"],
-                                    });
-                                  })
-                                  .catch(() =>
-                                    useToast
-                                      .getState()
-                                      .add("Failed to delete folder", "error"),
-                                  );
-                              }
-                            }}
-                            className="p-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg
-                                       text-gray-400 hover:text-red-600 dark:hover:text-red-400
-                                       hover:border-red-300 dark:hover:border-red-500 shadow-sm transition-colors"
-                            title="Delete folder"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                      )}
+          )}
 
-                      {/* List view: dots menu */}
-                      {viewMode === "list" && (
-                        <div
-                          className="absolute right-2 top-1/2 -translate-y-1/2"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setFolderMenuId(
-                                folderMenuId === folder.id ? null : folder.id,
-                              );
-                            }}
-                            className="p-1 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-gray-100
-                                       dark:hover:bg-gray-700 text-gray-400 transition-opacity"
-                          >
-                            <MoreVertical size={14} />
-                          </button>
-                          {folderMenuId === folder.id && (
-                            <>
-                              <div
-                                className="fixed inset-0 z-10"
-                                onClick={() => setFolderMenuId(null)}
-                              />
-                              <div
-                                className="absolute right-0 top-full mt-1 w-44 bg-white dark:bg-gray-900
-                                              border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-20 p-1"
-                              >
-                                <button
-                                  onClick={() => {
-                                    handleFolderAssignCategory(folder);
-                                    setFolderMenuId(null);
-                                  }}
-                                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700
-                                             dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                                >
-                                  <Hash size={14} /> Assign category
-                                </button>
-                                <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
-                                  <button
-                                    onClick={() => {
-                                      setFolderMenuId(null);
-                                      if (
-                                        confirm(
-                                          `Delete folder "${folder.name}" and all its contents?`,
-                                        )
-                                      ) {
-                                        api
-                                          .delete(`/folders/${folder.id}`)
-                                          .then(() => {
-                                            queryClient.invalidateQueries({
-                                              queryKey: [
-                                                "folders",
-                                                folderId ?? "root",
-                                              ],
-                                            });
-                                            queryClient.invalidateQueries({
-                                              queryKey: ["folders", "root"],
-                                            });
-                                          })
-                                          .catch(() =>
-                                            useToast
-                                              .getState()
-                                              .add(
-                                                "Failed to delete folder",
-                                                "error",
-                                              ),
-                                          );
-                                      }
-                                    }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600
-                                               dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg"
-                                  >
-                                    <Trash2 size={14} /> Delete
-                                  </button>
-                                </div>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+          {/* Type filter */}
+          {allFiles.length > 0 && (
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              {["all", "pdf", "image", "video", "word", "excel", "zip"].map(
+                (type) => (
+                  <button
+                    key={type}
+                    onClick={() => setTypeFilter(type)}
+                    className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${
+                      typeFilter === type
+                        ? "bg-primary-500 text-white border-primary-500"
+                        : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-700 hover:border-pink-300 dark:hover:border-pink-500"
+                    }`}
+                  >
+                    {type === "all" ? "All" : type.toUpperCase()}
+                  </button>
+                ),
+              )}
+            </div>
+          )}
+
+          {/* Pending approvals badge */}
+          {(user?.role === "ORG_ADMIN" ||
+            user?.role === "MANAGER" ||
+            user?.role === "SUPERADMIN") &&
+            files.some((f) => f.approvalStatus === "pending") && (
+              <div className="flex items-center gap-2 mb-4 p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-xl">
+                <span className="text-sm text-amber-700 dark:text-amber-400 font-medium">
+                  {files.filter((f) => f.approvalStatus === "pending").length}{" "}
+                  file(s) pending approval
+                </span>
+                <div className="flex gap-1.5 ml-auto flex-wrap">
+                  {files
+                    .filter((f) => f.approvalStatus === "pending")
+                    .map((f) => (
+                      <button
+                        key={f.id}
+                        onClick={() => setApprovalFile(f)}
+                        className="text-xs px-2.5 py-1 bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-800 font-medium truncate max-w-[140px]"
+                      >
+                        Review: {f.name}
+                      </button>
+                    ))}
                 </div>
               </div>
             )}
 
-            {/* Files */}
-            {files.length > 0 && (
-              <div>
-                {folders.length > 0 && (
-                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">
-                    Files ({files.length})
-                  </p>
-                )}
-                {viewMode === "grid" ? (
-                  <FileGrid
-                    files={files}
-                    onFileClick={handleFileClick}
-                    onStar={(file) => starMutation.mutate(file)}
-                  />
-                ) : (
-                  <FileList
-                    files={files}
-                    onFileClick={handleFileClick}
-                    onDelete={handleDelete}
-                    onShare={handleShare}
-                    onVersions={handleVersions}
-                    onMove={handleMove}
-                    onStar={(file) => starMutation.mutate(file)}
-                    onRename={(file) => {
-                      setRenameFile(file);
-                      setRenameName(file.name);
-                    }}
-                    selectedIds={selectedFiles}
-                    onSelectChange={setSelectedFiles}
-                    sortBy={sortBy}
-                    sortDir={sortDir}
-                    onSort={handleSort}
-                    onDragStart={(file) => setDraggedFileId(file.id)}
-                    onDragEnd={() => setDraggedFileId(null)}
-                    onMetadata={(file) => setMetadataFile(file)}
-                    onComments={(file) => setCommentsFile(file)}
-                    onSubmitApproval={(file) =>
-                      submitApprovalMutation.mutate(file.id)
-                    }
-                    onLock={(file) =>
-                      lockMutation.mutate({
-                        fileId: file.id,
-                        isLocked: !!file.isLocked,
-                      })
-                    }
-                    onAssignCategory={(file) =>
-                      setCategoryResource({
-                        id: file.id,
-                        type: "file",
-                        name: file.name,
-                        currentCategoryId: file.categoryId ?? null,
-                      })
-                    }
-                    onAssignTag={(file) => setTagFile(file)}
-                    onApprovalDetail={(file) => setApprovalDetailFile(file)}
-                    capabilitiesMap={capMap}
-                  />
-                )}
+          {/* Main content */}
+          {isLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <div className="w-6 h-6 border-2 border-primary-500 dark:border-pink-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : isFilteredEmpty ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                No files match the selected filter.
+              </p>
+              <button
+                onClick={() => setTypeFilter("all")}
+                className="mt-3 text-xs text-primary-500 dark:text-pink-400 hover:underline"
+              >
+                Clear filter
+              </button>
+            </div>
+          ) : isEmpty ? (
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl">
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                {!filesLoading &&
+                  !foldersLoading &&
+                  (filesData?.files?.length ?? 0) === 0 &&
+                  (foldersData?.folders?.length ?? 0) === 0 && (
+                    <div className="flex flex-col items-center justify-center text-center">
+                      <div className="w-16 h-16 bg-pink-50 dark:bg-pink-900/20 rounded-full flex items-center justify-center mb-4">
+                        <Upload size={28} className="text-primary-500" />
+                      </div>
+                      <h3 className="text-gray-700 dark:text-gray-300 font-medium mb-1">
+                        This folder is empty
+                      </h3>
+                      <p className="text-gray-400 text-sm mb-4">
+                        {canWrite
+                          ? "Upload files or create a folder to get started"
+                          : "No files have been shared with you here yet"}
+                      </p>
+                      {canWrite && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setShowNewFolder(true)}
+                            className="text-sm text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600
+                                         hover:bg-gray-50 dark:hover:bg-gray-800 px-3 py-1.5 rounded-lg transition-colors font-medium"
+                          >
+                            New Folder
+                          </button>
+                          <button
+                            onClick={() => setShowUpload(true)}
+                            className="px-4 py-2 bg-primary-500 text-white text-sm rounded-lg hover:bg-primary-600 dark:bg-primary-500 dark:hover:bg-primary-600"
+                          >
+                            Upload files
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
               </div>
-            )}
-          </div>
-        )}
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Subfolders */}
+              {folders.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">
+                    Folders ({folders.length})
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                    {folders.map((folder) => (
+                      <div key={folder.id} className="relative group">
+                        <button
+                          onClick={() => navigate(`/browse/${folder.id}`)}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            setDragOverFolderId(folder.id);
+                          }}
+                          onDragLeave={() => setDragOverFolderId(null)}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            setDragOverFolderId(null);
+                            if (draggedFileId) {
+                              dragMove.mutate({
+                                fileId: draggedFileId,
+                                targetFolderId: folder.id,
+                              });
+                              setDraggedFileId(null);
+                            }
+                          }}
+                          className={clsx(
+                            "w-full border rounded-xl transition-all text-left",
+                            viewMode === "list"
+                              ? "flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                              : "flex flex-col items-center p-4 hover:shadow-sm text-center",
+                            dragOverFolderId === folder.id
+                              ? "border-blue-400 bg-blue-50 dark:bg-blue-900/30 scale-105"
+                              : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500",
+                          )}
+                        >
+                          <div
+                            className={clsx(
+                              "bg-blue-50 dark:bg-blue-900/40 rounded-xl flex items-center justify-center shrink-0 transition-colors group-hover:bg-blue-100 dark:group-hover:bg-blue-800/60",
+                              viewMode === "list"
+                                ? "w-8 h-8"
+                                : "w-12 h-12 mb-3",
+                            )}
+                          >
+                            <Folder
+                              size={viewMode === "list" ? 16 : 22}
+                              className="text-blue-500"
+                            />
+                          </div>
+                          <div
+                            className={
+                              viewMode === "list"
+                                ? "flex-1 min-w-0 flex items-center justify-between pr-6"
+                                : "w-full"
+                            }
+                          >
+                            <span
+                              className={clsx(
+                                "text-xs font-medium text-gray-800 dark:text-gray-200 truncate",
+                                viewMode !== "list" &&
+                                  "w-full text-center block",
+                              )}
+                            >
+                              {folder.name}
+                            </span>
+                            <span
+                              className={clsx(
+                                "text-xs text-gray-400 shrink-0",
+                                viewMode !== "list" && "mt-1 block",
+                              )}
+                            >
+                              {folder._count.files} file
+                              {folder._count.files !== 1 ? "s" : ""}
+                            </span>
+                          </div>
+                        </button>
+                        {/* Grid view: icon buttons on hover */}
+                        {viewMode === "grid" && (
+                          <div className="absolute top-2 right-2 hidden group-hover:flex items-center gap-1">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleFolderAssignCategory(folder);
+                              }}
+                              className="p-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg
+                                       text-gray-400 hover:text-purple-600 dark:hover:text-purple-400
+                                       hover:border-purple-300 dark:hover:border-purple-500 shadow-sm transition-colors"
+                              title="Assign category"
+                            >
+                              <Hash size={12} />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (
+                                  confirm(
+                                    `Delete folder "${folder.name}" and all its contents?`,
+                                  )
+                                ) {
+                                  api
+                                    .delete(`/folders/${folder.id}`)
+                                    .then(() => {
+                                      queryClient.invalidateQueries({
+                                        queryKey: [
+                                          "folders",
+                                          folderId ?? "root",
+                                        ],
+                                      });
+                                      queryClient.invalidateQueries({
+                                        queryKey: ["folders", "root"],
+                                      });
+                                    })
+                                    .catch(() =>
+                                      useToast
+                                        .getState()
+                                        .add(
+                                          "Failed to delete folder",
+                                          "error",
+                                        ),
+                                    );
+                                }
+                              }}
+                              className="p-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg
+                                       text-gray-400 hover:text-red-600 dark:hover:text-red-400
+                                       hover:border-red-300 dark:hover:border-red-500 shadow-sm transition-colors"
+                              title="Delete folder"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        )}
 
-        {renameFile && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-            <div className="bg-white dark:bg-gray-900 border border-transparent dark:border-gray-800 rounded-xl p-6 w-96 shadow-xl">
-              <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                Rename file
-              </h3>
-              <input
-                autoFocus
-                className="w-full border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800
+                        {/* List view: dots menu */}
+                        {viewMode === "list" && (
+                          <div
+                            className="absolute right-2 top-1/2 -translate-y-1/2"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFolderMenuId(
+                                  folderMenuId === folder.id ? null : folder.id,
+                                );
+                              }}
+                              className="p-1 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-gray-100
+                                       dark:hover:bg-gray-700 text-gray-400 transition-opacity"
+                            >
+                              <MoreVertical size={14} />
+                            </button>
+                            {folderMenuId === folder.id && (
+                              <>
+                                <div
+                                  className="fixed inset-0 z-10"
+                                  onClick={() => setFolderMenuId(null)}
+                                />
+                                <div
+                                  className="absolute right-0 top-full mt-1 w-44 bg-white dark:bg-gray-900
+                                              border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-20 p-1"
+                                >
+                                  <button
+                                    onClick={() => {
+                                      handleFolderAssignCategory(folder);
+                                      setFolderMenuId(null);
+                                    }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700
+                                             dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                                  >
+                                    <Hash size={14} /> Assign category
+                                  </button>
+                                  <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
+                                    <button
+                                      onClick={() => {
+                                        setFolderMenuId(null);
+                                        if (
+                                          confirm(
+                                            `Delete folder "${folder.name}" and all its contents?`,
+                                          )
+                                        ) {
+                                          api
+                                            .delete(`/folders/${folder.id}`)
+                                            .then(() => {
+                                              queryClient.invalidateQueries({
+                                                queryKey: [
+                                                  "folders",
+                                                  folderId ?? "root",
+                                                ],
+                                              });
+                                              queryClient.invalidateQueries({
+                                                queryKey: ["folders", "root"],
+                                              });
+                                            })
+                                            .catch(() =>
+                                              useToast
+                                                .getState()
+                                                .add(
+                                                  "Failed to delete folder",
+                                                  "error",
+                                                ),
+                                            );
+                                        }
+                                      }}
+                                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600
+                                               dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg"
+                                    >
+                                      <Trash2 size={14} /> Delete
+                                    </button>
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Files */}
+              {files.length > 0 && (
+                <div>
+                  {folders.length > 0 && (
+                    <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">
+                      Files ({files.length})
+                    </p>
+                  )}
+                  {viewMode === "grid" ? (
+                    <FileGrid
+                      files={files}
+                      onFileClick={handleFileClick}
+                      onStar={(file) => starMutation.mutate(file)}
+                    />
+                  ) : (
+                    <FileList
+                      files={files}
+                      onFileClick={handleFileClick}
+                      onDelete={handleDelete}
+                      onShare={handleShare}
+                      onVersions={handleVersions}
+                      onMove={handleMove}
+                      onStar={(file) => starMutation.mutate(file)}
+                      onRename={(file) => {
+                        setRenameFile(file);
+                        setRenameName(file.name);
+                      }}
+                      selectedIds={selectedFiles}
+                      onSelectChange={setSelectedFiles}
+                      sortBy={sortBy}
+                      sortDir={sortDir}
+                      onSort={handleSort}
+                      onDragStart={(file) => setDraggedFileId(file.id)}
+                      onDragEnd={() => setDraggedFileId(null)}
+                      onMetadata={(file) => setMetadataFile(file)}
+                      onComments={(file) => setCommentsFile(file)}
+                      onSubmitApproval={(file) =>
+                        submitApprovalMutation.mutate(file.id)
+                      }
+                      onLock={(file) =>
+                        lockMutation.mutate({
+                          fileId: file.id,
+                          isLocked: !!file.isLocked,
+                        })
+                      }
+                      onAssignCategory={(file) =>
+                        setCategoryResource({
+                          id: file.id,
+                          type: "file",
+                          name: file.name,
+                          currentCategoryId: file.categoryId ?? null,
+                        })
+                      }
+                      onAssignTag={(file) => setTagFile(file)}
+                      onApprovalDetail={(file) => setApprovalDetailFile(file)}
+                      capabilitiesMap={capMap}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {renameFile && (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+              <div className="bg-white dark:bg-gray-900 border border-transparent dark:border-gray-800 rounded-xl p-6 w-96 shadow-xl">
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                  Rename file
+                </h3>
+                <input
+                  autoFocus
+                  className="w-full border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800
                            text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 text-sm mb-4
                            focus:ring-2 focus:ring-blue-400 focus:outline-none"
-                value={renameName}
-                onChange={(e) => setRenameName(e.target.value)}
-                onKeyDown={(e) =>
-                  e.key === "Enter" &&
-                  renameMutation.mutate({ id: renameFile.id, name: renameName })
-                }
-              />
-              <div className="flex gap-2 justify-end">
-                <button
-                  onClick={() => setRenameFile(null)}
-                  className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() =>
+                  value={renameName}
+                  onChange={(e) => setRenameName(e.target.value)}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" &&
                     renameMutation.mutate({
                       id: renameFile.id,
                       name: renameName,
                     })
                   }
-                  className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
-                >
-                  Rename
-                </button>
+                />
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => setRenameFile(null)}
+                    className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() =>
+                      renameMutation.mutate({
+                        id: renameFile.id,
+                        name: renameName,
+                      })
+                    }
+                    className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+                  >
+                    Rename
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+          )}
+        </div>
+
+        {/* ── Inline Metadata Side Panel ── */}
+        {metadataFile && (
+          <FileMetadataPanel
+            fileId={metadataFile.id}
+            fileName={metadataFile.name}
+            onClose={() => setMetadataFile(null)}
+          />
         )}
       </div>
 
@@ -1189,13 +1214,6 @@ export default function FileBrowserPage() {
       {/* ── Tag modal — opened from FileList onAssignTag ── */}
       {tagFile && (
         <AssignTagModal file={tagFile} onClose={() => setTagFile(null)} />
-      )}
-      {metadataFile && (
-        <FileMetadataPanel
-          fileId={metadataFile.id}
-          fileName={metadataFile.name}
-          onClose={() => setMetadataFile(null)}
-        />
       )}
       {commentsFile && (
         <FileCommentsPanel
