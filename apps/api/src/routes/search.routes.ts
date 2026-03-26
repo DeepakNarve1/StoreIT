@@ -58,7 +58,6 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
             where: {
               tenantId,
               isDeleted: false,
-              name: { contains: query, mode: "insensitive" },
               ...(mimeFilter
                 ? {
                     mimeType: {
@@ -68,14 +67,17 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
                   }
                 : {}),
               ...(categoryId ? { categoryId: String(categoryId) } : {}),
-              ...(!isPrivileged
-                ? {
-                    OR: [
-                      { id: { in: allowedFileIds } },
-                      { uploadedById: userId },
-                    ],
-                  }
-                : {}),
+              AND: [
+                {
+                  OR: [
+                    { name: { contains: query, mode: "insensitive" } },
+                    { metadata: { some: { value: { contains: query, mode: "insensitive" } } } },
+                  ]
+                },
+                ...(!isPrivileged
+                  ? [{ OR: [{ id: { in: allowedFileIds } }, { uploadedById: userId }] }]
+                  : []),
+              ],
             },
             take: limitNum,
             orderBy: { createdAt: "desc" },

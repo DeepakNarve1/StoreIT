@@ -30,6 +30,7 @@ model Tenant {
   stripeCustomerId     String?   // ← add
   stripeSubscriptionId String?   // ← add
   guestAccesses        GuestAccess[]
+  metadataTemplates    MetadataTemplate[]
 }
 
 // ─── USER ────────────────────────────────────────────────────────────────────
@@ -377,4 +378,30 @@ model GuestAccess {
   @@index([tenantId])
   @@index([fileId])
   @@map("guest_access")
+}
+
+// ─── METADATA TEMPLATES (Admin-defined) ───────────────────────────────────────
+model MetadataTemplate {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fields      MetadataTemplateField[]
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("metadata_templates")
+}
+
+model MetadataTemplateField {
+  id         String   @id @default(uuid())
+  key        String   // e.g. "Invoice Number", "Due Date"
+  type       String   @default("text") // "text", "date", "number"
+  required   Boolean  @default(false)
+  templateId String
+  template   MetadataTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+  @@map("metadata_template_fields")
 }

@@ -20,6 +20,7 @@ import { ToastContainer } from "./components/ui/Toast";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import BillingPage from "./pages/admin/BillingPage";
+import TemplatesPage from "./pages/admin/TemplatesPage";
 import SharedLinksPage from "./pages/admin/SharedLinksPage";
 import PermissionsOverviewPage from "./pages/admin/PermissionsOverviewPage";
 import GuestAccessPage from "./pages/GuestAccessPage";
@@ -33,9 +34,18 @@ const queryClient = new QueryClient({
   },
 });
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
+function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) {
+  const { isAuthenticated, user } = useAuthStore();
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (allowedRoles && !allowedRoles.includes(user?.role ?? "")) {
+    return <Navigate to="/" replace />; // Or a more specific unauthorized page
+  }
+
+  return <>{children}</>;
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
@@ -124,6 +134,23 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/admin/audit"
+            element={
+              <ProtectedRoute allowedRoles={["ORG_ADMIN", "MANAGER", "SUPERADMIN"]}>
+                <AuditLogPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/templates"
+            element={
+              <ProtectedRoute allowedRoles={["ORG_ADMIN", "MANAGER", "SUPERADMIN"]}>
+                <TemplatesPage />
+              </ProtectedRoute>
+            }
+          />
+
           <Route
             path="/tags"
             element={
