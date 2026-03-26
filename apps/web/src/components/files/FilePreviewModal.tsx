@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   X,
   Download,
@@ -19,6 +20,16 @@ interface FileItem {
   createdAt: string;
   storageKey?: string;
   viewUrl?: string | null;
+
+  // Optional extra fields (available from file list / server queries).
+  version?: number;
+  isLocked?: boolean;
+  lockedById?: string | null;
+  approvalStatus?: string | null;
+  approvalNote?: string | null;
+  approvedAt?: string | null;
+  approvedBy?: { name: string } | null;
+  tags?: { tag: { id: string; name: string; color: string } }[];
 }
 
 interface FilePreviewModalProps {
@@ -127,6 +138,32 @@ export default function FilePreviewModal({
   const { icon: Icon, color, bg } = getFileIcon(file.mimeType);
   const [viewUrl, setViewUrl] = useState<string | null>(file?.viewUrl || null);
   const [, setLoadingUrl] = useState(false);
+
+  const {
+    data: auditData,
+    isLoading: auditLoading,
+    error: auditError,
+  } = useQuery({
+    queryKey: ["audit-file", file.id],
+    enabled: !!file?.id,
+    queryFn: async () => {
+      const res = await api.get(`/audit/file/${file.id}`);
+      return res.data as { logs: any[] };
+    },
+  });
+
+  const auditLogs = auditData?.logs ?? [];
+
+  const formatDetailedDateTime = (dateStr: string) =>
+    new Date(dateStr).toLocaleString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
 
   useEffect(() => {
     if (!file?.id) return;
@@ -364,6 +401,108 @@ export default function FilePreviewModal({
         {/* Preview content */}
         <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900">
           {renderPreview()}
+
+          {/* Document details + audit log */}
+          <div className="px-4 pb-5 pt-4">
+            <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+              <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                  Document details
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-3 text-xs">
+                <div className="text-gray-500 dark:text-gray-400">Type</div>
+                <div className="text-gray-900 dark:text-white">
+                  {file.mimeType}
+                </div>
+
+                <div className="text-gray-500 dark:text-gray-400">Size</div>
+                <div className="text-gray-900 dark:text-white">
+                  {formatBytes(file.size)}
+                </div>
+
+                <div className="text-gray-500 dark:text-gray-400">
+                  Created / Modified
+                </div>
+                <div className="text-gray-900 dark:text-white">
+                  {formatDetailedDateTime(file.createdAt)}
+                </div>
+
+                <div className="text-gray-500 dark:text-gray-400">Version</div>
+                <div className="text-gray-900 dark:text-white">
+                  {file.version ? `v${file.version}` : "—"}
+                </div>
+
+                <div className="text-gray-500 dark:text-gray-400">Lock</div>
+                <div className="text-gray-900 dark:text-white">
+                  {file.isLocked ? "Locked" : "Not locked"}
+                </div>
+
+                <div className="text-gray-500 dark:text-gray-400">
+                  Approval
+                </div>
+                <div className="text-gray-900 dark:text-white">
+                  {file.approvalStatus ? file.approvalStatus : "—"}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                  Audit log
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Activity events for this document
+                </p>
+              </div>
+
+              <div className="px-4 py-3">
+                {auditLoading ? (
+                  <div className="text-sm text-gray-600 dark:text-gray-300">
+                    Loading audit log...
+                  </div>
+                ) : auditError ? (
+                  <div className="text-sm text-red-600 dark:text-red-400">
+                    Failed to load audit log.
+                  </div>
+                ) : auditLogs.length === 0 ? (
+                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                    No audit events yet.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {auditLogs.map((log: any) => (
+                      <div
+                        key={log.id}
+                        className="flex items-start justify-between gap-4 rounded-lg bg-gray-50 dark:bg-gray-800/60 px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-gray-900 dark:text-white truncate">
+                            {log.action}
+                          </p>
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                            {formatDetailedDateTime(log.createdAt)}
+                          </p>
+                        </div>
+                        <div className="text-right min-w-[140px]">
+                          <p className="text-xs text-gray-900 dark:text-white">
+                            {log.user?.name ?? "System"}
+                          </p>
+                          {log.user?.email && (
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                              {log.user.email}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </>

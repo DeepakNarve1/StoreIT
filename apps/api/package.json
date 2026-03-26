@@ -6,7 +6,9 @@
     "dev": "nodemon src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "seed": "ts-node src/utils/seed.ts"
+    "seed": "ts-node src/utils/seed.ts",
+    "prisma:migrate": "prisma migrate dev --schema ../../prisma/schema.prisma",
+    "prisma:generate": "prisma generate --schema ../../prisma/schema.prisma"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",

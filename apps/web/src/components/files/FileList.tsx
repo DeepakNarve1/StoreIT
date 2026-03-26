@@ -79,7 +79,9 @@ interface FileListProps {
     type: boolean;
     size: boolean;
     modified: boolean;
+    retention: boolean;
   };
+  onRetentionClick?: (file: FileItem) => void;
 }
 
 const getFileIcon = (mimeType: string) => {
@@ -193,7 +195,13 @@ export default function FileList({
   onApprovalDetail,
   capabilitiesMap,
   canDownload,
-  visibleColumns = { type: true, size: true, modified: true },
+  visibleColumns = {
+    type: true,
+    size: true,
+    modified: true,
+    retention: false,
+  },
+  onRetentionClick,
 }: FileListProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const { user } = useAuthStore();
@@ -265,7 +273,7 @@ export default function FileList({
   const hasStar = !!onStar;
   const checkboxSpan = hasCheckbox ? 1 : 0;
   const starSpan = hasStar ? 1 : 0;
-  const actionsSpan = 1; // reserve minimal space at far-right for row actions
+  const retentionEnabled = !!visibleColumns.retention;
   type DataKey = "type" | "size" | "modified";
   const visibleKeys: DataKey[] = [];
   if (visibleColumns.type) visibleKeys.push("type");
@@ -280,12 +288,88 @@ export default function FileList({
     dataSlots[start + i] = k;
   });
 
-  const nameSpan = Math.max(2, 12 - checkboxSpan - starSpan - actionsSpan - 6);
+  // Meta column is always present (col-span-1).
+  // Retention column is optional (col-span-1).
+  // We keep the same name width logic as before, while switching the grid track count.
+  const nameSpan = Math.max(2, 4 - checkboxSpan - starSpan);
+
+  const RETENTION_QUEUE_KEY = "storeit_retention_queue_v1";
+  type RetentionJob = {
+    id: string;
+    scope: "file" | "folder";
+    action: string;
+    resourceIds: string[];
+    applyAt: number | null;
+    retention: string;
+  };
+
+  const readRetentionJobs = (): RetentionJob[] => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem(RETENTION_QUEUE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed as RetentionJob[];
+    } catch {
+      return [];
+    }
+  };
+
+  const retentionByFileId = (() => {
+    if (!retentionEnabled) return new Map<string, RetentionJob>();
+    const jobs = readRetentionJobs();
+    const map = new Map<string, RetentionJob>();
+
+    for (const job of jobs) {
+      if (job.scope !== "file") continue;
+      for (const fileId of job.resourceIds ?? []) {
+        const existing = map.get(fileId);
+        if (!existing) {
+          map.set(fileId, job);
+          continue;
+        }
+
+        // Infinite wins over finite.
+        if (existing.applyAt === null) continue;
+        if (job.applyAt === null) {
+          map.set(fileId, job);
+          continue;
+        }
+
+        // Otherwise choose the nearest applyAt.
+        if (
+          typeof existing.applyAt === "number" &&
+          typeof job.applyAt === "number" &&
+          job.applyAt < existing.applyAt
+        ) {
+          map.set(fileId, job);
+        }
+      }
+    }
+
+    return map;
+  })();
+
+  const formatRetention = (job?: RetentionJob) => {
+    if (!job) return null;
+    if (job.applyAt === null) return "Infinite";
+    const dt = new Date(job.applyAt);
+    if (Number.isNaN(dt.getTime())) return null;
+    return dt.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
 
   return (
     <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-visible">
       {/* Header */}
-      <div className="grid grid-cols-12 gap-3 px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-white/5 items-center">
+      <div
+        className={`grid ${retentionEnabled ? "grid-cols-13" : "grid-cols-12"} gap-3 px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-white/5 items-center`}
+      >
         {hasCheckbox && (
           <div className="col-span-1 flex items-center">
             <input
@@ -379,6 +463,15 @@ export default function FileList({
             {!slot && <span className="opacity-0">—</span>}
           </div>
         ))}
+        {/* Meta header (FolderIT-style always visible) */}
+        <div className="col-span-1 text-xs font-medium text-gray-500">
+          Meta not found
+        </div>
+        {retentionEnabled && (
+          <div className="col-span-1 text-xs font-medium text-gray-500">
+            Retention
+          </div>
+        )}
         {/* Actions header placeholder */}
         <div className="col-span-1" />
       </div>
@@ -391,9 +484,9 @@ export default function FileList({
         return (
           <div
             key={file.id}
-            className="relative group grid grid-cols-12 gap-3 px-4 py-3 border-b
+            className={`relative group grid ${retentionEnabled ? "grid-cols-13" : "grid-cols-12"} gap-3 px-4 py-3 border-b
                        border-gray-100 dark:border-gray-800 last:border-b-0
-                       hover:bg-gray-50 dark:hover:bg-white/5 transition-colors items-center"
+                       hover:bg-gray-50 dark:hover:bg-white/5 transition-colors items-center`}
             draggable={!!onDragStart}
             onDragStart={() => onDragStart?.(file)}
             onDragEnd={() => onDragEnd?.()}
@@ -471,23 +564,6 @@ export default function FileList({
                     🔒 Locked
                   </span>
                 )}
-
-                {!!file.metaRequiredMissingCount &&
-                  file.metaRequiredMissingCount > 0 && (
-                    <span
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onMetadata?.(file);
-                      }}
-                      className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full font-medium
-                                 bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-100 dark:border-red-900/30
-                                 cursor-pointer whitespace-nowrap"
-                      title="Missing required metadata values"
-                    >
-                      <AlertTriangle size={13} />
-                      Missing some required meta values
-                    </span>
-                  )}
               </div>
             </button>
 
@@ -537,6 +613,42 @@ export default function FileList({
                 )}
               </div>
             ))}
+
+            {/* Meta column */}
+            <div className="col-span-1 flex items-center justify-center">
+              {!!file.metaRequiredMissingCount &&
+                file.metaRequiredMissingCount > 0 && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMetadata?.(file);
+                    }}
+                    className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium
+                               bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-100 dark:border-red-900/30
+                               whitespace-normal leading-tight"
+                    title="Missing required metadata values"
+                  >
+                    <AlertTriangle size={12} />
+                    <span>Missing some required meta values</span>
+                  </button>
+                )}
+            </div>
+
+            {retentionEnabled && (
+              <div className="col-span-1 flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRetentionClick?.(file);
+                  }}
+                  className="text-xs text-gray-500 dark:text-gray-400 truncate hover:text-primary-500 dark:hover:text-pink-300 transition-colors cursor-pointer max-w-full"
+                  title="View retention details"
+                >
+                  {formatRetention(retentionByFileId.get(file.id)) ?? "—"}
+                </button>
+              </div>
+            )}
 
             {/* Always-reserved far-right actions column */}
             <div className="col-span-1 flex items-center justify-end">
@@ -645,15 +757,17 @@ export default function FileList({
                         onSubmitApproval &&
                         (!file.approvalStatus ||
                           file.approvalStatus === "rejected") && (
-                          <button
-                            onClick={() => {
-                              onSubmitApproval(file);
-                              setActiveMenu(null);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                          >
-                            <CheckCircle size={14} /> Submit for approval
-                          </button>
+                          <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
+                            <button
+                              onClick={() => {
+                                onSubmitApproval(file);
+                                setActiveMenu(null);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                            >
+                              <CheckCircle size={14} /> Submit for approval
+                            </button>
+                          </div>
                         )}
                       {/* Lock/Unlock is strictly for MANAGER+ or file owner (handled separately by backend, but hidden here to avoid confusion for EDITORs who don't own it) */}
                       {(isLockPrivileged || file.uploadedById === user?.id) &&

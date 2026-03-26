@@ -3,6 +3,8 @@ import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import XLSX from "xlsx";
 import PDFDocument from "pdfkit";
+import { userHasCapability } from "./permissions.routes";
+import { z } from "zod";
 
 const router = Router();
 
@@ -60,6 +62,58 @@ router.get(
       });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch audit logs" });
+    }
+  },
+);
+
+// ─── GET /api/audit/file/:fileId — audit events for one file ───────────────
+router.get(
+  "/file/:fileId",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    const paramsSchema = z.object({ fileId: z.string().uuid() });
+    const parsed = paramsSchema.safeParse(req.params);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid file ID" });
+      return;
+    }
+
+    try {
+      const { fileId } = parsed.data;
+      const { userId, tenantId, role } = req.user!;
+      const privileged = ["SUPERADMIN", "ORG_ADMIN", "MANAGER", "EDITOR"].includes(role);
+
+      if (!privileged) {
+        const ok = await userHasCapability(
+          userId,
+          tenantId,
+          role,
+          "file",
+          fileId,
+          "see_audit_trails_file",
+        );
+        if (!ok) {
+          res.status(403).json({ error: "Access denied" });
+          return;
+        }
+      }
+
+      const logs = await prisma.auditLog.findMany({
+        where: {
+          tenantId,
+          resourceType: "file",
+          resourceId: fileId,
+        },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+        },
+      });
+
+      res.json({ logs });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch file audit log" });
     }
   },
 );

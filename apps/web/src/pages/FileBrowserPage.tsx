@@ -38,7 +38,10 @@ import AssignCategoryModal from "../components/files/AssignCategoryModal";
 import AssignTagModal from "../components/files/AssignTagModal.tsx";
 import { useToast } from "../components/ui/Toast";
 import FileMetadataPanel from "../components/files/FileMetadataPanel";
+import FolderMetadataPanel from "../components/files/FolderMetadataPanel";
 import FileCommentsPanel from "../components/files/FileCommentsPanel";
+import RetentionModal, { type RetentionAction } from "../components/files/RetentionModal";
+import RetentionDetailsModal from "../components/files/RetentionDetailsModal";
 import { useAuthStore } from "../store/authStore";
 import ApprovalDetailPanel from "../components/files/ApprovalDetailPanel";
 import { useFileCapabilities } from "../hooks/useFileCapabilities";
@@ -74,6 +77,7 @@ export default function FileBrowserPage() {
   const [newFolderName, setNewFolderName] = useState("");
   const [previewFile, setPreviewFile] = useState<any>(null);
   const [metadataFile, setMetadataFile] = useState<any>(null);
+  const [metadataFolder, setMetadataFolder] = useState<any>(null);
   const [permissionsResource, setPermissionsResource] = useState<{
     id: string;
     type: "file" | "folder";
@@ -105,14 +109,75 @@ export default function FileBrowserPage() {
     id: string;
     name: string;
   } | null>(null);
+  const [renameFolder, setRenameFolder] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [approvalFile, setApprovalFile] = useState<any>(null);
   const [renameName, setRenameName] = useState("");
+  const [renameFolderName, setRenameFolderName] = useState("");
   const [approvalNote, setApprovalNote] = useState("");
   const [approvalDetailFile, setApprovalDetailFile] = useState<any>(null);
 
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
   const [showBulkFolderDelete, setShowBulkFolderDelete] = useState(false);
+  const [showRetentionModal, setShowRetentionModal] = useState(false);
+  const [retentionScope, setRetentionScope] = useState<"file" | "folder">("file");
+  const [isApplyingRetention, setIsApplyingRetention] = useState(false);
+  const retentionQueueProcessingRef = useRef(false);
+  const [retentionEditJobId, setRetentionEditJobId] = useState<string | null>(null);
+  const [retentionModalInitialValues, setRetentionModalInitialValues] = useState<{
+    retention: string;
+    retentionUntil?: string | null;
+    action: RetentionAction;
+  } | null>(null);
+
+  const [showRetentionDetailsModal, setShowRetentionDetailsModal] =
+    useState(false);
+  const [retentionDetailsFile, setRetentionDetailsFile] = useState<any | null>(
+    null,
+  );
+  const [retentionDetailsJob, setRetentionDetailsJob] = useState<
+    | {
+        id: string;
+        scope: "file" | "folder";
+        action: RetentionAction;
+        resourceIds: string[];
+        applyAt: number | null;
+        createdAt: number;
+        retention: string;
+      }
+    | null
+  >(null);
+
+  const RETENTION_QUEUE_KEY = "storeit_retention_queue_v1";
+
+  type RetentionJob = {
+    id: string;
+    scope: "file" | "folder";
+    action: RetentionAction;
+    resourceIds: string[];
+    applyAt: number | null; // epoch ms (null = Infinite / never auto-trigger)
+    createdAt: number; // epoch ms
+    retention: string;
+  };
+
+  const loadRetentionQueue = (): RetentionJob[] => {
+    try {
+      const raw = localStorage.getItem(RETENTION_QUEUE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed as RetentionJob[];
+    } catch {
+      return [];
+    }
+  };
+
+  const saveRetentionQueue = (queue: RetentionJob[]) => {
+    localStorage.setItem(RETENTION_QUEUE_KEY, JSON.stringify(queue));
+  };
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDeletingFolders, setIsDeletingFolders] = useState(false);
   const [showModifyMenu, setShowModifyMenu] = useState(false);
@@ -121,6 +186,7 @@ export default function FileBrowserPage() {
     type: true,
     size: true,
     modified: true,
+    retention: false,
   });
 
   // ── Tag modal state ───────────────────────────────────────────────────────
@@ -156,12 +222,24 @@ export default function FileBrowserPage() {
         setRenameFile(null);
         return;
       }
+      if (renameFolder) {
+        setRenameFolder(null);
+        return;
+      }
       if (tagFile) {
         setTagFile(null);
         return;
       }
       if (metadataFile) {
         setMetadataFile(null);
+        return;
+      }
+      if (showRetentionDetailsModal) {
+        setShowRetentionDetailsModal(false);
+        return;
+      }
+      if (showRetentionModal) {
+        setShowRetentionModal(false);
         return;
       }
       if (commentsFile) {
@@ -211,6 +289,8 @@ export default function FileBrowserPage() {
     permissionsResource,
     moveFiles,
     categoryResource,
+    showRetentionDetailsModal,
+    showRetentionModal,
     showUpload,
     showNewFolder,
     approvalNote,
@@ -262,6 +342,23 @@ export default function FileBrowserPage() {
       useToast.getState().add("File renamed");
     },
     onError: () => useToast.getState().add("Failed to rename file", "error"),
+  });
+
+  const renameFolderMutation = useMutation({
+    mutationFn: async ({ id, name }: { id: string; name: string }) => {
+      await api.patch(`/folders/${id}`, { name });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["folders", folderId ?? "root"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["folders", "root"],
+      });
+      setRenameFolder(null);
+      useToast.getState().add("Folder renamed");
+    },
+    onError: () => useToast.getState().add("Failed to rename folder", "error"),
   });
 
   const submitApprovalMutation = useMutation({
@@ -568,6 +665,11 @@ export default function FileBrowserPage() {
       ? files.find((f) => f.id === selectedFiles[0])
       : null;
 
+  const singleSelectedFolder =
+    selectedFolders.length === 1
+      ? folders.find((f) => f.id === selectedFolders[0]) ?? null
+      : null;
+
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
@@ -605,24 +707,494 @@ export default function FileBrowserPage() {
     });
 
   const handleMetaToolbar = () => {
-    if (selectedFiles.length === 0) {
-      useToast.getState().add("Select a file to edit metadata");
+    if (selectedFiles.length === 1 && singleSelectedFile) {
+      if (!fileCan(singleSelectedFile.id, "edit_file_attrs")) {
+        useToast
+          .getState()
+          .add("You don't have permission to edit metadata", "error");
+        return;
+      }
+      setShowModifyMenu(false);
+      setShowColumnsMenu(false);
+      setMetadataFolder(null);
+      setMetadataFile(singleSelectedFile);
       return;
     }
-    if (selectedFiles.length !== 1 || !singleSelectedFile) {
+
+    if (selectedFolders.length === 1) {
+      const singleSelectedFolder =
+        folders.length > 0 ? folders.find((f) => f.id === selectedFolders[0]) : null;
+      if (!singleSelectedFolder) {
+        useToast.getState().add("Select exactly one folder to edit metadata", "error");
+        return;
+      }
+      setShowModifyMenu(false);
+      setShowColumnsMenu(false);
+      setMetadataFile(null);
+      setMetadataFolder(singleSelectedFolder);
+      return;
+    }
+
+    useToast
+      .getState()
+      .add("Select exactly one file or one folder to edit metadata", "error");
+  };
+
+  const openRetentionToolbar = () => {
+    if (selectedFiles.length === 0 && selectedFolders.length === 0) {
       useToast
         .getState()
-        .add("Select exactly one file to edit metadata", "error");
+        .add("Select file(s) or folder(s) to apply retention");
       return;
     }
-    if (!fileCan(singleSelectedFile.id, "edit_file_attrs")) {
-      useToast.getState().add("You don't have permission to edit metadata", "error");
+    if (selectedFiles.length > 0 && selectedFolders.length > 0) {
+      useToast
+        .getState()
+        .add("Select either files or folders (not both) for retention", "error");
       return;
     }
-    setShowModifyMenu(false);
-    setShowColumnsMenu(false);
-    setMetadataFile(singleSelectedFile);
+    if (selectedFiles.length > 0) {
+      setRetentionScope("file");
+      setShowRetentionModal(true);
+      return;
+    }
+    setRetentionScope("folder");
+    setShowRetentionModal(true);
   };
+
+  const applyRetention = async (payload: {
+    retention: string;
+    retentionUntil?: string | null;
+    action: RetentionAction;
+  }) => {
+    try {
+      setIsApplyingRetention(true);
+
+      const ids = retentionScope === "file" ? selectedFiles : selectedFolders;
+      if (!ids || ids.length === 0) {
+        useToast.getState().add("Select items first", "error");
+        return;
+      }
+
+      const now = Date.now();
+      const queue = loadRetentionQueue();
+      const isEditing = !!retentionEditJobId;
+      const jobId = isEditing
+        ? retentionEditJobId
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+      // Override semantics: when editing, replace any existing scheduled jobs
+      // for these ids in the current scope.
+      const idSet = new Set(ids);
+      const filteredQueue = queue.filter((j) => {
+        if (j.scope !== retentionScope) return true;
+        const intersects = (j.resourceIds ?? []).some((rid) => idSet.has(rid));
+        return !intersects;
+      });
+
+      // Clear any stale "upcoming deletion" notification flags for this job.
+      const NOTIF_KEY = "storeit_retention_notifications_v1";
+      if (jobId) {
+        try {
+          const raw = localStorage.getItem(NOTIF_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === "object" && parsed[jobId]) {
+              delete parsed[jobId];
+              localStorage.setItem(NOTIF_KEY, JSON.stringify(parsed));
+            }
+          }
+        } catch {
+          // Non-fatal
+        }
+      }
+
+      // Infinite retention means "never trigger action automatically".
+      if (payload.retention === "infinite") {
+        const job: RetentionJob = {
+          id: jobId,
+          scope: retentionScope,
+          action: payload.action,
+          resourceIds: [...ids],
+          applyAt: null,
+          createdAt: now,
+          retention: "infinite",
+        };
+        saveRetentionQueue([...filteredQueue, job]);
+
+        useToast.getState().add(
+          `Retention set to Infinite for ${ids.length} ${retentionScope}(s)`,
+          "info",
+        );
+        if (retentionScope === "file") setSelectedFiles([]);
+        if (retentionScope === "folder") setSelectedFolders([]);
+        return;
+      }
+
+      let applyAt: number | null = null;
+      if (payload.retention === "7d") applyAt = now + 7 * 24 * 60 * 60 * 1000;
+      else if (payload.retention === "30d")
+        applyAt = now + 30 * 24 * 60 * 60 * 1000;
+      else if (payload.retention === "90d")
+        applyAt = now + 90 * 24 * 60 * 60 * 1000;
+      else if (payload.retention === "custom") {
+        if (!payload.retentionUntil) {
+          applyAt = null;
+        } else {
+          const dt = new Date(payload.retentionUntil);
+          const t = dt.getTime();
+          applyAt = Number.isNaN(t) ? null : t;
+        }
+      }
+
+      if (applyAt === null) {
+        useToast.getState().add("Invalid retention timing", "error");
+        return;
+      }
+
+      const job: RetentionJob = {
+        id: jobId,
+        scope: retentionScope,
+        action: payload.action,
+        resourceIds: [...ids],
+        applyAt,
+        createdAt: now,
+        retention: payload.retention,
+      };
+      saveRetentionQueue([...filteredQueue, job]);
+
+      useToast.getState().add(
+        `Retention scheduled for ${new Date(applyAt).toLocaleString()}`,
+      );
+      if (retentionScope === "file") setSelectedFiles([]);
+      if (retentionScope === "folder") setSelectedFolders([]);
+    } catch {
+      useToast.getState().add("Failed to schedule retention", "error");
+    } finally {
+      setIsApplyingRetention(false);
+      setShowRetentionModal(false);
+      setRetentionEditJobId(null);
+      setRetentionModalInitialValues(null);
+    }
+  };
+
+  const epochMsToDatetimeLocal = (epochMs: number) => {
+    const d = new Date(epochMs);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    // datetime-local expects "YYYY-MM-DDTHH:mm" in local time.
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+      d.getHours(),
+    )}:${pad(d.getMinutes())}`;
+  };
+
+  const getCurrentRetentionJobForFile = (
+    fileId: string,
+  ): RetentionJob | null => {
+    const jobs = loadRetentionQueue();
+    let best: RetentionJob | null = null;
+
+    for (const job of jobs) {
+      if (job.scope !== "file") continue;
+      if (!(job.resourceIds ?? []).includes(fileId)) continue;
+
+      // Infinite wins over finite.
+      if (job.applyAt === null) {
+        best = job;
+        continue;
+      }
+
+      if (!best) {
+        best = job;
+        continue;
+      }
+
+      // If current best is Infinite, it already wins.
+      if (best.applyAt === null) continue;
+
+      if (best.applyAt !== null && job.applyAt !== null && job.applyAt < best.applyAt) {
+        best = job;
+      }
+    }
+
+    return best;
+  };
+
+  const openRetentionDetails = (file: any) => {
+    const job = getCurrentRetentionJobForFile(file.id);
+    setRetentionDetailsFile(file);
+    setRetentionDetailsJob(job);
+    setShowRetentionDetailsModal(true);
+  };
+
+  const handleEditRetention = () => {
+    if (!retentionDetailsFile) return;
+
+    setShowRetentionDetailsModal(false);
+    setRetentionScope("file");
+    setSelectedFiles([retentionDetailsFile.id]);
+
+    const job = retentionDetailsJob;
+    setRetentionEditJobId(job?.id ?? null);
+
+    if (job) {
+      if (job.applyAt === null) {
+        setRetentionModalInitialValues({
+          retention: "infinite",
+          retentionUntil: null,
+          action: job.action,
+        });
+      } else {
+        setRetentionModalInitialValues({
+          retention: "custom",
+          retentionUntil: epochMsToDatetimeLocal(job.applyAt),
+          action: job.action,
+        });
+      }
+    } else {
+      setRetentionModalInitialValues(null);
+    }
+
+    setShowRetentionModal(true);
+  };
+
+  // Local retention scheduler:
+  // - When user applies a finite retention, we store a job in localStorage.
+  // - Every few seconds we check due jobs and run the underlying delete/move APIs.
+  // This makes the retention timing work immediately (without server-side cron).
+  useEffect(() => {
+    const intervalId = window.setInterval(async () => {
+      if (retentionQueueProcessingRef.current) return;
+
+      const queue = loadRetentionQueue();
+      if (queue.length === 0) return;
+
+      const now = Date.now();
+      const dueJobs = queue.filter(
+        (j) => j.applyAt !== null && j.applyAt <= now,
+      );
+      if (dueJobs.length === 0) return;
+
+      retentionQueueProcessingRef.current = true;
+      let nextQueue = queue;
+      let didApplyAny = false;
+
+      try {
+        for (const job of dueJobs) {
+          try {
+            if (job.scope === "file") {
+              if (job.action === "move_to_trash") {
+                await api.post("/files/bulk-delete", { ids: job.resourceIds });
+              } else {
+                const results = await Promise.allSettled(
+                  job.resourceIds.map((id) => api.delete(`/files/${id}/permanent`)),
+                );
+                const ok = results.every((r) => r.status === "fulfilled");
+                if (!ok) throw new Error("Some files permanent-delete failed");
+              }
+            } else {
+              if (job.action === "move_to_trash") {
+                await Promise.all(job.resourceIds.map((id) => api.delete(`/folders/${id}`)));
+              } else {
+                const results = await Promise.allSettled(
+                  job.resourceIds.map((id) => api.delete(`/folders/${id}/permanent`)),
+                );
+                const ok = results.every((r) => r.status === "fulfilled");
+                if (!ok) throw new Error("Some folders permanent-delete failed");
+              }
+            }
+
+            useToast.getState().add(
+              `Retention applied (${job.scope === "file" ? "file(s)" : "folder(s)"})`,
+            );
+            didApplyAny = true;
+            nextQueue = nextQueue.filter((q) => q.id !== job.id);
+          } catch {
+            // Keep the job for retry on next interval.
+          }
+        }
+
+        if (nextQueue.length !== queue.length) {
+          saveRetentionQueue(nextQueue);
+        }
+
+        if (didApplyAny) {
+          queryClient.invalidateQueries({
+            queryKey: ["files", folderId ?? "root"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["folders", folderId ?? "root"],
+          });
+          queryClient.invalidateQueries({ queryKey: ["trash"] });
+          queryClient.invalidateQueries({ queryKey: ["recent-files"] });
+          queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+          setSelectedFiles([]);
+          setSelectedFolders([]);
+        }
+      } finally {
+        retentionQueueProcessingRef.current = false;
+      }
+    }, 2000);
+
+    return () => window.clearInterval(intervalId);
+  }, [folderId, queryClient]);
+
+  // Admin notifications for upcoming retention actions (workspace-local).
+  // - Starts ~2 days before applyAt
+  // - Updates at progressively closer thresholds
+  useEffect(() => {
+    const role = user?.role ?? "";
+    const isAdmin = role === "SUPERADMIN" || role === "ORG_ADMIN";
+    if (!isAdmin) return;
+
+    const NOTIF_KEY = "storeit_retention_notifications_v1";
+    const thresholds = [
+      { key: "2d", ms: 48 * 60 * 60 * 1000 },
+      { key: "24h", ms: 24 * 60 * 60 * 1000 },
+      { key: "12h", ms: 12 * 60 * 60 * 1000 },
+      { key: "6h", ms: 6 * 60 * 60 * 1000 },
+      { key: "1h", ms: 60 * 60 * 1000 },
+      { key: "15m", ms: 15 * 60 * 1000 },
+    ];
+
+    const notifyWindowMs = 10 * 60 * 1000; // 10 minutes
+
+    const shouldNotifyAt = (targetMs: number, nowMs: number) => {
+      return nowMs >= targetMs && nowMs <= targetMs + notifyWindowMs;
+    };
+
+    const loadNotifState = () => {
+      try {
+        const raw = localStorage.getItem(NOTIF_KEY);
+        if (!raw) return {} as Record<string, Record<string, true>>;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") return {};
+        return parsed as Record<string, Record<string, true>>;
+      } catch {
+        return {} as Record<string, Record<string, true>>;
+      }
+    };
+
+    const saveNotifState = (state: Record<string, Record<string, true>>) => {
+      localStorage.setItem(NOTIF_KEY, JSON.stringify(state));
+    };
+
+    const formatDetailedDateTime = (epochMs: number) =>
+      new Date(epochMs).toLocaleString("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+
+    const intervalId = window.setInterval(() => {
+      const queue = loadRetentionQueue();
+      if (queue.length === 0) return;
+
+      const now = Date.now();
+      const remainingNotifState = loadNotifState();
+      let changed = false;
+
+      // Clean up notifications for jobs that no longer exist.
+      const currentJobIds = new Set(queue.map((j) => j.id));
+      for (const jobId of Object.keys(remainingNotifState)) {
+        if (!currentJobIds.has(jobId)) {
+          delete remainingNotifState[jobId];
+          changed = true;
+        }
+      }
+
+      for (const job of queue) {
+        if (job.applyAt === null) continue; // Infinite
+
+        // FolderIT-style for 7d retention:
+        // notifications happen on Day 1 / Day 3 / Day 5, deletion happens on Day 7.
+        if (job.retention === "7d") {
+          const day1 = job.createdAt + 1 * 24 * 60 * 60 * 1000;
+          const day3 = job.createdAt + 3 * 24 * 60 * 60 * 1000;
+          const day5 = job.createdAt + 5 * 24 * 60 * 60 * 1000;
+
+          const dayBuckets: Array<{ key: string; at: number; label: string }> = [
+            { key: "1d", at: day1, label: "Day 1" },
+            { key: "3d", at: day3, label: "Day 3" },
+            { key: "5d", at: day5, label: "Day 5" },
+          ];
+
+          const scopeLabel = job.scope === "file" ? "file(s)" : "folder(s)";
+          const actionLabel =
+            job.action === "move_to_trash"
+              ? "will be moved to trash"
+              : "will be permanently deleted";
+          const count = job.resourceIds?.length ?? 0;
+
+          if (!remainingNotifState[job.id]) remainingNotifState[job.id] = {};
+
+          for (const b of dayBuckets) {
+            if (shouldNotifyAt(b.at, now)) {
+              if (remainingNotifState[job.id]?.[b.key] === true) continue;
+
+              useToast.getState().add(
+                `Retention: ${count} ${scopeLabel} ${actionLabel} (Day 7 delete: ${formatDetailedDateTime(
+                  job.applyAt,
+                )}). Notification: ${b.label} (${formatDetailedDateTime(b.at)}).`,
+                "info",
+              );
+              remainingNotifState[job.id][b.key] = true;
+              changed = true;
+            }
+          }
+
+          continue; // Skip threshold-based toasts for 7d jobs (prevents duplicates).
+        }
+
+        const remainingMs = job.applyAt - now;
+        if (remainingMs <= 0) continue; // Due now (scheduler will handle)
+
+        // Determine which threshold bucket we are in.
+        // Example: if remaining is 10h -> "12h" bucket.
+        let bucketKey: string | null = null;
+        for (let i = 0; i < thresholds.length; i++) {
+          const cur = thresholds[i];
+          const next = thresholds[i + 1];
+          if (remainingMs <= cur.ms && (!next || remainingMs > next.ms)) {
+            bucketKey = cur.key;
+            break;
+          }
+        }
+
+        if (!bucketKey) continue; // > 48h away
+
+        if (
+          remainingNotifState[job.id]?.[bucketKey] === true
+        ) {
+          continue;
+        }
+
+        const scopeLabel = job.scope === "file" ? "file(s)" : "folder(s)";
+        const actionLabel =
+          job.action === "move_to_trash"
+            ? "will be moved to trash"
+            : "will be permanently deleted";
+        const count = job.resourceIds?.length ?? 0;
+        const when = formatDetailedDateTime(job.applyAt);
+
+        useToast.getState().add(
+          `Retention: ${count} ${scopeLabel} ${actionLabel} on ${when}.`,
+          "info",
+        );
+
+        if (!remainingNotifState[job.id]) remainingNotifState[job.id] = {};
+        remainingNotifState[job.id][bucketKey] = true;
+        changed = true;
+      }
+
+      if (changed) saveNotifState(remainingNotifState);
+    }, 60000);
+
+    return () => window.clearInterval(intervalId);
+  }, [user?.role]);
 
   return (
     <AppShell>
@@ -676,10 +1248,16 @@ export default function FileBrowserPage() {
             <div className="relative">
               <button
                 onClick={() => {
-                  if (selectedFiles.length === 0) {
+                  if (selectedFiles.length === 0 && selectedFolders.length === 0) {
                     useToast
                       .getState()
-                      .add("Select file(s) to use modify actions");
+                      .add("Select file(s) or folder(s) to use modify actions");
+                    return;
+                  }
+                  if (selectedFiles.length > 0 && selectedFolders.length > 0) {
+                    useToast
+                      .getState()
+                      .add("Select either files or folders (not both).", "error");
                     return;
                   }
                   setShowModifyMenu((v) => !v);
@@ -701,115 +1279,221 @@ export default function FileBrowserPage() {
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="px-3 py-2 text-[11px] text-gray-400 dark:text-gray-500">
-                      {selectedFiles.length} file
-                      {selectedFiles.length !== 1 ? "s" : ""} selected
+                      {selectedFiles.length > 0 && selectedFolders.length === 0
+                        ? `${selectedFiles.length} file${
+                            selectedFiles.length !== 1 ? "s" : ""
+                          } selected`
+                        : selectedFolders.length > 0 && selectedFiles.length === 0
+                          ? `${selectedFolders.length} folder${
+                              selectedFolders.length !== 1 ? "s" : ""
+                            } selected`
+                          : "Select either files or folders"}
                     </div>
+                    {/* ── Files mode ── */}
+                    {selectedFiles.length > 0 && selectedFolders.length === 0 && (
+                      <>
+                        {fileCan(selectedFiles[0], "add_files") && (
+                          <button
+                            onClick={() => {
+                              setShowModifyMenu(false);
+                              setMoveFiles(selectedFileObjects);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                          >
+                            <FolderInput size={14} /> Move
+              </button>
+            )}
 
-                    {fileCan(selectedFiles[0], "add_files") && (
-                      <button
-                        onClick={() => {
-                          setShowModifyMenu(false);
-                          setMoveFiles(selectedFileObjects);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                      >
-                        <FolderInput size={14} /> Move
-                      </button>
+                        {selectedFiles.every((id) => fileCan(id, "download_files")) && (
+                          <button
+                            onClick={() => {
+                              setShowModifyMenu(false);
+                              bulkDownload();
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                          >
+                            <Download size={14} /> Download ZIP
+                          </button>
+                        )}
+
+                        {selectedFiles.every((id) => fileCan(id, "delete_files")) && (
+                          <button
+                            onClick={() => {
+                              setShowModifyMenu(false);
+                              setShowBulkDelete(true);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg"
+                          >
+                            <Trash2 size={14} /> Delete
+                          </button>
+                        )}
+
+                        <div className="border-t border-gray-100 dark:border-gray-800 my-1" />
+
+                        {singleSelectedFile &&
+                          fileCan(singleSelectedFile.id, "share_files") && (
+                            <button
+                              onClick={() => {
+                                setShowModifyMenu(false);
+                                handleShare(singleSelectedFile);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                            >
+                              <Share2 size={14} /> Permissions
+                            </button>
+                          )}
+
+                        {singleSelectedFile &&
+                          fileCan(singleSelectedFile.id, "edit_file_attrs") && (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setShowModifyMenu(false);
+                                  setRenameFile(singleSelectedFile);
+                                  setRenameName(singleSelectedFile.name);
+                                }}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                              >
+                                <SquarePen size={14} /> Rename
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setShowModifyMenu(false);
+                                  setTagFile(singleSelectedFile);
+                                }}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                              >
+                                <Tag size={14} /> Assign tag
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setShowModifyMenu(false);
+                                  setCategoryResource({
+                                    id: singleSelectedFile.id,
+                                    type: "file",
+                                    name: singleSelectedFile.name,
+                                    currentCategoryId:
+                                      (singleSelectedFile as any).categoryId ?? null,
+                                  });
+                                }}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                              >
+                                <Hash size={14} /> Assign category
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setShowModifyMenu(false);
+                                  setMetadataFile(singleSelectedFile);
+                                }}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                              >
+                                <Info size={14} /> Metadata
+                              </button>
+                            </>
+                          )}
+
+                        {!singleSelectedFile && (
+                          <div className="px-3 py-2 text-[11px] text-gray-400 dark:text-gray-500">
+                            Select exactly 1 file for permissions / rename / tag /
+                            category / metadata
+                          </div>
+                        )}
+                      </>
                     )}
 
-                    {selectedFiles.every((id) => fileCan(id, "download_files")) && (
-                      <button
-                        onClick={() => {
-                          setShowModifyMenu(false);
-                          bulkDownload();
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                      >
-                        <Download size={14} /> Download ZIP
-                      </button>
-                    )}
-
-                    {selectedFiles.every((id) => fileCan(id, "delete_files")) && (
-                      <button
-                        onClick={() => {
-                          setShowModifyMenu(false);
-                          setShowBulkDelete(true);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg"
-                      >
-                        <Trash2 size={14} /> Delete
-                      </button>
-                    )}
-
-                    <div className="border-t border-gray-100 dark:border-gray-800 my-1" />
-
-                    {singleSelectedFile &&
-                      fileCan(singleSelectedFile.id, "share_files") && (
+                    {/* ── Folders mode ── */}
+                    {selectedFolders.length > 0 && selectedFiles.length === 0 && (
+                      <>
                         <button
                           onClick={() => {
                             setShowModifyMenu(false);
-                            handleShare(singleSelectedFile);
+                            bulkFolderMove();
                           }}
                           className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                         >
-                          <Share2 size={14} /> Permissions
+                          <FolderInput size={14} /> Move
                         </button>
-                      )}
 
-                    {singleSelectedFile &&
-                      fileCan(singleSelectedFile.id, "edit_file_attrs") && (
-                        <>
-                          <button
-                            onClick={() => {
-                              setShowModifyMenu(false);
-                              setRenameFile(singleSelectedFile);
-                              setRenameName(singleSelectedFile.name);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                          >
-                            <SquarePen size={14} /> Rename
-                          </button>
-                          <button
-                            onClick={() => {
-                              setShowModifyMenu(false);
-                              setTagFile(singleSelectedFile);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                          >
-                            <Tag size={14} /> Assign tag
-                          </button>
-                          <button
-                            onClick={() => {
-                              setShowModifyMenu(false);
-                              setCategoryResource({
-                                id: singleSelectedFile.id,
-                                type: "file",
-                                name: singleSelectedFile.name,
-                                currentCategoryId:
-                                  (singleSelectedFile as any).categoryId ?? null,
-                              });
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                          >
-                            <Hash size={14} /> Assign category
-                          </button>
-                          <button
-                            onClick={() => {
-                              setShowModifyMenu(false);
-                              setMetadataFile(singleSelectedFile);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                          >
-                            <Info size={14} /> Metadata
-                          </button>
-                        </>
-                      )}
+                        <button
+                          onClick={() => {
+                            setShowModifyMenu(false);
+                            bulkFolderDownload();
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                        >
+                          <Download size={14} /> Download ZIP
+                        </button>
 
-                    {!singleSelectedFile && (
-                      <div className="px-3 py-2 text-[11px] text-gray-400 dark:text-gray-500">
-                        Select exactly 1 file for permissions / rename / tag /
-                        category / metadata
-                      </div>
+                        <button
+                          onClick={() => {
+                            setShowModifyMenu(false);
+                            setShowBulkFolderDelete(true);
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg"
+                        >
+                          <Trash2 size={14} /> Delete
+                        </button>
+
+                        <div className="border-t border-gray-100 dark:border-gray-800 my-1" />
+
+                        {singleSelectedFolder && (
+                          <>
+                            <button
+                              onClick={() => {
+                                setShowModifyMenu(false);
+                                handleFolderShare(singleSelectedFolder);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                            >
+                              <Share2 size={14} /> Permissions
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                setShowModifyMenu(false);
+                                setRenameFolder(singleSelectedFolder);
+                                setRenameFolderName(singleSelectedFolder.name);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                            >
+                              <SquarePen size={14} /> Rename
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                setShowModifyMenu(false);
+                                setCategoryResource({
+                                  id: singleSelectedFolder.id,
+                                  type: "folder",
+                                  name: singleSelectedFolder.name,
+                                  currentCategoryId:
+                                    (singleSelectedFolder as any).categoryId ?? null,
+                                });
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                            >
+                              <Hash size={14} /> Assign category
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                setShowModifyMenu(false);
+                                setMetadataFolder(singleSelectedFolder);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                            >
+                              <Info size={14} /> Metadata
+                            </button>
+                          </>
+                        )}
+
+                        {!singleSelectedFolder && (
+                          <div className="px-3 py-2 text-[11px] text-gray-400 dark:text-gray-500">
+                            Select exactly 1 folder for permissions / rename / category /
+                            metadata
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </>
@@ -879,6 +1563,20 @@ export default function FileBrowserPage() {
                       />
                       Modified
                     </label>
+                    <label className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={visibleColumns.retention}
+                        onChange={(e) =>
+                          setVisibleColumns((v) => ({
+                            ...v,
+                            retention: e.target.checked,
+                          }))
+                        }
+                        className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-primary-500 cursor-pointer"
+                      />
+                      Retention
+                    </label>
                   </div>
                 </>
               )}
@@ -891,11 +1589,7 @@ export default function FileBrowserPage() {
               <span className="text-[10px] font-medium">Meta</span>
             </button>
             <button
-              onClick={() =>
-                useToast
-                  .getState()
-                  .add("Retention policies will be configurable soon")
-              }
+              onClick={openRetentionToolbar}
               className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-primary-600 transition-colors"
             >
               <ShieldCheck size={16} />
@@ -1289,8 +1983,8 @@ export default function FileBrowserPage() {
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-                      Folders ({folders.length})
-                    </p>
+                    Folders ({folders.length})
+                  </p>
                     {viewMode === "list" && (
                       <label className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                         <input
@@ -1441,31 +2135,31 @@ export default function FileBrowserPage() {
                             </div>
                           </div>
                         ) : (
-                          <button
-                            onClick={() => navigate(`/browse/${folder.id}`)}
-                            onDragOver={(e) => {
-                              e.preventDefault();
-                              setDragOverFolderId(folder.id);
-                            }}
-                            onDragLeave={() => setDragOverFolderId(null)}
-                            onDrop={(e) => {
-                              e.preventDefault();
-                              setDragOverFolderId(null);
-                              if (draggedFileId) {
-                                dragMove.mutate({
-                                  fileId: draggedFileId,
-                                  targetFolderId: folder.id,
-                                });
-                                setDraggedFileId(null);
-                              }
-                            }}
-                            className={clsx(
+                        <button
+                          onClick={() => navigate(`/browse/${folder.id}`)}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            setDragOverFolderId(folder.id);
+                          }}
+                          onDragLeave={() => setDragOverFolderId(null)}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            setDragOverFolderId(null);
+                            if (draggedFileId) {
+                              dragMove.mutate({
+                                fileId: draggedFileId,
+                                targetFolderId: folder.id,
+                              });
+                              setDraggedFileId(null);
+                            }
+                          }}
+                          className={clsx(
                               "w-full border rounded-xl transition-all flex flex-col items-center p-4 hover:shadow-sm text-center",
-                              dragOverFolderId === folder.id
-                                ? "border-blue-400 bg-blue-50 dark:bg-blue-900/30 scale-105"
-                                : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500",
-                            )}
-                          >
+                            dragOverFolderId === folder.id
+                              ? "border-blue-400 bg-blue-50 dark:bg-blue-900/30 scale-105"
+                              : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-500",
+                          )}
+                        >
                           <div
                             className={clsx(
                               "bg-blue-50 dark:bg-blue-900/40 rounded-xl flex items-center justify-center shrink-0 transition-colors group-hover:bg-blue-100 dark:group-hover:bg-blue-800/60",
@@ -1487,7 +2181,7 @@ export default function FileBrowserPage() {
                               {folder._count.files !== 1 ? "s" : ""}
                             </span>
                           </div>
-                          </button>
+                        </button>
                         )}
                         {/* Grid view: icon buttons on hover */}
                         {viewMode === "grid" && (
@@ -1579,6 +2273,40 @@ export default function FileBrowserPage() {
                                   >
                                     <Hash size={14} /> Assign category
                                   </button>
+
+                                  <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
+                                    <button
+                                      onClick={() => {
+                                        handleFolderShare(folder);
+                                        setFolderMenuId(null);
+                                      }}
+                                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700
+                                               dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                                    >
+                                      <Share2 size={14} /> Share permissions
+                                    </button>
+                                    <button
+                                      onClick={async () => {
+                                        await handleFolderDownload(folder);
+                                        setFolderMenuId(null);
+                                      }}
+                                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700
+                                               dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                                    >
+                                      <Download size={14} /> Download ZIP
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setMetadataFile(null);
+                                        setMetadataFolder(folder);
+                                        setFolderMenuId(null);
+                                      }}
+                                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700
+                                               dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                                    >
+                                      <Database size={14} /> Meta
+                                    </button>
+                                  </div>
                                   <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
                                     <button
                                       onClick={() => {
@@ -1685,6 +2413,7 @@ export default function FileBrowserPage() {
                       onApprovalDetail={(file) => setApprovalDetailFile(file)}
                       capabilitiesMap={capMap}
                       visibleColumns={visibleColumns}
+                      onRetentionClick={(file) => openRetentionDetails(file)}
                     />
                   )}
                 </div>
@@ -1735,6 +2464,50 @@ export default function FileBrowserPage() {
               </div>
             </div>
           )}
+
+          {renameFolder && (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+              <div className="bg-white dark:bg-gray-900 border border-transparent dark:border-gray-800 rounded-xl p-6 w-96 shadow-xl">
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                  Rename folder
+                </h3>
+                <input
+                  autoFocus
+                  className="w-full border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800
+                           text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 text-sm mb-4
+                           focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                  value={renameFolderName}
+                  onChange={(e) => setRenameFolderName(e.target.value)}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" &&
+                    renameFolderMutation.mutate({
+                      id: renameFolder.id,
+                      name: renameFolderName,
+                    })
+                  }
+                />
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => setRenameFolder(null)}
+                    className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() =>
+                      renameFolderMutation.mutate({
+                        id: renameFolder.id,
+                        name: renameFolderName,
+                      })
+                    }
+                    className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+                  >
+                    Rename
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Inline Metadata Side Panel ── */}
@@ -1743,6 +2516,13 @@ export default function FileBrowserPage() {
             fileId={metadataFile.id}
             fileName={metadataFile.name}
             onClose={() => setMetadataFile(null)}
+          />
+        )}
+        {metadataFolder && (
+          <FolderMetadataPanel
+            folderId={metadataFolder.id}
+            folderName={metadataFolder.name}
+            onClose={() => setMetadataFolder(null)}
           />
         )}
       </div>
@@ -1867,6 +2647,34 @@ export default function FileBrowserPage() {
           onResubmit={() =>
             submitApprovalMutation.mutate(approvalDetailFile.id)
           }
+        />
+      )}
+
+      {showRetentionDetailsModal && (
+        <RetentionDetailsModal
+          file={
+            retentionDetailsFile
+              ? { id: retentionDetailsFile.id, name: retentionDetailsFile.name }
+              : null
+          }
+          job={retentionDetailsJob}
+          onClose={() => setShowRetentionDetailsModal(false)}
+          onEdit={handleEditRetention}
+        />
+      )}
+
+      {showRetentionModal && (
+        <RetentionModal
+          scope={retentionScope}
+          count={retentionScope === "file" ? selectedFiles.length : selectedFolders.length}
+          onClose={() => {
+            setShowRetentionModal(false);
+            setRetentionEditJobId(null);
+            setRetentionModalInitialValues(null);
+          }}
+          onConfirm={applyRetention}
+          isConfirming={isApplyingRetention}
+          initialValues={retentionModalInitialValues ?? undefined}
         />
       )}
 

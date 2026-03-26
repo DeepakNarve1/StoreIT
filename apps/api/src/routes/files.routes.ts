@@ -339,16 +339,29 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
         new Set(chains.flat().map((c) => c.id)),
       );
 
-      const defs = await prisma.folderMetadataField.findMany({
-        where: { tenantId, folderId: { in: allFolderIds } },
-        select: {
-          folderId: true,
-          key: true,
-          type: true,
-          required: true,
-          recursive: true,
-        },
-      });
+      let defs: Array<{
+        folderId: string;
+        key: string;
+        type: string;
+        required: boolean;
+        recursive: boolean;
+      }> = [];
+      try {
+        defs = await prisma.folderMetadataField.findMany({
+          where: { tenantId, folderId: { in: allFolderIds } },
+          select: {
+            folderId: true,
+            key: true,
+            type: true,
+            required: true,
+            recursive: true,
+          },
+        });
+      } catch {
+        // Safety fallback: if DB migration for folder_metadata_fields
+        // hasn't been applied yet, don't block file listing.
+        defs = [];
+      }
 
       const defsByFolder = new Map<string, typeof defs>();
       for (const d of defs) {

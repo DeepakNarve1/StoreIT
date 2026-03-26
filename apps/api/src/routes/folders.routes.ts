@@ -28,7 +28,10 @@ async function getVisibleFolderIdSetForUser(opts: {
     select: { departmentId: true },
   });
 
-  const orClauses: any[] = [{ grantedTo: "all" }, { grantedTo: "user", userId }];
+  const orClauses: any[] = [
+    { grantedTo: "all" },
+    { grantedTo: "user", userId },
+  ];
   if (userRecord?.departmentId) {
     orClauses.push({
       grantedTo: "department",
@@ -48,7 +51,8 @@ async function getVisibleFolderIdSetForUser(opts: {
   const directlyVisible = new Set<string>();
   for (const p of perms) {
     const caps = (p as any).capabilities as Record<string, boolean> | null;
-    const hasSeeFolders = caps?.see_folders === true || caps?.see_files === true;
+    const hasSeeFolders =
+      caps?.see_folders === true || caps?.see_files === true;
     // Treat any folder permission action as visibility, even if caps are missing
     const hasAnyFolderAccess = ["read", "write", "delete", "admin"].includes(
       p.action,
@@ -120,7 +124,7 @@ router.get(
 router.put(
   "/:id/metadata-fields",
   verifyAuth,
-  requireRole("ORG_ADMIN", "MANAGER", "SUPERADMIN"),
+  requireRole("ORG_ADMIN", "MANAGER", "SUPERADMIN", "EDITOR"),
   async (req: AuthRequest, res: Response) => {
     if (!isValidUUID(req.params.id)) {
       res.status(400).json({ error: "Invalid folder ID" });
@@ -132,11 +136,9 @@ router.put(
         .array(
           z.object({
             key: z.string().min(1).max(100),
-            type: z
-              .string()
-              .refine((t) => METADATA_TYPE_ALLOWED.includes(t), {
-                message: "Unsupported metadata type",
-              }),
+            type: z.string().refine((t) => METADATA_TYPE_ALLOWED.includes(t), {
+              message: "Unsupported metadata type",
+            }),
             required: z.boolean(),
             recursive: z.boolean(),
           }),
@@ -149,7 +151,11 @@ router.put(
 
       // Ensure folder belongs to tenant
       const folder = await prisma.folder.findFirst({
-        where: { id: req.params.id, tenantId: req.user!.tenantId, isDeleted: false },
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
         select: { id: true },
       });
       if (!folder) {
@@ -764,7 +770,10 @@ router.get(
         return;
       }
 
-      const descendantIds = await getAllDescendantFolderIds(rootFolder.id, tenantId);
+      const descendantIds = await getAllDescendantFolderIds(
+        rootFolder.id,
+        tenantId,
+      );
       const allFolderIds = [rootFolder.id, ...descendantIds];
 
       const folderRows = await prisma.folder.findMany({
@@ -773,7 +782,10 @@ router.get(
       });
 
       const folderById = new Map(
-        folderRows.map((f) => [f.id, { id: f.id, name: f.name, parentId: f.parentId }]),
+        folderRows.map((f) => [
+          f.id,
+          { id: f.id, name: f.name, parentId: f.parentId },
+        ]),
       );
 
       const getRelativeFolderPath = (folderId: string) => {
@@ -920,11 +932,18 @@ router.post(
       }
 
       const folderRows = await prisma.folder.findMany({
-        where: { id: { in: Array.from(allFolderIds) }, tenantId, isDeleted: false },
+        where: {
+          id: { in: Array.from(allFolderIds) },
+          tenantId,
+          isDeleted: false,
+        },
         select: { id: true, name: true, parentId: true },
       });
       const folderById = new Map(
-        folderRows.map((f) => [f.id, { id: f.id, name: f.name, parentId: f.parentId }]),
+        folderRows.map((f) => [
+          f.id,
+          { id: f.id, name: f.name, parentId: f.parentId },
+        ]),
       );
 
       const files = await prisma.file.findMany({
@@ -994,7 +1013,8 @@ router.post(
 
         // Find which of the requested roots is an ancestor of this file's folder.
         // If none match (shouldn't happen), fall back to first requested root.
-        let assignedRootId = ids.find((id) => id === (file.folderId ?? "")) ?? ids[0];
+        let assignedRootId =
+          ids.find((id) => id === (file.folderId ?? "")) ?? ids[0];
         const folderId = file.folderId;
         if (folderId) {
           // Walk upwards to find a root we requested
