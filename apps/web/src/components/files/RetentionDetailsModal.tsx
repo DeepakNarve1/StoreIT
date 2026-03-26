@@ -11,6 +11,8 @@ type RetentionJobForDetails = {
   applyAt: number | null; // epoch ms (null = Infinite)
   createdAt: number; // epoch ms
   retention: string;
+  reminder?: string | null;
+  reminderAt?: number | null;
 };
 
 type Props = {
@@ -120,7 +122,7 @@ export default function RetentionDetailsModal({
             </div>
           </div>
 
-          {job?.applyAt !== null && job?.retention === "7d" && (
+            {job?.applyAt !== null && job?.retention === "7d" && !job?.reminder && (
             <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 p-4">
               <div className="flex items-center justify-between gap-4">
                 <span className="text-gray-500 dark:text-gray-400">
@@ -158,6 +160,28 @@ export default function RetentionDetailsModal({
                     {formatDetailedDateTime(job.createdAt + 1 * 24 * 60 * 60 * 1000)}
                   </span>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {job?.applyAt !== null && job?.reminder && job.reminder !== "none" && (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 p-4">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-gray-500 dark:text-gray-400">Reminder</span>
+                <span className="text-gray-900 dark:text-white font-medium">
+                  {job.reminder === "custom" && job.reminderAt
+                    ? formatDetailedDateTime(job.reminderAt)
+                    : job.reminder && job.applyAt
+                    ? (() => {
+                        const m = String(job.reminder).match(/^(\d+)d$/);
+                        if (m) {
+                          const days = Number(m[1]);
+                          return formatDetailedDateTime(job.applyAt - days * 24 * 60 * 60 * 1000);
+                        }
+                        return "—";
+                      })()
+                    : "—"}
+                </span>
               </div>
             </div>
           )}

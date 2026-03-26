@@ -12,6 +12,8 @@ type Props = {
     retention: string;
     retentionUntil?: string | null;
     action: RetentionAction;
+    reminder?: string | null; // e.g. '1d','3d','5d','7d','custom'
+    reminderAt?: string | null; // datetime-local string for custom reminder
   }) => Promise<void>;
   isConfirming?: boolean;
   initialValues?: {
@@ -31,6 +33,15 @@ const RETENTION_PRESETS: Array<{
   { label: "30 days", value: "30d", untilType: "none" },
   { label: "90 days", value: "90d", untilType: "none" },
   { label: "Custom date", value: "custom", untilType: "custom" },
+];
+
+const REMINDER_PRESETS: Array<{ label: string; value: string; untilType?: "none" | "custom" }> = [
+  { label: "None", value: "none", untilType: "none" },
+  { label: "1 day before", value: "1d", untilType: "none" },
+  { label: "3 days before", value: "3d", untilType: "none" },
+  { label: "5 days before", value: "5d", untilType: "none" },
+  { label: "7 days before", value: "7d", untilType: "none" },
+  { label: "Custom time", value: "custom", untilType: "custom" },
 ];
 
 function formatScope(scope: "file" | "folder") {
@@ -53,6 +64,11 @@ export default function RetentionModal({
   const [customUntil, setCustomUntil] = useState<string>(
     initialValues?.retentionUntil ?? "",
   );
+  const [reminderValue, setReminderValue] = useState<string>(
+    // default to none
+    "none",
+  );
+  const [customReminderAt, setCustomReminderAt] = useState<string>("");
   const [action, setAction] = useState<RetentionAction>(
     initialValues?.action ?? "move_to_trash",
   );
@@ -63,6 +79,7 @@ export default function RetentionModal({
     setRetentionValue(initialValues.retention);
     setCustomUntil(initialValues.retentionUntil ?? "");
     setAction(initialValues.action);
+    // If opening for edit, the modal might include reminder fields in future.
   }, [initialValues]);
 
   const retentionPreset = useMemo(
@@ -70,12 +87,19 @@ export default function RetentionModal({
     [retentionValue],
   );
 
+  const reminderPreset = useMemo(
+    () => REMINDER_PRESETS.find((p) => p.value === reminderValue),
+    [reminderValue],
+  );
+
   const requireUntil = retentionPreset?.untilType === "custom";
+  const requireReminderAt = reminderPreset?.untilType === "custom";
 
   const canConfirm = useMemo(() => {
     if (action !== "move_to_trash" && action !== "permanent_delete")
       return false;
     if (requireUntil) return !!customUntil;
+    if (requireReminderAt) return !!customReminderAt;
     return true;
   }, [action, customUntil, requireUntil]);
 
@@ -137,6 +161,37 @@ export default function RetentionModal({
             </div>
           )}
 
+          <div className="space-y-1">
+            <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+              Reminder
+            </div>
+            <select
+              value={reminderValue}
+              onChange={(e) => setReminderValue(e.target.value)}
+              className="w-full border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent"
+            >
+              {REMINDER_PRESETS.map((p) => (
+                <option key={p.value} value={p.value}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {requireReminderAt && (
+            <div className="space-y-1">
+              <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                Reminder time (date & time)
+              </div>
+              <input
+                type="datetime-local"
+                value={customReminderAt}
+                onChange={(e) => setCustomReminderAt(e.target.value)}
+                className="w-full border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent"
+              />
+            </div>
+          )}
+
           <div className="space-y-2">
             <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
               Action
@@ -186,6 +241,8 @@ export default function RetentionModal({
                 retention: retentionValue,
                 retentionUntil: requireUntil ? customUntil : null,
                 action,
+                reminder: reminderValue === "none" ? null : reminderValue,
+                reminderAt: requireReminderAt ? customReminderAt : null,
               });
             }}
             disabled={isConfirming || !canConfirm}

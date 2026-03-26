@@ -161,6 +161,8 @@ export default function FileBrowserPage() {
     applyAt: number | null; // epoch ms (null = Infinite / never auto-trigger)
     createdAt: number; // epoch ms
     retention: string;
+    reminder?: string | null; // '1d','3d','5d','7d','custom','none'
+    reminderAt?: number | null; // epoch ms for custom reminder
   };
 
   const loadRetentionQueue = (): RetentionJob[] => {
@@ -766,6 +768,8 @@ export default function FileBrowserPage() {
     retention: string;
     retentionUntil?: string | null;
     action: RetentionAction;
+    reminder?: string | null;
+    reminderAt?: string | null;
   }) => {
     try {
       setIsApplyingRetention(true);
@@ -819,6 +823,8 @@ export default function FileBrowserPage() {
           applyAt: null,
           createdAt: now,
           retention: "infinite",
+          reminder: payload.reminder ?? null,
+          reminderAt: payload.reminderAt ? new Date(payload.reminderAt).getTime() : null,
         };
         saveRetentionQueue([...filteredQueue, job]);
 
@@ -860,6 +866,8 @@ export default function FileBrowserPage() {
         applyAt,
         createdAt: now,
         retention: payload.retention,
+        reminder: payload.reminder ?? null,
+        reminderAt: payload.reminderAt ? new Date(payload.reminderAt).getTime() : null,
       };
       saveRetentionQueue([...filteredQueue, job]);
 
@@ -1108,6 +1116,44 @@ export default function FileBrowserPage() {
 
       for (const job of queue) {
         if (job.applyAt === null) continue; // Infinite
+        // If job has an explicit per-job reminder configured, use it.
+        if (job.reminder && job.reminder !== "none") {
+          let notifyAt: number | null = null;
+          if (job.reminder === "custom") {
+            if (job.reminderAt) notifyAt = job.reminderAt;
+          } else {
+            const m = String(job.reminder).match(/^(\d+)d$/);
+            if (m && job.applyAt) {
+              const days = Number(m[1]);
+              notifyAt = job.applyAt - days * 24 * 60 * 60 * 1000;
+            }
+          }
+
+          if (notifyAt !== null) {
+            if (shouldNotifyAt(notifyAt, now)) {
+              if (remainingNotifState[job.id]?.["reminder"] !== true) {
+                const scopeLabel = job.scope === "file" ? "file(s)" : "folder(s)";
+                const actionLabel =
+                  job.action === "move_to_trash"
+                    ? "will be moved to trash"
+                    : "will be permanently deleted";
+                const count = job.resourceIds?.length ?? 0;
+                const when = formatDetailedDateTime(job.applyAt);
+
+                useToast.getState().add(
+                  `Retention: ${count} ${scopeLabel} ${actionLabel} on ${when}. Reminder: ${formatDetailedDateTime(notifyAt)}.`,
+                  "info",
+                );
+
+                if (!remainingNotifState[job.id]) remainingNotifState[job.id] = {};
+                remainingNotifState[job.id]["reminder"] = true;
+                changed = true;
+              }
+            }
+          }
+
+          continue; // skip legacy thresholds if a per-job reminder exists
+        }
 
         // FolderIT-style for 7d retention:
         // notifications happen on Day 1 / Day 3 / Day 5, deletion happens on Day 7.
