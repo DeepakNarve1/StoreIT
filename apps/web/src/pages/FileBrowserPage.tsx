@@ -520,60 +520,69 @@ export default function FileBrowserPage() {
           </div>
 
           {/* Toolbar */}
-          <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+          <div className="flex items-center justify-between mb-3">
             <h1 className="text-base font-semibold text-gray-900 dark:text-white">
               {ancestors.length > 0
                 ? ancestors[ancestors.length - 1].name
                 : "All Files"}
             </h1>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-1 gap-0.5">
-                <button
-                  onClick={() => setViewMode("grid")}
-                  className={clsx(
-                    "p-1.5 rounded-md transition-colors",
-                    viewMode === "grid"
-                      ? "bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 shadow-sm"
-                      : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200",
-                  )}
-                >
-                  <LayoutGrid size={15} />
-                </button>
-                <button
-                  onClick={() => setViewMode("list")}
-                  className={clsx(
-                    "p-1.5 rounded-md transition-colors",
-                    viewMode === "list"
-                      ? "bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 shadow-sm"
-                      : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200",
-                  )}
-                >
-                  <List size={15} />
-                </button>
-              </div>
-              {canWrite && (
-                <button
-                  onClick={() => setShowNewFolder(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm
-                           text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg
-                           hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors font-medium"
-                >
-                  <FolderPlus size={15} /> New Folder
-                </button>
-              )}
-              {(canWrite ||
-                // VIEWERs with an add_files capability on ANY file in this folder
-                // (checked via capMap on already-loaded files — good enough signal)
-                fileIds.some((id) => capMap[id]?.add_files === true)) && (
-                <button
-                  onClick={() => setShowUpload(!showUpload)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm
-                           bg-primary-500 hover:bg-primary-600 text-white rounded-lg
-                           transition-colors font-medium"
-                >
-                  <Upload size={15} /> Upload
-                </button>
-              )}
+          </div>
+
+          {/* Folderit-style action toolbar */}
+          <div className="flex items-center gap-0.5 mb-4 pb-3 border-b border-gray-100 dark:border-gray-800">
+            {(canWrite ||
+              fileIds.some((id) => capMap[id]?.add_files === true)) && (
+              <button
+                onClick={() => setShowUpload(!showUpload)}
+                className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-primary-600 transition-colors"
+              >
+                <Upload size={16} />
+                <span className="text-[10px] font-medium">Upload</span>
+              </button>
+            )}
+            {canWrite && (
+              <button
+                onClick={() => setShowNewFolder(true)}
+                className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-primary-600 transition-colors"
+              >
+                <FolderPlus size={16} />
+                <span className="text-[10px] font-medium">New Folder</span>
+              </button>
+            )}
+            <div className="w-px h-7 bg-gray-200 dark:bg-gray-700 mx-1" />
+            <button
+              onClick={() => navigate("/admin/audit")}
+              className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+            >
+              <Hash size={16} />
+              <span className="text-[10px] font-medium">Audit Log</span>
+            </button>
+            <div className="w-px h-7 bg-gray-200 dark:bg-gray-700 mx-1" />
+            <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-1 gap-0.5 ml-auto">
+              <button
+                onClick={() => setViewMode("grid")}
+                title="Grid view"
+                className={clsx(
+                  "p-1.5 rounded-md transition-colors",
+                  viewMode === "grid"
+                    ? "bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 shadow-sm"
+                    : "text-gray-500 hover:text-gray-700 dark:text-gray-400",
+                )}
+              >
+                <LayoutGrid size={14} />
+              </button>
+              <button
+                onClick={() => setViewMode("list")}
+                title="List view"
+                className={clsx(
+                  "p-1.5 rounded-md transition-colors",
+                  viewMode === "list"
+                    ? "bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 shadow-sm"
+                    : "text-gray-500 hover:text-gray-700 dark:text-gray-400",
+                )}
+              >
+                <List size={14} />
+              </button>
             </div>
           </div>
 

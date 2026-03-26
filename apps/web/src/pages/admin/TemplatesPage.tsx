@@ -13,7 +13,6 @@ import {
 import AppShell from "../../components/layout/AppShell";
 import api from "../../api/axios";
 import { useToast } from "../../components/ui/Toast";
-import clsx from "clsx";
 
 interface TemplateField {
   key: string;
