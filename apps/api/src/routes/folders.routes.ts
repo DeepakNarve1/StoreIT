@@ -3,8 +3,188 @@ import { z } from "zod";
 import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import { createAuditLog } from "../services/audit.service";
+import archiver from "archiver";
+import https from "https";
+import http from "http";
+import { getFileViewUrl } from "../services/storage.service";
+import { userHasCapability } from "./permissions.routes";
 
 const router = Router();
+
+const PRIVILEGED = ["SUPERADMIN", "ORG_ADMIN", "MANAGER", "EDITOR"];
+
+type FolderRow = { id: string; name: string; parentId: string | null };
+
+async function getVisibleFolderIdSetForUser(opts: {
+  userId: string;
+  tenantId: string;
+  role: string;
+}): Promise<Set<string>> {
+  const { userId, tenantId, role } = opts;
+  if (PRIVILEGED.includes(role)) return new Set<string>();
+
+  const userRecord = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { departmentId: true },
+  });
+
+  const orClauses: any[] = [{ grantedTo: "all" }, { grantedTo: "user", userId }];
+  if (userRecord?.departmentId) {
+    orClauses.push({
+      grantedTo: "department",
+      departmentId: userRecord.departmentId,
+    });
+  }
+
+  const perms = await prisma.permission.findMany({
+    where: {
+      resourceType: "folder",
+      OR: orClauses,
+      AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
+    },
+    select: { resourceId: true, action: true, capabilities: true },
+  });
+
+  const directlyVisible = new Set<string>();
+  for (const p of perms) {
+    const caps = (p as any).capabilities as Record<string, boolean> | null;
+    const hasSeeFolders = caps?.see_folders === true || caps?.see_files === true;
+    // Treat any folder permission action as visibility, even if caps are missing
+    const hasAnyFolderAccess = ["read", "write", "delete", "admin"].includes(
+      p.action,
+    );
+    if (hasSeeFolders || hasAnyFolderAccess) directlyVisible.add(p.resourceId);
+  }
+
+  if (directlyVisible.size === 0) return new Set<string>();
+
+  // Add ancestors so navigation + breadcrumb works.
+  const allFolders = (await prisma.folder.findMany({
+    where: { tenantId, isDeleted: false },
+    select: { id: true, name: true, parentId: true },
+  })) as FolderRow[];
+
+  const byId = new Map<string, FolderRow>();
+  allFolders.forEach((f) => byId.set(f.id, f));
+
+  const visible = new Set<string>(directlyVisible);
+  for (const id of directlyVisible) {
+    let current = byId.get(id)?.parentId ?? null;
+    let depth = 0;
+    while (current && depth < 50) {
+      visible.add(current);
+      current = byId.get(current)?.parentId ?? null;
+      depth++;
+    }
+  }
+
+  return visible;
+}
+
+const METADATA_TYPE_ALLOWED = [
+  "text",
+  "boolean",
+  "date",
+  "datetime",
+  "number",
+  "integer",
+  "decimal",
+  "longText",
+  "email",
+  "list",
+];
+
+// ─── GET /api/folders/:id/metadata-fields — folder default schema ─────────
+router.get(
+  "/:id/metadata-fields",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.id)) {
+      res.status(400).json({ error: "Invalid folder ID" });
+      return;
+    }
+    try {
+      const fields = await prisma.folderMetadataField.findMany({
+        where: { folderId: req.params.id, tenantId: req.user!.tenantId },
+        orderBy: { createdAt: "asc" },
+        select: { key: true, type: true, required: true, recursive: true },
+      });
+      res.json({ fields });
+    } catch {
+      res.status(500).json({ error: "Failed to fetch metadata fields" });
+    }
+  },
+);
+
+// ─── PUT /api/folders/:id/metadata-fields — replace folder schema ──────
+router.put(
+  "/:id/metadata-fields",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "MANAGER", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.id)) {
+      res.status(400).json({ error: "Invalid folder ID" });
+      return;
+    }
+
+    const schema = z.object({
+      fields: z
+        .array(
+          z.object({
+            key: z.string().min(1).max(100),
+            type: z
+              .string()
+              .refine((t) => METADATA_TYPE_ALLOWED.includes(t), {
+                message: "Unsupported metadata type",
+              }),
+            required: z.boolean(),
+            recursive: z.boolean(),
+          }),
+        )
+        .max(50),
+    });
+
+    try {
+      const { fields } = schema.parse(req.body);
+
+      // Ensure folder belongs to tenant
+      const folder = await prisma.folder.findFirst({
+        where: { id: req.params.id, tenantId: req.user!.tenantId, isDeleted: false },
+        select: { id: true },
+      });
+      if (!folder) {
+        res.status(404).json({ error: "Folder not found" });
+        return;
+      }
+
+      await prisma.$transaction([
+        prisma.folderMetadataField.deleteMany({
+          where: { folderId: req.params.id, tenantId: req.user!.tenantId },
+        }),
+        ...fields.map((f) =>
+          prisma.folderMetadataField.create({
+            data: {
+              tenantId: req.user!.tenantId,
+              folderId: req.params.id,
+              key: f.key,
+              type: f.type,
+              required: f.required,
+              recursive: f.recursive,
+            },
+          }),
+        ),
+      ]);
+
+      res.json({ message: "Folder metadata fields updated" });
+    } catch (err: any) {
+      if (err.name === "ZodError") {
+        res.status(400).json({ error: "Invalid metadata fields" });
+        return;
+      }
+      res.status(500).json({ error: "Failed to update metadata fields" });
+    }
+  },
+);
 
 // ─── UUID validation ──────────────────────────────────────────────────────────
 const UUID_REGEX =
@@ -37,10 +217,16 @@ async function getAllDescendantFolderIds(
 router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
     const { parentId } = req.query;
+    const { userId, tenantId, role } = req.user!;
+    const visibleSet = await getVisibleFolderIdSetForUser({
+      userId,
+      tenantId,
+      role,
+    });
 
     const folders = await prisma.folder.findMany({
       where: {
-        tenantId: req.user!.tenantId,
+        tenantId,
         isDeleted: false,
         parentId:
           parentId && parentId !== "null" && parentId !== "undefined"
@@ -63,7 +249,14 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
       },
     });
 
-    res.json({ folders });
+    const filtered =
+      PRIVILEGED.includes(role) || visibleSet.size === 0
+        ? PRIVILEGED.includes(role)
+          ? folders
+          : []
+        : folders.filter((f) => visibleSet.has(f.id));
+
+    res.json({ folders: filtered });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch folders" });
@@ -72,8 +265,14 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
 // ─── GET /api/folders/all — flat list for sidebar tree ───────────────────────
 router.get("/all", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
+    const { userId, tenantId, role } = req.user!;
+    const visibleSet = await getVisibleFolderIdSetForUser({
+      userId,
+      tenantId,
+      role,
+    });
     const folders = await prisma.folder.findMany({
-      where: { tenantId: req.user!.tenantId, isDeleted: false },
+      where: { tenantId, isDeleted: false },
       orderBy: { name: "asc" },
       select: {
         id: true,
@@ -89,7 +288,13 @@ router.get("/all", verifyAuth, async (req: AuthRequest, res: Response) => {
         },
       },
     });
-    res.json({ folders });
+    const filtered =
+      PRIVILEGED.includes(role) || visibleSet.size === 0
+        ? PRIVILEGED.includes(role)
+          ? folders
+          : []
+        : folders.filter((f) => visibleSet.has(f.id));
+    res.json({ folders: filtered });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch folders" });
@@ -522,6 +727,323 @@ router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// ─── GET /api/folders/:id/download — zip folder contents ────────────────────
+router.get(
+  "/:id/download",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.id)) {
+      res.status(400).json({ error: "Invalid folder ID" });
+      return;
+    }
+    try {
+      const { userId, tenantId, role } = req.user!;
+      const isPrivileged = PRIVILEGED.includes(role);
+
+      if (!isPrivileged) {
+        const canSeeFolder = await userHasCapability(
+          userId,
+          tenantId,
+          role,
+          "folder",
+          req.params.id,
+          "see_folders",
+        );
+        if (!canSeeFolder) {
+          res.status(403).json({ error: "Access denied" });
+          return;
+        }
+      }
+
+      const rootFolder = await prisma.folder.findFirst({
+        where: { id: req.params.id, tenantId, isDeleted: false },
+        select: { id: true, name: true, parentId: true },
+      });
+      if (!rootFolder) {
+        res.status(404).json({ error: "Folder not found" });
+        return;
+      }
+
+      const descendantIds = await getAllDescendantFolderIds(rootFolder.id, tenantId);
+      const allFolderIds = [rootFolder.id, ...descendantIds];
+
+      const folderRows = await prisma.folder.findMany({
+        where: { id: { in: allFolderIds }, tenantId, isDeleted: false },
+        select: { id: true, name: true, parentId: true },
+      });
+
+      const folderById = new Map(
+        folderRows.map((f) => [f.id, { id: f.id, name: f.name, parentId: f.parentId }]),
+      );
+
+      const getRelativeFolderPath = (folderId: string) => {
+        if (folderId === rootFolder.id) return "";
+        const segments: string[] = [];
+        let currentId: string | null | undefined = folderId;
+        let depth = 0;
+        while (currentId && currentId !== rootFolder.id && depth < 40) {
+          const f = folderById.get(currentId);
+          if (!f) break;
+          if (f.parentId === rootFolder.id) {
+            segments.unshift(f.name);
+            break;
+          }
+          segments.unshift(f.name);
+          currentId = f.parentId;
+          depth++;
+        }
+        return segments.join("/");
+      };
+
+      const files = await prisma.file.findMany({
+        where: { tenantId, isDeleted: false, folderId: { in: allFolderIds } },
+        select: { id: true, name: true, storageKey: true, folderId: true },
+      });
+
+      const MAX_FILES_TO_ZIP = 5000;
+      if (files.length > MAX_FILES_TO_ZIP) {
+        res.status(400).json({
+          error: `Too many files to download at once (max ${MAX_FILES_TO_ZIP}).`,
+        });
+        return;
+      }
+
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${rootFolder.name}-storeit-${Date.now()}.zip"`,
+      );
+
+      const archive = archiver("zip", { zlib: { level: 6 } });
+      archive.pipe(res);
+
+      for (const file of files) {
+        if (!isPrivileged) {
+          const canDownload = await userHasCapability(
+            userId,
+            tenantId,
+            role,
+            "file",
+            file.id,
+            "download_files",
+          );
+          if (!canDownload) {
+            res.status(403).json({
+              error: `You don't have permission to download "${file.name}".`,
+            });
+            return;
+          }
+        }
+
+        const url = await getFileViewUrl(file.storageKey, 60);
+        const relativeFolderPath = file.folderId
+          ? getRelativeFolderPath(file.folderId)
+          : "";
+        const entryName = [
+          rootFolder.name,
+          relativeFolderPath ? relativeFolderPath : null,
+          file.name,
+        ]
+          .filter(Boolean)
+          .join("/");
+
+        await new Promise<void>((resolve, reject) => {
+          const client = url.startsWith("https") ? https : http;
+          client
+            .get(url, (stream) => {
+              archive.append(stream, { name: entryName });
+              stream.on("end", resolve);
+              stream.on("error", reject);
+            })
+            .on("error", reject);
+        });
+      }
+
+      await archive.finalize();
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Failed to create folder ZIP" });
+    }
+  },
+);
+
+// ─── POST /api/folders/bulk-download — zip multiple folders ───────────────
+router.post(
+  "/bulk-download",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { ids } = z
+        .object({ ids: z.array(z.string().uuid()).min(1).max(20) })
+        .parse(req.body);
+
+      const { userId, tenantId, role } = req.user!;
+      const isPrivileged = PRIVILEGED.includes(role);
+
+      const rootFolders = await prisma.folder.findMany({
+        where: { id: { in: ids }, tenantId, isDeleted: false },
+        select: { id: true, name: true },
+      });
+      if (rootFolders.length === 0) {
+        res.status(404).json({ error: "No folders found" });
+        return;
+      }
+
+      const rootById = new Map(rootFolders.map((f) => [f.id, f]));
+
+      if (!isPrivileged) {
+        for (const rootId of ids) {
+          const canSeeFolder = await userHasCapability(
+            userId,
+            tenantId,
+            role,
+            "folder",
+            rootId,
+            "see_folders",
+          );
+          if (!canSeeFolder) {
+            res.status(403).json({ error: "Access denied" });
+            return;
+          }
+        }
+      }
+
+      // Collect all folders + files for all requested roots.
+      // Note: duplicates are possible if folders overlap, which is acceptable for now.
+      const allFolderIds = new Set<string>();
+      for (const rootId of ids) {
+        const rootExists = rootById.has(rootId);
+        if (!rootExists) continue;
+        allFolderIds.add(rootId);
+        const descendantIds = await getAllDescendantFolderIds(rootId, tenantId);
+        descendantIds.forEach((id) => allFolderIds.add(id));
+      }
+
+      const folderRows = await prisma.folder.findMany({
+        where: { id: { in: Array.from(allFolderIds) }, tenantId, isDeleted: false },
+        select: { id: true, name: true, parentId: true },
+      });
+      const folderById = new Map(
+        folderRows.map((f) => [f.id, { id: f.id, name: f.name, parentId: f.parentId }]),
+      );
+
+      const files = await prisma.file.findMany({
+        where: {
+          tenantId,
+          isDeleted: false,
+          folderId: { in: Array.from(allFolderIds) },
+        },
+        select: { id: true, name: true, storageKey: true, folderId: true },
+      });
+
+      const MAX_FILES_TO_ZIP = 5000;
+      if (files.length > MAX_FILES_TO_ZIP) {
+        res.status(400).json({
+          error: `Too many files to download at once (max ${MAX_FILES_TO_ZIP}).`,
+        });
+        return;
+      }
+
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="storeit-folders-${Date.now()}.zip"`,
+      );
+
+      const archive = archiver("zip", { zlib: { level: 6 } });
+      archive.pipe(res);
+
+      const getRelativeFolderPath = (rootId: string, folderId: string) => {
+        if (folderId === rootId) return "";
+        const segments: string[] = [];
+        let currentId: string | null | undefined = folderId;
+        let depth = 0;
+        while (currentId && currentId !== rootId && depth < 40) {
+          const f = folderById.get(currentId);
+          if (!f) break;
+          if (f.parentId === rootId) {
+            segments.unshift(f.name);
+            break;
+          }
+          segments.unshift(f.name);
+          currentId = f.parentId;
+          depth++;
+        }
+        return segments.join("/");
+      };
+
+      for (const file of files) {
+        if (!isPrivileged) {
+          const canDownload = await userHasCapability(
+            userId,
+            tenantId,
+            role,
+            "file",
+            file.id,
+            "download_files",
+          );
+          if (!canDownload) {
+            res.status(403).json({
+              error: `You don't have permission to download "${file.name}".`,
+            });
+            return;
+          }
+        }
+
+        const url = await getFileViewUrl(file.storageKey, 60);
+
+        // Find which of the requested roots is an ancestor of this file's folder.
+        // If none match (shouldn't happen), fall back to first requested root.
+        let assignedRootId = ids.find((id) => id === (file.folderId ?? "")) ?? ids[0];
+        const folderId = file.folderId;
+        if (folderId) {
+          // Walk upwards to find a root we requested
+          let current: string | null = folderId;
+          let depth = 0;
+          while (current && depth < 40) {
+            if (rootById.has(current)) {
+              assignedRootId = current;
+              break;
+            }
+            const f = folderById.get(current);
+            current = f?.parentId ?? null;
+            depth++;
+          }
+        }
+
+        const rootName = rootById.get(assignedRootId)?.name ?? "folder";
+        const relativePath = folderId
+          ? getRelativeFolderPath(assignedRootId, folderId)
+          : "";
+
+        const entryName = [
+          rootName,
+          relativePath ? relativePath : null,
+          file.name,
+        ]
+          .filter(Boolean)
+          .join("/");
+
+        await new Promise<void>((resolve, reject) => {
+          const client = url.startsWith("https") ? https : http;
+          client
+            .get(url, (stream) => {
+              archive.append(stream, { name: entryName });
+              stream.on("end", resolve);
+              stream.on("error", reject);
+            })
+            .on("error", reject);
+        });
+      }
+
+      await archive.finalize();
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Failed to create folders ZIP" });
+    }
+  },
+);
+
 // ─── GET /api/folders/:id/ancestors ──────────────────────────────────────────
 // Returns the full path from root to this folder as an ordered array
 router.get(
@@ -533,6 +1055,22 @@ router.get(
       return;
     }
     try {
+      const { userId, tenantId, role } = req.user!;
+      const isPrivileged = PRIVILEGED.includes(role);
+      if (!isPrivileged) {
+        const canSeeFolder = await userHasCapability(
+          userId,
+          tenantId,
+          role,
+          "folder",
+          req.params.id,
+          "see_folders",
+        );
+        if (!canSeeFolder) {
+          res.status(403).json({ error: "Access denied" });
+          return;
+        }
+      }
       const ancestors: { id: string; name: string }[] = [];
       let currentId: string | null = req.params.id;
 

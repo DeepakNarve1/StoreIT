@@ -128,16 +128,16 @@ const getActionConfig = (action: string) =>
     bg: "bg-gray-50 dark:bg-white/5",
   };
 
-const timeAgo = (dateStr: string) => {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days = Math.floor(diff / 86400000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  return `${days}d ago`;
-};
+const formatDetailedDateTime = (dateStr: string) =>
+  new Date(dateStr).toLocaleString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
 
 const ACTIONS = Object.keys(ACTION_CONFIG);
 
@@ -145,6 +145,9 @@ export default function AuditLogPage() {
   const [page, setPage] = useState(1);
   const [filterAction, setFilterAction] = useState("");
   const [filterType, setFilterType] = useState("");
+  const [exportFormat, setExportFormat] = useState<
+    "xlsx" | "ods" | "csv" | "pdf"
+  >("xlsx");
 
   const { data, isLoading } = useQuery({
     queryKey: ["audit-logs", page, filterAction, filterType],
@@ -186,6 +189,7 @@ export default function AuditLogPage() {
       const params = new URLSearchParams();
       if (filterAction) params.set("action", filterAction);
 
+      params.set("format", exportFormat);
       const res = await api.get(`/audit/export?${params.toString()}`, {
         responseType: "blob",
       });
@@ -193,7 +197,7 @@ export default function AuditLogPage() {
       const url = URL.createObjectURL(new Blob([res.data]));
       const a = document.createElement("a");
       a.href = url;
-      a.download = `audit-log-${new Date().toISOString().split("T")[0]}.csv`;
+      a.download = `audit-log-${new Date().toISOString().split("T")[0]}.${exportFormat}`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
@@ -276,8 +280,38 @@ export default function AuditLogPage() {
           </div>
         )}
 
-        {/* Filters */}
-        <div className="flex items-center gap-3 mb-4 flex-wrap">
+        {/* Filters + Export */}
+        <div className="flex items-center gap-3 mb-4 flex-wrap justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
+              Download log:
+            </span>
+            <select
+              value={exportFormat}
+              onChange={(e) =>
+                setExportFormat(
+                  e.target.value as "xlsx" | "ods" | "csv" | "pdf",
+                )
+              }
+              className="px-2.5 py-1.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg
+                       text-xs focus:outline-none focus:ring-2 focus:ring-blue-400 dark:text-gray-200"
+            >
+              <option value="xlsx">xlsx</option>
+              <option value="ods">ods</option>
+              <option value="csv">csv</option>
+              <option value="pdf">pdf</option>
+            </select>
+            <button
+              onClick={handleExport}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
+             text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50
+             dark:hover:bg-white/5 transition-colors"
+            >
+              <Download size={13} />
+              Download
+            </button>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
             <Filter size={13} />
             <span>Filter:</span>
@@ -326,20 +360,12 @@ export default function AuditLogPage() {
             </button>
           )}
           {pagination && (
-            <span className="ml-auto text-xs text-gray-400 dark:text-gray-600">
+            <span className="text-xs text-gray-400 dark:text-gray-600">
               {pagination.total} events total
             </span>
           )}
+          </div>
         </div>
-        <button
-          onClick={handleExport}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium
-             text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50 mb-4
-             dark:hover:bg-white/5 transition-colors ml-auto"
-        >
-          <Download size={14} />
-          Export CSV
-        </button>
 
         {/* Log table */}
         <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
@@ -451,13 +477,7 @@ export default function AuditLogPage() {
                     {/* Time */}
                     <div className="col-span-2">
                       <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {timeAgo(log.createdAt)}
-                      </p>
-                      <p className="text-xs text-gray-400 dark:text-gray-600">
-                        {new Date(log.createdAt).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                        })}
+                        {formatDetailedDateTime(log.createdAt)}
                       </p>
                     </div>
                   </div>

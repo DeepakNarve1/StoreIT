@@ -297,6 +297,127 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
       });
     }
 
+    // ─── FolderIT-style "missing required metadata" indicator ─────────────
+    // For each returned file, compute how many required default metadata
+    // fields are missing (recursive fields apply to descendants).
+    const fileIds = files.map((f) => f.id);
+    const distinctFolderIds = Array.from(
+      new Set(files.map((f) => f.folderId).filter((id): id is string => !!id)),
+    );
+
+    if (fileIds.length > 0 && distinctFolderIds.length > 0) {
+      const folderChainCache = new Map<
+        string,
+        { id: string; isSelf: boolean }[]
+      >();
+
+      const getFolderChain = async (folderId: string) => {
+        const cached = folderChainCache.get(folderId);
+        if (cached) return cached;
+        const chain: { id: string; isSelf: boolean }[] = [];
+        let current: string | null = folderId;
+        let depth = 0;
+        while (current && depth < 50) {
+          chain.push({ id: current, isSelf: depth === 0 });
+          const parentFolder: { parentId: string | null } | null =
+            await prisma.folder.findFirst({
+            where: { id: current, tenantId },
+            select: { parentId: true },
+          });
+          current = parentFolder?.parentId ?? null;
+          depth++;
+        }
+        folderChainCache.set(folderId, chain);
+        return chain;
+      };
+
+      const chains = await Promise.all(
+        distinctFolderIds.map((id) => getFolderChain(id)),
+      );
+
+      const allFolderIds = Array.from(
+        new Set(chains.flat().map((c) => c.id)),
+      );
+
+      const defs = await prisma.folderMetadataField.findMany({
+        where: { tenantId, folderId: { in: allFolderIds } },
+        select: {
+          folderId: true,
+          key: true,
+          type: true,
+          required: true,
+          recursive: true,
+        },
+      });
+
+      const defsByFolder = new Map<string, typeof defs>();
+      for (const d of defs) {
+        const arr = defsByFolder.get(d.folderId) ?? [];
+        arr.push(d);
+        defsByFolder.set(d.folderId, arr);
+      }
+
+      const metaRecords = await prisma.fileMetadata.findMany({
+        where: { fileId: { in: fileIds } },
+        select: { fileId: true, key: true, value: true },
+      });
+
+      const metaByFileKey = new Map<string, Map<string, string>>();
+      for (const m of metaRecords) {
+        const fId = m.fileId;
+        const keyLower = m.key.toLowerCase();
+        if (!metaByFileKey.has(fId)) metaByFileKey.set(fId, new Map());
+        metaByFileKey.get(fId)!.set(keyLower, m.value);
+      }
+
+      const requiredForFolder = new Map<
+        string,
+        Map<string, { required: boolean; type: string; key: string }>
+      >();
+
+      // Precompute required key sets per folderId (so files in same folder reuse).
+      for (const folderId of distinctFolderIds) {
+        const chain = await getFolderChain(folderId);
+        const keyToField = new Map<
+          string,
+          { required: boolean; type: string; key: string }
+        >();
+
+        for (const ref of chain) {
+          const folderDefs = defsByFolder.get(ref.id) ?? [];
+          for (const fd of folderDefs) {
+            if (!fd.required) continue;
+            if (!ref.isSelf && !fd.recursive) continue;
+            const lk = fd.key.toLowerCase();
+            if (keyToField.has(lk)) continue; // nearest wins
+            keyToField.set(lk, { required: true, type: fd.type, key: fd.key });
+          }
+        }
+        requiredForFolder.set(folderId, keyToField);
+      }
+
+      // Attach missing info into each file object.
+      for (const file of files) {
+        const folderId = file.folderId;
+        if (!folderId) {
+          (file as any).metaRequiredMissingCount = 0;
+          (file as any).metaRequiredMissingKeys = [];
+          continue;
+        }
+
+        const requiredKeyToField = requiredForFolder.get(folderId);
+        const requiredKeys = Array.from(requiredKeyToField?.keys() ?? []);
+        const metaForFile = metaByFileKey.get(file.id) ?? new Map<string, string>();
+        const missingKeys = requiredKeys.filter((k) => {
+          const v = metaForFile.get(k);
+          return !v || !String(v).trim();
+        });
+
+        (file as any).metaRequiredMissingCount = missingKeys.length;
+        (file as any).metaRequiredMissingKeys = missingKeys;
+      }
+    }
+
     res.json({ files });
   } catch (err) {
     console.error(err);
@@ -1800,6 +1921,90 @@ router.get(
       res.json({ metadata });
     } catch {
       res.status(500).json({ error: "Failed to fetch metadata" });
+    }
+  },
+);
+
+// ─── GET /api/files/:id/metadata-schema — applicable default fields ──────
+router.get(
+  "/:id/metadata-schema",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.id)) {
+      res.status(400).json({ error: "Invalid ID" });
+      return;
+    }
+    try {
+      const file = await prisma.file.findFirst({
+        where: { id: req.params.id, tenantId: req.user!.tenantId, isDeleted: false },
+        select: { id: true, folderId: true },
+      });
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+      if (!file.folderId) {
+        res.json({ folderId: null, fields: [] });
+        return;
+      }
+
+      // Walk up ancestors and collect folder metadata field definitions.
+      // For the file's own folder: include all fields.
+      // For ancestors: include only recursive fields.
+      const folderIds: { id: string; isSelf: boolean }[] = [];
+      let current: string | null = file.folderId;
+      let depth = 0;
+      while (current && depth < 50) {
+        folderIds.push({ id: current, isSelf: depth === 0 });
+        const parentFolder: { parentId: string | null } | null =
+          await prisma.folder.findFirst({
+          where: { id: current, tenantId: req.user!.tenantId, isDeleted: false },
+          select: { parentId: true },
+          });
+        current = parentFolder?.parentId ?? null;
+        depth++;
+      }
+
+      const defs = await prisma.folderMetadataField.findMany({
+        where: {
+          tenantId: req.user!.tenantId,
+          folderId: { in: folderIds.map((f) => f.id) },
+        },
+        select: { folderId: true, key: true, type: true, required: true, recursive: true },
+      });
+
+      const defsByFolder = new Map<string, typeof defs>();
+      for (const d of defs) {
+        const arr = defsByFolder.get(d.folderId) ?? [];
+        arr.push(d);
+        defsByFolder.set(d.folderId, arr);
+      }
+
+      // Nearest folder wins for duplicated keys.
+      const keyToField = new Map<
+        string,
+        { key: string; type: string; required: boolean }
+      >();
+
+      for (const folderRef of folderIds) {
+        const list = defsByFolder.get(folderRef.id) ?? [];
+        for (const f of list) {
+          if (!folderRef.isSelf && !f.recursive) continue;
+          if (keyToField.has(f.key.toLowerCase())) continue;
+          keyToField.set(f.key.toLowerCase(), {
+            key: f.key,
+            type: f.type,
+            required: f.required,
+          });
+        }
+      }
+
+      res.json({
+        folderId: file.folderId,
+        fields: Array.from(keyToField.values()),
+      });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch metadata schema" });
     }
   },
 );

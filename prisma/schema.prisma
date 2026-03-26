@@ -31,6 +31,7 @@ model Tenant {
   stripeSubscriptionId String?   // ← add
   guestAccesses        GuestAccess[]
   metadataTemplates    MetadataTemplate[]
+  metadataFolderFields FolderMetadataField[]
 }
 
 // ─── USER ────────────────────────────────────────────────────────────────────
@@ -125,6 +126,7 @@ model Folder {
 
   files        File[]
   permissions  Permission[]
+  metadataFields FolderMetadataField[]
 
   @@index([tenantId])
   @@index([tenantId, parentId])
@@ -404,4 +406,27 @@ model MetadataTemplateField {
 
   @@index([templateId])
   @@map("metadata_template_fields")
+}
+
+// ─── PER-FOLDER METADATA DEFAULT FIELDS (FolderIT parity) ────────────────────
+// Defines the default metadata schema for files inside a given folder.
+// If `recursive` is true, the field definition is also applied to descendant
+// folders for required-value checks and metadata editor rendering.
+model FolderMetadataField {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  folderId  String
+  folder    Folder   @relation(fields: [folderId], references: [id], onDelete: Cascade)
+
+  key       String
+  type      String   @default("text") // "text", "boolean", "date", "datetime", "number", ...
+  required  Boolean  @default(false)
+  recursive Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, folderId])
+  @@index([tenantId, key])
+  @@map("folder_metadata_fields")
 }

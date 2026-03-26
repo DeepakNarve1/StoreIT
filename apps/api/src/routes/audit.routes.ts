@@ -1,6 +1,8 @@
 import { Router, Response } from "express";
 import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
+import XLSX from "xlsx";
+import PDFDocument from "pdfkit";
 
 const router = Router();
 
@@ -114,7 +116,13 @@ router.get(
   requireRole("ORG_ADMIN", "SUPERADMIN"),
   async (req: AuthRequest, res: Response) => {
     try {
-      const { action, userId, resourceType, from, to } = req.query;
+      const { action, userId, resourceType, from, to, format } = req.query;
+      const exportFormat = String(format ?? "csv").toLowerCase();
+      const allowedFormats = new Set(["csv", "xlsx", "ods", "pdf"]);
+      if (!allowedFormats.has(exportFormat)) {
+        res.status(400).json({ error: "Unsupported export format" });
+        return;
+      }
 
       const where: any = { tenantId: req.user!.tenantId };
       if (action) where.action = action;
@@ -157,14 +165,71 @@ router.get(
       const csv = [header, ...rows]
         .map((row) => row.map(escape).join(","))
         .join("\n");
+      const datePart = new Date().toISOString().split("T")[0];
 
-      const filename = `audit-log-${new Date().toISOString().split("T")[0]}.csv`;
-      res.setHeader("Content-Type", "text/csv");
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="${filename}"`,
-      );
-      res.send(csv);
+      if (exportFormat === "csv") {
+        const filename = `audit-log-${datePart}.csv`;
+        res.setHeader("Content-Type", "text/csv");
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${filename}"`,
+        );
+        res.send(csv);
+        return;
+      }
+
+      if (exportFormat === "xlsx" || exportFormat === "ods") {
+        const worksheet = XLSX.utils.aoa_to_sheet([header, ...rows]);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Audit Log");
+        const bookType = exportFormat === "ods" ? "ods" : "xlsx";
+        const buffer = XLSX.write(workbook, { type: "buffer", bookType });
+        const filename = `audit-log-${datePart}.${bookType}`;
+        const contentType =
+          bookType === "ods"
+            ? "application/vnd.oasis.opendocument.spreadsheet"
+            : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        res.setHeader("Content-Type", contentType);
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${filename}"`,
+        );
+        res.send(buffer);
+        return;
+      }
+
+      const filename = `audit-log-${datePart}.pdf`;
+      const doc = new PDFDocument({ margin: 40, size: "A4" });
+      const chunks: Buffer[] = [];
+      doc.on("data", (chunk) => chunks.push(chunk as Buffer));
+      doc.on("error", () => {
+        res.status(500).json({ error: "Failed to generate PDF export" });
+      });
+      doc.fontSize(16).text("Audit Log Export", { underline: true });
+      doc.moveDown(0.5);
+      doc.fontSize(10).text(`Generated at: ${new Date().toISOString()}`);
+      doc.moveDown(1);
+      logs.forEach((log, index) => {
+        const line = [
+          `${index + 1}.`,
+          new Date(log.createdAt).toISOString(),
+          log.action,
+          log.user?.name ?? "System",
+          log.resourceType ?? "",
+          log.resourceName ?? "",
+          log.ipAddress ?? "",
+        ].join(" | ");
+        doc.fontSize(9).text(line, { width: 520 });
+        doc.moveDown(0.35);
+      });
+      doc.end();
+      await new Promise<void>((resolve) => {
+        doc.on("end", () => resolve());
+      });
+      const pdfBuffer = Buffer.concat(chunks);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(pdfBuffer);
     } catch (err) {
       res.status(500).json({ error: "Failed to export audit logs" });
     }
