@@ -975,6 +975,26 @@ export default function FileBrowserPage() {
       ? (folders.find((f) => f.id === selectedFolders[0]) ?? null)
       : null;
 
+  const canUseMetaToolbar = (() => {
+    // Bulk file metadata edit requires edit_metadata on all selected files.
+    if (selectedFiles.length > 1 && selectedFolders.length === 0) {
+      return selectedFiles.every((id) => fileCan(id, "edit_metadata"));
+    }
+    // Single file selection.
+    if (selectedFiles.length === 1 && singleSelectedFile) {
+      return fileCan(singleSelectedFile.id, "edit_metadata");
+    }
+    // Single folder selection.
+    if (selectedFolders.length === 1 && singleSelectedFolder) {
+      return folderCan(singleSelectedFolder.id, "edit_metadata");
+    }
+    // Folder context shortcut (no selection, browsing inside a folder).
+    if (!selectedFiles.length && !selectedFolders.length && folderId) {
+      return folderCan(folderId, "edit_metadata");
+    }
+    return false;
+  })();
+
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
@@ -1097,6 +1117,12 @@ export default function FileBrowserPage() {
     // Folder context shortcut:
     // when browsing inside a folder with no current selection, edit current folder metadata.
     if (!selectedFiles.length && !selectedFolders.length && folderId) {
+      if (!folderCan(folderId, "edit_metadata")) {
+        useToast
+          .getState()
+          .add("You don't have permission to edit folder metadata", "error");
+        return;
+      }
       const currentFolderName =
         ancestors.length > 0
           ? (ancestors[ancestors.length - 1]?.name ?? "Folder")
@@ -2110,13 +2136,15 @@ export default function FileBrowserPage() {
                 </>
               )}
             </div>
-            <button
-              onClick={handleMetaToolbar}
-              className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-primary-600 transition-colors"
-            >
-              <Database size={16} />
-              <span className="text-[10px] font-medium">Meta</span>
-            </button>
+            {canUseMetaToolbar && (
+              <button
+                onClick={handleMetaToolbar}
+                className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-primary-600 transition-colors"
+              >
+                <Database size={16} />
+                <span className="text-[10px] font-medium">Meta</span>
+              </button>
+            )}
             <button
               onClick={openRetentionToolbar}
               className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-primary-600 transition-colors"
