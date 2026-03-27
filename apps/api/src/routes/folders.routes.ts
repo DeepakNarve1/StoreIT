@@ -108,12 +108,67 @@ router.get(
       return;
     }
     try {
+      const { userId, tenantId, role } = req.user!;
+      const folder = await prisma.folder.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId,
+          isDeleted: false,
+        },
+        select: { id: true },
+      });
+      if (!folder) {
+        res.status(404).json({ error: "Folder not found" });
+        return;
+      }
+
+      const isPrivileged = PRIVILEGED.includes(role);
+      if (!isPrivileged) {
+        const canViewMetadata = await userHasCapability(
+          userId,
+          tenantId,
+          role,
+          "folder",
+          folder.id,
+          "view_metadata",
+        );
+        if (!canViewMetadata) {
+          const canSeeFolder = await userHasCapability(
+            userId,
+            tenantId,
+            role,
+            "folder",
+            folder.id,
+            "see_folders",
+          );
+          if (!canSeeFolder) {
+            res.status(403).json({ error: "Permission denied" });
+            return;
+          }
+        }
+      }
+
       const fields = await prisma.folderMetadataField.findMany({
         where: { folderId: req.params.id, tenantId: req.user!.tenantId },
         orderBy: { createdAt: "asc" },
-        select: { key: true, type: true, required: true, recursive: true },
+        select: {
+          key: true,
+          type: true,
+          required: true,
+          recursive: true,
+          options: true,
+        },
       });
-      res.json({ fields });
+      res.json({
+        fields: fields.map((f) => ({
+          ...f,
+          options: Array.isArray(f.options)
+            ? (f.options as unknown[]).filter(
+                (o): o is string => typeof o === "string",
+              )
+            : [],
+        })),
+      });
     } catch {
       res.status(500).json({ error: "Failed to fetch metadata fields" });
     }
@@ -124,7 +179,6 @@ router.get(
 router.put(
   "/:id/metadata-fields",
   verifyAuth,
-  requireRole("ORG_ADMIN", "MANAGER", "SUPERADMIN", "EDITOR"),
   async (req: AuthRequest, res: Response) => {
     if (!isValidUUID(req.params.id)) {
       res.status(400).json({ error: "Invalid folder ID" });
@@ -141,6 +195,7 @@ router.put(
             }),
             required: z.boolean(),
             recursive: z.boolean(),
+            options: z.array(z.string().min(1).max(100)).max(100).optional(),
           }),
         )
         .max(50),
@@ -163,6 +218,32 @@ router.put(
         return;
       }
 
+      const isPrivileged = PRIVILEGED.includes(req.user!.role);
+      if (!isPrivileged) {
+        const canEditMetadata = await userHasCapability(
+          req.user!.userId,
+          req.user!.tenantId,
+          req.user!.role,
+          "folder",
+          folder.id,
+          "edit_metadata",
+        );
+        if (!canEditMetadata) {
+          const canEditFolder = await userHasCapability(
+            req.user!.userId,
+            req.user!.tenantId,
+            req.user!.role,
+            "folder",
+            folder.id,
+            "edit_folders",
+          );
+          if (!canEditFolder) {
+            res.status(403).json({ error: "Permission denied" });
+            return;
+          }
+        }
+      }
+
       await prisma.$transaction([
         prisma.folderMetadataField.deleteMany({
           where: { folderId: req.params.id, tenantId: req.user!.tenantId },
@@ -176,6 +257,7 @@ router.put(
               type: f.type,
               required: f.required,
               recursive: f.recursive,
+              options: f.type === "list" ? (f.options ?? []) : [],
             },
           }),
         ),
@@ -262,7 +344,155 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
           : []
         : folders.filter((f) => visibleSet.has(f.id));
 
-    res.json({ folders: filtered });
+    // Recursive file count (include descendant folders).
+    const allTenantFolders = await prisma.folder.findMany({
+      where: { tenantId, isDeleted: false },
+      select: { id: true, parentId: true },
+    });
+    const allowedFolderIds = new Set(
+      PRIVILEGED.includes(role)
+        ? allTenantFolders.map((f) => f.id)
+        : allTenantFolders.filter((f) => visibleSet.has(f.id)).map((f) => f.id),
+    );
+
+    const childrenByParent = new Map<string | null, string[]>();
+    for (const f of allTenantFolders) {
+      if (!allowedFolderIds.has(f.id)) continue;
+      const arr = childrenByParent.get(f.parentId ?? null) ?? [];
+      arr.push(f.id);
+      childrenByParent.set(f.parentId ?? null, arr);
+    }
+
+    const perFolderFileCounts = await prisma.file.groupBy({
+      by: ["folderId"],
+      where: {
+        tenantId,
+        isDeleted: false,
+        folderId: { in: Array.from(allowedFolderIds) },
+      },
+      _count: { _all: true },
+    });
+    const directFileCountByFolder = new Map<string, number>();
+    for (const row of perFolderFileCounts) {
+      const folderId = row.folderId ?? "";
+      if (!folderId) continue;
+      directFileCountByFolder.set(folderId, row._count._all);
+    }
+
+    const totalMemo = new Map<string, number>();
+    const computeTotalFiles = (id: string): number => {
+      const memo = totalMemo.get(id);
+      if (memo !== undefined) return memo;
+      const direct = directFileCountByFolder.get(id) ?? 0;
+      const childIds = childrenByParent.get(id) ?? [];
+      const childSum = childIds.reduce(
+        (sum, cid) => sum + computeTotalFiles(cid),
+        0,
+      );
+      const total = direct + childSum;
+      totalMemo.set(id, total);
+      return total;
+    };
+
+    // Compute direct "files missing required metadata" per folder.
+    const allFiles = await prisma.file.findMany({
+      where: {
+        tenantId,
+        isDeleted: false,
+        folderId: { in: Array.from(allowedFolderIds) },
+      },
+      select: {
+        id: true,
+        folderId: true,
+        metadata: { select: { key: true } },
+      },
+    });
+
+    const defs = await prisma.folderMetadataField.findMany({
+      where: {
+        tenantId,
+        folderId: { in: Array.from(allowedFolderIds) },
+      },
+      select: { folderId: true, key: true, required: true, recursive: true },
+    });
+    const defsByFolder = new Map<string, typeof defs>();
+    for (const d of defs) {
+      const arr = defsByFolder.get(d.folderId) ?? [];
+      arr.push(d);
+      defsByFolder.set(d.folderId, arr);
+    }
+
+    const parentById = new Map(allTenantFolders.map((f) => [f.id, f.parentId]));
+    const requiredKeysMemo = new Map<string, Set<string>>();
+    const getRequiredKeysForFolder = (folderId: string) => {
+      const memo = requiredKeysMemo.get(folderId);
+      if (memo) return memo;
+      const refs: Array<{ id: string; isSelf: boolean }> = [];
+      let cur: string | null = folderId;
+      let depth = 0;
+      while (cur && depth < 80) {
+        refs.push({ id: cur, isSelf: depth === 0 });
+        cur = parentById.get(cur) ?? null;
+        depth++;
+      }
+      const keySet = new Set<string>();
+      for (const ref of refs) {
+        const list = defsByFolder.get(ref.id) ?? [];
+        for (const d of list) {
+          if (!d.required) continue;
+          if (!ref.isSelf && !d.recursive) continue;
+          const lk = d.key.toLowerCase();
+          if (!keySet.has(lk)) keySet.add(lk);
+        }
+      }
+      requiredKeysMemo.set(folderId, keySet);
+      return keySet;
+    };
+
+    const directMissingByFolder = new Map<string, number>();
+    for (const file of allFiles) {
+      if (!file.folderId) continue;
+      const reqKeys = getRequiredKeysForFolder(file.folderId);
+      if (reqKeys.size === 0) continue;
+      const have = new Set(
+        (file.metadata ?? []).map((m) => m.key.toLowerCase()),
+      );
+      let missing = false;
+      for (const k of reqKeys) {
+        if (!have.has(k)) {
+          missing = true;
+          break;
+        }
+      }
+      if (!missing) continue;
+      directMissingByFolder.set(
+        file.folderId,
+        (directMissingByFolder.get(file.folderId) ?? 0) + 1,
+      );
+    }
+
+    const missingMemo = new Map<string, number>();
+    const computeTotalMissingMeta = (id: string): number => {
+      const memo = missingMemo.get(id);
+      if (memo !== undefined) return memo;
+      const direct = directMissingByFolder.get(id) ?? 0;
+      const childIds = childrenByParent.get(id) ?? [];
+      const childSum = childIds.reduce(
+        (sum, cid) => sum + computeTotalMissingMeta(cid),
+        0,
+      );
+      const total = direct + childSum;
+      missingMemo.set(id, total);
+      return total;
+    };
+
+    const withRecursiveCounts = filtered.map((f) => ({
+      ...f,
+      totalFiles: computeTotalFiles(f.id),
+      totalMissingMeta: computeTotalMissingMeta(f.id),
+    }));
+
+    res.json({ folders: withRecursiveCounts });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch folders" });

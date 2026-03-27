@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
@@ -20,6 +20,8 @@ import {
   X,
   Check,
   Link2,
+  LayoutTemplate,
+  GripVertical,
 } from "lucide-react";
 import clsx from "clsx";
 import api from "../../api/axios";
@@ -51,7 +53,14 @@ const NAV_ITEMS = [
   { label: "Tags", icon: Tag, path: "/tags" },
   { label: "Trash", icon: Trash2, path: "/trash" },
   { label: "Shared Links", icon: Link2, path: "/admin/shared-links" },
+  {
+    label: "Templates",
+    icon: LayoutTemplate,
+    path: "/admin/templates",
+    adminOnly: true,
+  },
 ];
+const NAV_ORDER_KEY = "storeit_sidebar_nav_order_v1";
 
 // ─── Folder node (recursive) ──────────────────────────────────────────────────
 function FolderNode({
@@ -79,7 +88,7 @@ function FolderNode({
             ? "bg-pink-50 dark:bg-pink-900/20 text-primary-500 dark:text-pink-400 font-medium"
             : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white",
         )}
-        style={{ paddingLeft: `${12 + depth * 12}px`, paddingRight: 8 }}
+        style={{ paddingLeft: `${10 + depth * 10}px`, paddingRight: 6 }}
       >
         <button
           onClick={() => setExpanded((e) => !e)}
@@ -96,13 +105,13 @@ function FolderNode({
         </button>
         <button
           onClick={() => navigate(`/browse/${folder.id}`)}
-          className="flex items-center gap-2 flex-1 py-1.5 text-left min-w-0"
+          className="flex items-center gap-1.5 flex-1 py-1 text-left min-w-0 text-xs"
         >
           {isActive ? (
-            <FolderOpen size={14} className="shrink-0 text-primary-500" />
+            <FolderOpen size={13} className="shrink-0 text-primary-500" />
           ) : (
             <Folder
-              size={14}
+              size={13}
               className="shrink-0 text-gray-400 group-hover:text-gray-600"
             />
           )}
@@ -171,10 +180,10 @@ function CategoryNode({
         </button>
         <button
           onClick={() => navigate(`/category/${category.id}`)}
-          className="flex items-center gap-2 flex-1 py-1.5 text-left min-w-0"
+          className="flex items-center gap-1.5 flex-1 py-1 text-left min-w-0 text-xs"
         >
           <Hash
-            size={14}
+            size={13}
             className={clsx(
               "shrink-0",
               isActive
@@ -226,6 +235,83 @@ export default function Sidebar({ isOpen }: SidebarProps) {
   );
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [draggingNavPath, setDraggingNavPath] = useState<string | null>(null);
+  const [dragOverNavPath, setDragOverNavPath] = useState<string | null>(null);
+  const [navOrder, setNavOrder] = useState<string[]>(() => {
+    if (typeof window === "undefined") return NAV_ITEMS.map((i) => i.path);
+    try {
+      const raw = window.localStorage.getItem(NAV_ORDER_KEY);
+      if (!raw) return NAV_ITEMS.map((i) => i.path);
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return NAV_ITEMS.map((i) => i.path);
+      return parsed.filter((x): x is string => typeof x === "string");
+    } catch {
+      return NAV_ITEMS.map((i) => i.path);
+    }
+  });
+
+  useEffect(() => {
+    const defaults = NAV_ITEMS.map((i) => i.path);
+    setNavOrder((prev) => {
+      const known = new Set(defaults);
+      const cleaned = prev.filter((p) => known.has(p));
+      const missing = defaults.filter((p) => !cleaned.includes(p));
+      return [...cleaned, ...missing];
+    });
+  }, []);
+
+  const { data: sidebarPrefData } = useQuery({
+    queryKey: ["pref-sidebar-order"],
+    queryFn: async () => {
+      const res = await api.get("/preferences/sidebar-order");
+      return res.data as { order: string[] };
+    },
+  });
+  useEffect(() => {
+    if (!sidebarPrefData) return;
+    const remote = Array.isArray(sidebarPrefData.order)
+      ? sidebarPrefData.order.filter((x): x is string => typeof x === "string")
+      : [];
+    if (remote.length > 0) setNavOrder(remote);
+  }, [sidebarPrefData]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(NAV_ORDER_KEY, JSON.stringify(navOrder));
+  }, [navOrder]);
+
+  const orderedNavItems = useMemo(() => {
+    const byPath = new Map(NAV_ITEMS.map((i) => [i.path, i]));
+    const ordered: typeof NAV_ITEMS = [];
+    navOrder.forEach((path) => {
+      const item = byPath.get(path);
+      if (item) ordered.push(item);
+    });
+    NAV_ITEMS.forEach((item) => {
+      if (!ordered.some((x) => x.path === item.path)) ordered.push(item);
+    });
+    return ordered;
+  }, [navOrder]);
+
+  const reorderNav = (fromPath: string, toPath: string) => {
+    if (!fromPath || !toPath || fromPath === toPath) return;
+    setNavOrder((prev) => {
+      const base = prev.length ? [...prev] : NAV_ITEMS.map((i) => i.path);
+      const fromIdx = base.indexOf(fromPath);
+      const toIdx = base.indexOf(toPath);
+      if (fromIdx < 0 || toIdx < 0) return prev;
+      const [moved] = base.splice(fromIdx, 1);
+      base.splice(toIdx, 0, moved);
+      saveSidebarOrder.mutate(base);
+      return base;
+    });
+  };
+
+  const saveSidebarOrder = useMutation({
+    mutationFn: async (order: string[]) => {
+      await api.put("/preferences/sidebar-order", { order });
+    },
+  });
 
   // Fetch folders
   const { data: foldersData, isLoading: foldersLoading } = useQuery({
@@ -299,7 +385,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
   if (!isOpen) return null;
 
   return (
-    <aside className="w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col h-full shrink-0">
+    <aside className="w-60 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col h-full shrink-0">
       {/* Brand / Tenant Info */}
       <div className="h-16 flex flex-col justify-center px-4 border-b border-gray-200 dark:border-gray-800 shrink-0">
         <div className="flex items-center gap-2">
@@ -331,7 +417,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
               className={clsx(
                 "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors mb-0.5",
                 location.pathname === "/"
-                  ? "bg-pink-50 dark:bg-pink-900/20 text-primary-500 dark:text-pink-400 font-medium"
+                  ? "bg-pink-50 dark:bg-pink-900/20 text-primary-500 dark:text-pink-400 font-medium font"
                   : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white",
               )}
             >
@@ -339,34 +425,83 @@ export default function Sidebar({ isOpen }: SidebarProps) {
               Dashboard
             </button>
           )}
-          {NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            const isActive =
-              item.path === "/"
-                ? location.pathname === "/"
-                : location.pathname.startsWith(item.path);
-            return (
-              <button
-                key={item.path}
-                onClick={() => navigate(item.path)}
-                className={clsx(
-                  "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors mb-0.5",
-                  isActive
-                    ? "bg-pink-50 dark:bg-pink-900/20 text-primary-500 dark:text-pink-400 font-medium"
-                    : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white",
-                )}
-              >
-                <Icon size={16} />
-                {item.label}
-              </button>
-            );
-          })}
+          {orderedNavItems
+            .filter(
+              (item: any) =>
+                !item.adminOnly ||
+                ["ORG_ADMIN", "SUPERADMIN"].includes(user?.role ?? ""),
+            )
+            .map((item) => {
+              const Icon = item.icon;
+              const isActive =
+                item.path === "/"
+                  ? location.pathname === "/"
+                  : location.pathname.startsWith(item.path);
+              return (
+                <div
+                  key={item.path}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDragEnter={() => setDragOverNavPath(item.path)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const fromPath = e.dataTransfer.getData(
+                      "text/storeit-nav-path",
+                    );
+                    reorderNav(fromPath, item.path);
+                    setDragOverNavPath(null);
+                    setDraggingNavPath(null);
+                  }}
+                  className={clsx(
+                    "group rounded-lg transition-all duration-200",
+                    dragOverNavPath === item.path &&
+                      draggingNavPath !== item.path &&
+                      "bg-gray-100 dark:bg-gray-800/70",
+                    draggingNavPath === item.path &&
+                      "opacity-70 scale-[0.99] shadow-sm",
+                  )}
+                >
+                  <button
+                    onClick={() => navigate(item.path)}
+                    className={clsx(
+                      "w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-all duration-200 mb-0.5",
+                      isActive
+                        ? "bg-pink-50 dark:bg-pink-900/20 text-primary-500 dark:text-pink-400 font-medium"
+                        : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white",
+                      draggingNavPath === item.path && "cursor-grabbing",
+                    )}
+                  >
+                    <span
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData(
+                          "text/storeit-nav-path",
+                          item.path,
+                        );
+                        setDraggingNavPath(item.path);
+                      }}
+                      onDragEnd={() => {
+                        setDraggingNavPath(null);
+                        setDragOverNavPath(null);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing text-gray-400 dark:text-gray-500"
+                      title="Drag to reorder"
+                    >
+                      <GripVertical size={14} />
+                    </span>
+                    <Icon size={14} />
+                    {item.label}
+                  </button>
+                </div>
+              );
+            })}
         </div>
 
         {/* ── CATEGORIES ─────────────────────────────────────────────── */}
         <div className="px-4 mb-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+            <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">
               By Category
             </span>
             {canWrite && (
@@ -463,7 +598,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
         {/* ── FOLDERS ────────────────────────────────────────────────── */}
         <div className="px-4 mb-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+            <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">
               Folders
             </span>
             {canWrite && (
@@ -514,40 +649,40 @@ export default function Sidebar({ isOpen }: SidebarProps) {
         {user?.role === "SUPERADMIN" && (
           <button
             onClick={() => navigate("/superadmin/orgs")}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs
                text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors font-medium"
           >
-            <Shield size={16} />
+            <Shield size={14} />
             <span>Superadmin</span>
           </button>
         )}
         {(user?.role === "ORG_ADMIN" || user?.role === "SUPERADMIN") && (
           <button
             onClick={() => navigate("/admin/users")}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs
                      text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors"
           >
-            <Users size={16} />
+            <Users size={14} />
             <span>User Management</span>
           </button>
         )}
         {(user?.role === "ORG_ADMIN" || user?.role === "SUPERADMIN") && (
           <button
             onClick={() => navigate("/billing")}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs
                text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors"
           >
-            <CreditCard size={16} />
+            <CreditCard size={14} />
             <span>Billing</span>
           </button>
         )}
         {(user?.role === "ORG_ADMIN" || user?.role === "SUPERADMIN") && (
           <button
             onClick={() => navigate("/admin/audit")}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs
                text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors"
           >
-            <Activity size={16} />
+            <Activity size={14} />
             <span>Audit Log</span>
           </button>
         )}
@@ -555,23 +690,23 @@ export default function Sidebar({ isOpen }: SidebarProps) {
           <button
             onClick={() => navigate("/admin/permissions")}
             className={clsx(
-              "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors",
+              "w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors",
               location.pathname === "/admin/permissions"
                 ? "bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 font-medium"
                 : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white",
             )}
           >
-            <Shield size={16} />
+            <Shield size={14} />
             <span>Permissions</span>
           </button>
         )}
         {(user?.role === "ORG_ADMIN" || user?.role === "SUPERADMIN") && (
           <button
             onClick={() => navigate("/admin/settings")}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs
                      text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white transition-colors"
           >
-            <Settings size={16} />
+            <Settings size={14} />
             <span>Settings</span>
           </button>
         )}

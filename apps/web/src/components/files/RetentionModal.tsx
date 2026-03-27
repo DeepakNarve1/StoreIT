@@ -35,7 +35,11 @@ const RETENTION_PRESETS: Array<{
   { label: "Custom date", value: "custom", untilType: "custom" },
 ];
 
-const REMINDER_PRESETS: Array<{ label: string; value: string; untilType?: "none" | "custom" }> = [
+const REMINDER_PRESETS: Array<{
+  label: string;
+  value: string;
+  untilType?: "none" | "custom";
+}> = [
   { label: "None", value: "none", untilType: "none" },
   { label: "1 day before", value: "1d", untilType: "none" },
   { label: "3 days before", value: "3d", untilType: "none" },
@@ -255,4 +259,3 @@ export default function RetentionModal({
     </div>
   );
 }
-

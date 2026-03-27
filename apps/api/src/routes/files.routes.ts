@@ -110,14 +110,14 @@ function isBlockedByLock(
   file: { isLocked: boolean; lockedById: string | null },
   userId: string,
   role: string,
-  action?: "delete" | "edit"
+  action?: "delete" | "edit",
 ): boolean {
   if (!file.isLocked) return false;
   const isPrivileged = ["SUPERADMIN", "ORG_ADMIN", "MANAGER"].includes(role);
   if (isPrivileged) return false;
-  
+
   if (action === "delete") return true; // Locker cannot bypass lock for delete.
-  
+
   if (file.lockedById === userId) return false;
   return true;
 }
@@ -321,9 +321,9 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
           chain.push({ id: current, isSelf: depth === 0 });
           const parentFolder: { parentId: string | null } | null =
             await prisma.folder.findFirst({
-            where: { id: current, tenantId },
-            select: { parentId: true },
-          });
+              where: { id: current, tenantId },
+              select: { parentId: true },
+            });
           current = parentFolder?.parentId ?? null;
           depth++;
         }
@@ -335,9 +335,7 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
         distinctFolderIds.map((id) => getFolderChain(id)),
       );
 
-      const allFolderIds = Array.from(
-        new Set(chains.flat().map((c) => c.id)),
-      );
+      const allFolderIds = Array.from(new Set(chains.flat().map((c) => c.id)));
 
       let defs: Array<{
         folderId: string;
@@ -420,7 +418,8 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
 
         const requiredKeyToField = requiredForFolder.get(folderId);
         const requiredKeys = Array.from(requiredKeyToField?.keys() ?? []);
-        const metaForFile = metaByFileKey.get(file.id) ?? new Map<string, string>();
+        const metaForFile =
+          metaByFileKey.get(file.id) ?? new Map<string, string>();
         const missingKeys = requiredKeys.filter((k) => {
           const v = metaForFile.get(k);
           return !v || !String(v).trim();
@@ -470,7 +469,7 @@ router.post(
           role,
           "folder",
           folderId,
-          "add_files"
+          "add_files",
         );
         const perm = await prisma.permission.findFirst({
           where: {
@@ -482,7 +481,8 @@ router.post(
             ],
           },
         });
-        const hasCoarseWrite = perm && ["write", "delete", "admin"].includes(perm.action);
+        const hasCoarseWrite =
+          perm && ["write", "delete", "admin"].includes(perm.action);
 
         if (!canDropFiles && !hasCoarseWrite) {
           res
@@ -573,6 +573,24 @@ router.post(
             code: "FILE_LOCKED",
           });
           return;
+        }
+
+        // Version safety guard: keep file type consistent across versions.
+        // Prevents cases like uploading a PDF over an existing PNG file name.
+        if (existingFile) {
+          const currentMime = String(existingFile.mimeType || "")
+            .toLowerCase()
+            .split(";")[0];
+          const incomingMime = String(file.mimetype || "")
+            .toLowerCase()
+            .split(";")[0];
+          if (currentMime && incomingMime && currentMime !== incomingMime) {
+            res.status(400).json({
+              error: `Version type mismatch for "${safeName}". Existing type is ${currentMime}, incoming is ${incomingMime}.`,
+              code: "VERSION_TYPE_MISMATCH",
+            });
+            return;
+          }
         }
 
         await uploadFile(storageKey, file.buffer, file.mimetype);
@@ -897,9 +915,7 @@ router.post(
       const isLockPrivileged = ["SUPERADMIN", "ORG_ADMIN", "MANAGER"].includes(
         role,
       );
-      const blocked = lockedFiles.filter(
-        (f) => !isLockPrivileged,
-      );
+      const blocked = lockedFiles.filter((f) => !isLockPrivileged);
       if (blocked.length > 0) {
         res.status(423).json({
           error: `${blocked.length} file(s) are locked and cannot be deleted.`,
@@ -1301,6 +1317,75 @@ router.get(
       res.json({ versions: allVersions, currentVersion: file.version });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch versions" });
+    }
+  },
+);
+
+router.get(
+  "/:id/versions/:versionId/view",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.id) || !isValidUUID(req.params.versionId)) {
+      res.status(400).json({ error: "Invalid ID" });
+      return;
+    }
+    try {
+      const { userId, tenantId, role } = req.user!;
+      const file = await prisma.file.findFirst({
+        where: { id: req.params.id, tenantId, isDeleted: false },
+      });
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      const canAccess = await userCanAccessFile(
+        file.id,
+        userId,
+        tenantId,
+        role,
+        file.uploadedById,
+      );
+      if (!canAccess) {
+        res.status(403).json({ error: "Access denied" });
+        return;
+      }
+
+      const versionRecord = await prisma.fileVersion.findFirst({
+        where: { id: req.params.versionId, fileId: file.id },
+        select: {
+          id: true,
+          version: true,
+          storageKey: true,
+        },
+      });
+      if (!versionRecord) {
+        res.status(404).json({ error: "Version not found" });
+        return;
+      }
+
+      const viewUrl = await getFileViewUrl(
+        versionRecord.storageKey,
+        SIGNED_URL_TTL.VIEW,
+      );
+      await createAuditLog({
+        action: "file.view",
+        userId,
+        tenantId,
+        resourceType: "file",
+        resourceId: file.id,
+        resourceName: file.name,
+        metadata: { version: versionRecord.version },
+        req,
+      });
+      res.json({
+        viewUrl,
+        version: versionRecord.version,
+        name: file.name,
+        mimeType: file.mimeType,
+      });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to open version" });
     }
   },
 );
@@ -1852,7 +1937,9 @@ router.delete(
       }
 
       // ── LOCK GUARD ────────────────────────────────────────────────────────
-      if (isBlockedByLock(file as any, req.user!.userId, req.user!.role, "delete")) {
+      if (
+        isBlockedByLock(file as any, req.user!.userId, req.user!.role, "delete")
+      ) {
         res.status(423).json({
           error: "File is locked and cannot be permanently deleted.",
           code: "FILE_LOCKED",
@@ -1927,6 +2014,39 @@ router.get(
         res.status(404).json({ error: "File not found" });
         return;
       }
+      const fileForPerm = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+        select: { id: true, uploadedById: true },
+      });
+      if (!fileForPerm) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+      const isPrivileged = [
+        "SUPERADMIN",
+        "ORG_ADMIN",
+        "MANAGER",
+        "EDITOR",
+      ].includes(req.user!.role);
+      if (!isPrivileged) {
+        const canViewMetadata = await userHasCapability(
+          req.user!.userId,
+          req.user!.tenantId,
+          req.user!.role,
+          "file",
+          fileForPerm.id,
+          "view_metadata",
+        );
+        if (!canViewMetadata) {
+          res.status(403).json({ error: "Permission denied" });
+          return;
+        }
+      }
+
       const metadata = await prisma.fileMetadata.findMany({
         where: { fileId: req.params.id },
         orderBy: { createdAt: "asc" },
@@ -1934,6 +2054,78 @@ router.get(
       res.json({ metadata });
     } catch {
       res.status(500).json({ error: "Failed to fetch metadata" });
+    }
+  },
+);
+
+router.get(
+  "/:id/metadata-history",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    if (!isValidUUID(req.params.id)) {
+      res.status(400).json({ error: "Invalid ID" });
+      return;
+    }
+    try {
+      const file = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+        select: { id: true },
+      });
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+      const fileForPerm = await prisma.file.findFirst({
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+        select: { id: true, uploadedById: true },
+      });
+      if (!fileForPerm) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+      const isPrivileged = [
+        "SUPERADMIN",
+        "ORG_ADMIN",
+        "MANAGER",
+        "EDITOR",
+      ].includes(req.user!.role);
+      if (!isPrivileged) {
+        const canViewMetadata = await userHasCapability(
+          req.user!.userId,
+          req.user!.tenantId,
+          req.user!.role,
+          "file",
+          fileForPerm.id,
+          "view_metadata",
+        );
+        if (!canViewMetadata) {
+          res.status(403).json({ error: "Permission denied" });
+          return;
+        }
+      }
+
+      const logs = await prisma.auditLog.findMany({
+        where: {
+          tenantId: req.user!.tenantId,
+          resourceType: "file",
+          resourceId: req.params.id,
+          action: { in: ["file.metadata.update", "file.metadata.bulk_update"] },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 30,
+        include: { user: { select: { id: true, name: true, email: true } } },
+      });
+      res.json({ logs });
+    } catch {
+      res.status(500).json({ error: "Failed to fetch metadata history" });
     }
   },
 );
@@ -1949,13 +2141,38 @@ router.get(
     }
     try {
       const file = await prisma.file.findFirst({
-        where: { id: req.params.id, tenantId: req.user!.tenantId, isDeleted: false },
-        select: { id: true, folderId: true },
+        where: {
+          id: req.params.id,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+        select: { id: true, folderId: true, uploadedById: true },
       });
       if (!file) {
         res.status(404).json({ error: "File not found" });
         return;
       }
+      const isPrivileged = [
+        "SUPERADMIN",
+        "ORG_ADMIN",
+        "MANAGER",
+        "EDITOR",
+      ].includes(req.user!.role);
+      if (!isPrivileged) {
+        const canViewMetadata = await userHasCapability(
+          req.user!.userId,
+          req.user!.tenantId,
+          req.user!.role,
+          "file",
+          file.id,
+          "view_metadata",
+        );
+        if (!canViewMetadata) {
+          res.status(403).json({ error: "Permission denied" });
+          return;
+        }
+      }
+
       if (!file.folderId) {
         res.json({ folderId: null, fields: [] });
         return;
@@ -1971,8 +2188,12 @@ router.get(
         folderIds.push({ id: current, isSelf: depth === 0 });
         const parentFolder: { parentId: string | null } | null =
           await prisma.folder.findFirst({
-          where: { id: current, tenantId: req.user!.tenantId, isDeleted: false },
-          select: { parentId: true },
+            where: {
+              id: current,
+              tenantId: req.user!.tenantId,
+              isDeleted: false,
+            },
+            select: { parentId: true },
           });
         current = parentFolder?.parentId ?? null;
         depth++;
@@ -1983,7 +2204,14 @@ router.get(
           tenantId: req.user!.tenantId,
           folderId: { in: folderIds.map((f) => f.id) },
         },
-        select: { folderId: true, key: true, type: true, required: true, recursive: true },
+        select: {
+          folderId: true,
+          key: true,
+          type: true,
+          required: true,
+          recursive: true,
+          options: true,
+        },
       });
 
       const defsByFolder = new Map<string, typeof defs>();
@@ -1996,7 +2224,7 @@ router.get(
       // Nearest folder wins for duplicated keys.
       const keyToField = new Map<
         string,
-        { key: string; type: string; required: boolean }
+        { key: string; type: string; required: boolean; options?: string[] }
       >();
 
       for (const folderRef of folderIds) {
@@ -2008,6 +2236,7 @@ router.get(
             key: f.key,
             type: f.type,
             required: f.required,
+            options: Array.isArray(f.options) ? (f.options as string[]) : [],
           });
         }
       }
@@ -2063,26 +2292,46 @@ router.put(
       ].includes(req.user!.role);
 
       if (!isPrivileged) {
-        const canEditAttrs = await userHasCapability(
+        const canEditMetadata = await userHasCapability(
           req.user!.userId,
           req.user!.tenantId,
           req.user!.role,
           "file",
           file.id,
-          "edit_file_attrs"
+          "edit_metadata",
         );
-        if (!canEditAttrs) {
+        if (!canEditMetadata) {
           const hasCoarseWrite = await userHasFilePermission(
             file.id,
             req.user!.userId,
             file.uploadedById,
             req.user!.role,
-            "write"
+            "write",
           );
           if (!hasCoarseWrite) {
             res.status(403).json({ error: "Permission denied" });
             return;
           }
+        }
+      }
+
+      const oldMeta = await prisma.fileMetadata.findMany({
+        where: { fileId: req.params.id },
+        select: { key: true, value: true },
+      });
+      const oldByKey = new Map(oldMeta.map((m) => [m.key.toLowerCase(), m]));
+      const newByKey = new Map(fields.map((f) => [f.key.toLowerCase(), f]));
+      const allKeys = new Set([...oldByKey.keys(), ...newByKey.keys()]);
+      const changes: Array<{ key: string; before: string; after: string }> = [];
+      for (const lk of allKeys) {
+        const before = oldByKey.get(lk)?.value ?? "";
+        const after = newByKey.get(lk)?.value ?? "";
+        if (before !== after) {
+          changes.push({
+            key: newByKey.get(lk)?.key ?? oldByKey.get(lk)?.key ?? lk,
+            before,
+            after,
+          });
         }
       }
 
@@ -2094,6 +2343,20 @@ router.put(
           }),
         ),
       ]);
+      await createAuditLog({
+        action: "file.metadata.update",
+        userId: req.user!.userId,
+        tenantId: req.user!.tenantId,
+        resourceType: "file",
+        resourceId: file.id,
+        resourceName: file.name,
+        metadata: {
+          fieldCount: fields.length,
+          keys: fields.map((f) => f.key),
+          changes: changes.slice(0, 30),
+        },
+        req,
+      });
       res.json({ message: "Metadata updated" });
     } catch (err: any) {
       if (err.name === "ZodError") {
@@ -2101,6 +2364,145 @@ router.put(
         return;
       }
       res.status(500).json({ error: "Failed to update metadata" });
+    }
+  },
+);
+
+// ─── POST /api/files/bulk-metadata — apply metadata to many files ───────────
+router.post(
+  "/bulk-metadata",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { ids, fields } = z
+        .object({
+          ids: z.array(z.string().uuid()).min(1).max(200),
+          fields: z
+            .array(
+              z.object({
+                key: z.string().min(1).max(100),
+                value: z.string().max(500),
+              }),
+            )
+            .min(1)
+            .max(20),
+        })
+        .parse(req.body);
+
+      const tenantId = req.user!.tenantId;
+      const userId = req.user!.userId;
+      const role = req.user!.role;
+      const isPrivileged = [
+        "SUPERADMIN",
+        "ORG_ADMIN",
+        "MANAGER",
+        "EDITOR",
+      ].includes(role);
+
+      const files = await prisma.file.findMany({
+        where: { tenantId, isDeleted: false, id: { in: ids } },
+        select: { id: true, name: true, uploadedById: true },
+      });
+
+      const fileById = new Map(files.map((f) => [f.id, f]));
+      const uniqueFields = fields.filter(
+        (f, i, arr) =>
+          arr.findIndex((x) => x.key.toLowerCase() === f.key.toLowerCase()) ===
+          i,
+      );
+      const keys = uniqueFields.map((f) => f.key);
+
+      let updatedCount = 0;
+      const deniedIds: string[] = [];
+      const missingIds: string[] = [];
+
+      for (const id of ids) {
+        const file = fileById.get(id);
+        if (!file) {
+          missingIds.push(id);
+          continue;
+        }
+
+        let allowed = true;
+        if (!isPrivileged) {
+          const canEditMetadata = await userHasCapability(
+            userId,
+            tenantId,
+            role,
+            "file",
+            id,
+            "edit_metadata",
+          );
+          if (!canEditMetadata) {
+            const hasCoarseWrite = await userHasFilePermission(
+              id,
+              userId,
+              file.uploadedById,
+              role,
+              "write",
+            );
+            allowed = hasCoarseWrite;
+          }
+        }
+        if (!allowed) {
+          deniedIds.push(id);
+          continue;
+        }
+
+        const existingForKeys = await prisma.fileMetadata.findMany({
+          where: { fileId: id, key: { in: keys } },
+          select: { key: true, value: true },
+        });
+        const existingByLower = new Map(
+          existingForKeys.map((m) => [m.key.toLowerCase(), m.value]),
+        );
+        const changes = uniqueFields
+          .map((f) => ({
+            key: f.key,
+            before: existingByLower.get(f.key.toLowerCase()) ?? "",
+            after: f.value,
+          }))
+          .filter((c) => c.before !== c.after);
+
+        await prisma.$transaction([
+          prisma.fileMetadata.deleteMany({
+            where: { fileId: id, key: { in: keys } },
+          }),
+          ...uniqueFields.map((f) =>
+            prisma.fileMetadata.create({
+              data: { fileId: id, key: f.key, value: f.value },
+            }),
+          ),
+        ]);
+
+        await createAuditLog({
+          action: "file.metadata.bulk_update",
+          userId: req.user!.userId,
+          tenantId: req.user!.tenantId,
+          resourceType: "file",
+          resourceId: id,
+          resourceName: file.name,
+          metadata: { fieldCount: uniqueFields.length, keys, changes },
+          req,
+        });
+
+        updatedCount++;
+      }
+
+      res.json({
+        message: "Bulk metadata applied",
+        updatedCount,
+        deniedCount: deniedIds.length,
+        missingCount: missingIds.length,
+        deniedIds,
+        missingIds,
+      });
+    } catch (err: any) {
+      if (err?.name === "ZodError") {
+        res.status(400).json({ error: "Invalid input" });
+        return;
+      }
+      res.status(500).json({ error: "Failed to apply bulk metadata" });
     }
   },
 );
@@ -2243,7 +2645,7 @@ router.post(
           req.user!.role,
           "file",
           file.id,
-          "edit_file_attrs"
+          "edit_file_attrs",
         );
         if (!canEditAttrs) {
           const hasCoarseWrite = await userHasFilePermission(
@@ -2251,7 +2653,7 @@ router.post(
             req.user!.userId,
             file.uploadedById,
             req.user!.role,
-            "write"
+            "write",
           );
           if (!hasCoarseWrite) {
             res.status(403).json({ error: "Permission denied" });

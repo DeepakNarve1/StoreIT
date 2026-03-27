@@ -111,7 +111,7 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
         {canWrite && (
           <button
             onClick={handleUpload}
-            className="flex items-center gap-1.5 bg-primary-500 hover:bg-primary-600
+            className="flex items-center gap-1.5 bg-primary-600 hover:bg-primary-500
                        text-white text-sm font-medium px-3 py-1.5 rounded-lg transition-colors"
           >
             <Upload size={15} />
@@ -192,7 +192,7 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
                        pl-1 pr-2 py-1 rounded-lg transition-colors"
           >
             <div
-              className="w-7 h-7 bg-primary-500 rounded-full flex items-center
+              className="w-7 h-7 bg-primary-600 rounded-full flex items-center
                             justify-center text-white text-xs font-semibold shrink-0"
             >
               {getInitials(user?.name || "U")}

@@ -27,12 +27,14 @@ type FolderField = {
   type: FieldType;
   required: boolean;
   recursive: boolean;
+  options?: string[];
 };
 
 type Props = {
   folderId: string;
   folderName: string;
   onClose: () => void;
+  variant?: "sidebar" | "page";
 };
 
 const TYPE_OPTIONS: Array<{ value: FieldType; label: string }> = [
@@ -52,6 +54,7 @@ export default function FolderMetadataPanel({
   folderId,
   folderName,
   onClose,
+  variant = "sidebar",
 }: Props) {
   const queryClient = useQueryClient();
   const { add } = useToast();
@@ -114,6 +117,7 @@ export default function FolderMetadataPanel({
         type: fromTemplate.type,
         required: false,
         recursive: false,
+        options: [],
       },
     ]);
   };
@@ -124,18 +128,34 @@ export default function FolderMetadataPanel({
     if (fields.some((f) => f.key.trim().toLowerCase() === kLower)) return;
     setFields([
       ...fields,
-      { key, type, required: false, recursive: false },
+      {
+        key,
+        type,
+        required: false,
+        recursive: false,
+        options: type === "list" ? newFieldOptions.map((x) => x.trim()).filter(Boolean) : [],
+      },
     ]);
   };
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      const invalidListFields = fields.filter(
+        (f) => f.type === "list" && (f.options ?? []).length === 0,
+      );
+      if (invalidListFields.length > 0) {
+        throw new Error("LIST_OPTIONS_REQUIRED");
+      }
       await api.put(`/folders/${folderId}/metadata-fields`, {
         fields: fields.map((f) => ({
           key: f.key,
           type: f.type,
           required: f.required,
           recursive: f.recursive,
+          options:
+            f.type === "list"
+              ? (f.options ?? []).map((x) => x.trim()).filter(Boolean)
+              : [],
         })),
       });
     },
@@ -152,11 +172,18 @@ export default function FolderMetadataPanel({
       add("Default metadata saved", "success");
       onClose();
     },
-    onError: () => add("Failed to save metadata", "error"),
+    onError: (err: any) => {
+      if (err?.message === "LIST_OPTIONS_REQUIRED") {
+        add("List fields must include options", "error");
+        return;
+      }
+      add("Failed to save metadata", "error");
+    },
   });
 
   const [newFieldName, setNewFieldName] = useState("");
   const [newFieldType, setNewFieldType] = useState<FieldType>("text");
+  const [newFieldOptions, setNewFieldOptions] = useState<string[]>([""]);
 
   const existingFieldsList = useMemo(() => {
     const seen = new Set<string>();
@@ -176,8 +203,12 @@ export default function FolderMetadataPanel({
 
   return (
     <div
-      className="flex flex-col border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 w-80 shrink-0 rounded-r-xl overflow-hidden"
-      style={{ borderLeft: "none" }}
+      className={
+        variant === "page"
+          ? "flex flex-col border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 w-full max-w-5xl mx-auto rounded-xl overflow-hidden min-h-[70vh]"
+          : "flex flex-col border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 w-80 shrink-0 rounded-r-xl overflow-hidden"
+      }
+      style={variant === "page" ? undefined : { borderLeft: "none" }}
     >
       <div className="flex items-center gap-2.5 px-4 py-3.5 border-b border-gray-100 dark:border-gray-800 shrink-0">
         <div className="w-7 h-7 bg-purple-50 dark:bg-purple-900/30 rounded-lg flex items-center justify-center shrink-0">
@@ -190,6 +221,17 @@ export default function FolderMetadataPanel({
           <p className="text-xs text-gray-400 truncate" title={folderName}>
             {`in folder "${folderName}"`}
           </p>
+          <div className="mt-1 flex items-center gap-2 text-[10px]">
+            <span className="px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+              {fields.length} field{fields.length !== 1 ? "s" : ""}
+            </span>
+            <span className="px-1.5 py-0.5 rounded-full bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-300">
+              {fields.filter((f) => f.required).length} required
+            </span>
+            <span className="px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300">
+              {fields.filter((f) => f.recursive).length} recursive
+            </span>
+          </div>
         </div>
         <button
           onClick={onClose}
@@ -201,9 +243,24 @@ export default function FolderMetadataPanel({
 
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800 shrink-0">
         <div className="text-[11px] text-gray-500 dark:text-gray-400">
-          Required (optional), Recursive (subfolders)
+          Configure defaults, and choose which fields apply recursively.
         </div>
-        <div />
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setShowExistingPicker(true)}
+            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+            title="Add from existing metadata fields"
+          >
+            <Plus size={12} /> Add existing
+          </button>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md bg-purple-600 text-white hover:bg-purple-700 dark:bg-purple-500 dark:hover:bg-purple-600"
+            title="Create a new metadata field"
+          >
+            <Plus size={12} /> New field
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -212,53 +269,56 @@ export default function FolderMetadataPanel({
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto px-4 py-3 min-h-0">
-          <div className="grid grid-cols-12 gap-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
-            <div className="col-span-6 flex items-center gap-2">
-              <span>Name</span>
-              <button
-                onClick={() => setShowExistingPicker(true)}
-                className="ml-auto p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-purple-600 dark:text-purple-400"
-                title="Add from existing metadata fields"
-              >
-                <Plus size={14} />
-              </button>
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-purple-600 dark:text-purple-400"
-                title="Create a new metadata field"
-              >
-                <Plus size={14} />
-              </button>
-            </div>
-            <div className="col-span-3">Required</div>
-            <div className="col-span-3">Recursive</div>
+          <div className="grid grid-cols-12 gap-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2 px-1">
+            <div className="col-span-6">Field</div>
+            <div className="col-span-2 text-center">Required</div>
+            <div className="col-span-2 text-center">Recursive</div>
+            <div className="col-span-2 text-right">Action</div>
           </div>
 
           <div className="space-y-2">
             {fields.length === 0 ? (
-              <div className="text-xs text-gray-500 dark:text-gray-400 py-6 text-center">
-                No default metadata fields yet. Use the + buttons above.
+              <div className="text-xs text-gray-500 dark:text-gray-400 py-8 text-center border border-dashed border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50/60 dark:bg-gray-800/30">
+                No default metadata fields yet. Use "Add existing" or "New field".
               </div>
             ) : (
               fields.map((f, idx) => {
                 return (
                   <div
-                    key={`${f.key}-${idx}`}
-                    className="grid grid-cols-12 gap-2 items-center"
+                    key={idx}
+                    className="grid grid-cols-12 gap-2 items-start rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-2"
                   >
-                    <div className="col-span-6">
+                    <div className="col-span-6 min-w-0">
                       <input
                         value={f.key}
                         readOnly
                         disabled
-                        className="w-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded-lg px-2 py-1.5 text-xs cursor-not-allowed"
+                        className="w-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 rounded-lg px-2 py-1.5 text-xs cursor-not-allowed font-medium"
                       />
                       <div className="text-[10px] text-gray-400 mt-1">
-                        {f.type}
+                        Type: {f.type}
                       </div>
+                      {f.type === "list" && (
+                        <input
+                          value={(f.options ?? []).join(", ")}
+                          onChange={(e) => {
+                            const next = [...fields];
+                            next[idx] = {
+                              ...next[idx],
+                              options: e.target.value
+                                .split(",")
+                                .map((x) => x.trim())
+                                .filter(Boolean),
+                            };
+                            setFields(next);
+                          }}
+                          placeholder="Options: High, Medium, Low"
+                          className="mt-1 w-full border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent"
+                        />
+                      )}
                     </div>
 
-                    <div className="col-span-3 flex items-center justify-center">
+                    <div className="col-span-2 flex items-center justify-center pt-1.5">
                       <input
                         type="checkbox"
                         checked={f.required}
@@ -274,7 +334,7 @@ export default function FolderMetadataPanel({
                       />
                     </div>
 
-                    <div className="col-span-3 flex items-center justify-center">
+                    <div className="col-span-2 flex items-center justify-center pt-1.5">
                       <input
                         type="checkbox"
                         checked={f.recursive}
@@ -291,13 +351,13 @@ export default function FolderMetadataPanel({
                     </div>
 
                     {/* Remove button */}
-                    <div className="col-span-12 flex justify-end mt-1">
+                    <div className="col-span-2 flex justify-end pt-1">
                       <button
                         onClick={() => {
                           const next = fields.filter((_, i) => i !== idx);
                           setFields(next);
                         }}
-                        className="inline-flex items-center gap-2 text-xs text-red-500 hover:text-red-600 px-2 py-1 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                        className="inline-flex items-center gap-1 text-xs text-red-500 hover:text-red-600 px-2 py-1 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                       >
                         <Trash2 size={13} />
                         Remove
@@ -431,6 +491,51 @@ export default function FolderMetadataPanel({
                 </select>
               </div>
 
+              {newFieldType === "list" && (
+                <div className="space-y-1">
+                  <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                    Options
+                  </div>
+                  <div className="space-y-2">
+                    {newFieldOptions.map((opt, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <input
+                          value={opt}
+                          onChange={(e) =>
+                            setNewFieldOptions((prev) =>
+                              prev.map((v, i) => (i === idx ? e.target.value : v)),
+                            )
+                          }
+                          placeholder={`Option ${idx + 1}`}
+                          className="flex-1 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setNewFieldOptions((prev) =>
+                              prev.length === 1
+                                ? prev
+                                : prev.filter((_, i) => i !== idx),
+                            )
+                          }
+                          className="px-2 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
+                          title="Remove option"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setNewFieldOptions((prev) => [...prev, ""])}
+                      className="inline-flex items-center gap-1 text-xs text-purple-600 dark:text-purple-400 hover:underline"
+                    >
+                      <Plus size={12} /> Add option
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   onClick={() => setShowCreateModal(false)}
@@ -440,9 +545,17 @@ export default function FolderMetadataPanel({
                 </button>
                 <button
                   onClick={() => {
+                    if (
+                      newFieldType === "list" &&
+                      newFieldOptions.map((x) => x.trim()).filter(Boolean).length === 0
+                    ) {
+                      add("Please add list options", "error");
+                      return;
+                    }
                     addNewField(newFieldName, newFieldType);
                     setNewFieldName("");
                     setNewFieldType("text");
+                    setNewFieldOptions([""]);
                     setShowCreateModal(false);
                   }}
                   disabled={!newFieldName.trim()}

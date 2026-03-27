@@ -146,6 +146,7 @@ router.delete(
     try {
       const template = await prisma.metadataTemplate.findFirst({
         where: { id: req.params.id, tenantId: req.user!.tenantId },
+        include: { fields: true },
       });
 
       if (!template) {
@@ -153,11 +154,38 @@ router.delete(
         return;
       }
 
-      await prisma.metadataTemplate.delete({
-        where: { id: req.params.id },
+      const tenantId = req.user!.tenantId;
+      const signatures = (template.fields ?? []).map((f) => ({
+        key: f.key,
+        type: f.type,
+      }));
+
+      const result = await prisma.$transaction(async (tx) => {
+        // Delete template first (template fields cascade via relation).
+        await tx.metadataTemplate.delete({
+          where: { id: req.params.id },
+        });
+
+        // Unassign applied folder metadata fields that came from this template.
+        // Matching strategy: same key + type within tenant.
+        let removedFolderFieldCount = 0;
+        if (signatures.length > 0) {
+          const del = await tx.folderMetadataField.deleteMany({
+            where: {
+              tenantId,
+              OR: signatures.map((s) => ({ key: s.key, type: s.type })),
+            },
+          });
+          removedFolderFieldCount = del.count;
+        }
+
+        return { removedFolderFieldCount };
       });
 
-      res.json({ message: "Template deleted" });
+      res.json({
+        message: "Template deleted",
+        removedFolderFieldCount: result.removedFolderFieldCount,
+      });
     } catch (err) {
       res.status(500).json({ error: "Failed to delete template" });
     }

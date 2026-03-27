@@ -6,6 +6,7 @@ import {
   Archive,
   File,
   Star,
+  GripVertical,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -22,6 +23,7 @@ interface FileGridProps {
   files: FileItem[];
   onFileClick: (file: FileItem) => void;
   onStar?: (file: FileItem) => void;
+  onReorder?: (fromId: string, toId: string) => void;
 }
 
 const getFileIcon = (mimeType: string) => {
@@ -82,6 +84,7 @@ export default function FileGrid({
   files,
   onFileClick,
   onStar,
+  onReorder,
 }: FileGridProps) {
   if (files.length === 0) return null;
 
@@ -91,7 +94,20 @@ export default function FileGrid({
         const { icon: Icon, color, bg } = getFileIcon(file.mimeType);
         return (
           // Outer wrapper is relative so the star button can be positioned absolutely
-          <div key={file.id} className="relative group">
+          <div
+            key={file.id}
+            className="relative group"
+            onDragOver={(e) => {
+              if (!onReorder) return;
+              e.preventDefault();
+            }}
+            onDrop={(e) => {
+              if (!onReorder) return;
+              e.preventDefault();
+              const fromId = e.dataTransfer.getData("text/storeit-file-order-id");
+              onReorder(fromId, file.id);
+            }}
+          >
             <button
               onClick={() => onFileClick(file)}
               className="w-full flex flex-col items-center p-4 bg-white dark:bg-gray-800
@@ -119,6 +135,20 @@ export default function FileGrid({
             </button>
 
             {/* Star button — top-right corner, always visible if starred, else shows on hover */}
+            {onReorder && (
+              <span
+                draggable
+                onDragStart={(e) =>
+                  e.dataTransfer.setData("text/storeit-file-order-id", file.id)
+                }
+                onClick={(e) => e.stopPropagation()}
+                className="absolute top-2 left-2 p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all
+                           text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-grab active:cursor-grabbing"
+                title="Drag to reorder"
+              >
+                <GripVertical size={13} />
+              </span>
+            )}
             {onStar && (
               <button
                 onClick={(e) => {

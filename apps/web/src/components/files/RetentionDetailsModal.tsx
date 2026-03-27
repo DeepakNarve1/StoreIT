@@ -57,7 +57,10 @@ export default function RetentionDetailsModal({
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
           <div className="flex items-center gap-3">
             <div className="w-7 h-7 bg-purple-50 dark:bg-purple-900/30 rounded-lg flex items-center justify-center shrink-0">
-              <Clock3 size={16} className="text-purple-700 dark:text-purple-300" />
+              <Clock3
+                size={16}
+                className="text-purple-700 dark:text-purple-300"
+              />
             </div>
             <div>
               <div className="font-semibold text-gray-900 dark:text-gray-100">
@@ -81,27 +84,25 @@ export default function RetentionDetailsModal({
           <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 p-4">
             <div className="grid grid-cols-1 gap-3 text-xs">
               <div className="flex items-center justify-between gap-4">
-                <span className="text-gray-500 dark:text-gray-400">
-                  Status
-                </span>
+                <span className="text-gray-500 dark:text-gray-400">Status</span>
                 <span className="text-gray-900 dark:text-white font-medium">
-                  {job ? (job.applyAt === null ? "Infinite" : "Scheduled") : "Not scheduled"}
+                  {job
+                    ? job.applyAt === null
+                      ? "Infinite"
+                      : "Scheduled"
+                    : "Not scheduled"}
                 </span>
               </div>
 
               <div className="flex items-center justify-between gap-4">
-                <span className="text-gray-500 dark:text-gray-400">
-                  Action
-                </span>
+                <span className="text-gray-500 dark:text-gray-400">Action</span>
                 <span className="text-gray-900 dark:text-white font-medium">
                   {job ? formatAction(job.action) : "—"}
                 </span>
               </div>
 
               <div className="flex items-center justify-between gap-4">
-                <span className="text-gray-500 dark:text-gray-400">
-                  Timing
-                </span>
+                <span className="text-gray-500 dark:text-gray-400">Timing</span>
                 <span className="text-gray-900 dark:text-white font-medium text-right">
                   {job
                     ? job.applyAt === null
@@ -122,69 +123,91 @@ export default function RetentionDetailsModal({
             </div>
           </div>
 
-            {job?.applyAt !== null && job?.retention === "7d" && !job?.reminder && (
-            <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 p-4">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-gray-500 dark:text-gray-400">
-                  Notification timeline
-                </span>
-                <span className="text-gray-900 dark:text-white font-medium">
-                  Day 1 / 3 / 5 / 7
-                </span>
+          {job?.applyAt !== null &&
+            job?.retention === "7d" &&
+            !job?.reminder && (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-gray-500 dark:text-gray-400">
+                    Notification timeline
+                  </span>
+                  <span className="text-gray-900 dark:text-white font-medium">
+                    Day 1 / 3 / 5 / 7
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-2">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-gray-500 dark:text-gray-400">
+                      Day 7
+                    </span>
+                    <span className="text-gray-900 dark:text-white font-medium">
+                      Delete: {formatDetailedDateTime(job.applyAt)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-gray-500 dark:text-gray-400">
+                      Day 5
+                    </span>
+                    <span className="text-gray-900 dark:text-white font-medium">
+                      Notify:{" "}
+                      {formatDetailedDateTime(
+                        job.createdAt + 5 * 24 * 60 * 60 * 1000,
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-gray-500 dark:text-gray-400">
+                      Day 3
+                    </span>
+                    <span className="text-gray-900 dark:text-white font-medium">
+                      Notify:{" "}
+                      {formatDetailedDateTime(
+                        job.createdAt + 3 * 24 * 60 * 60 * 1000,
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-gray-500 dark:text-gray-400">
+                      Day 1
+                    </span>
+                    <span className="text-gray-900 dark:text-white font-medium">
+                      Notify:{" "}
+                      {formatDetailedDateTime(
+                        job.createdAt + 1 * 24 * 60 * 60 * 1000,
+                      )}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="mt-3 grid grid-cols-1 gap-2">
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-gray-500 dark:text-gray-400">Day 7</span>
-                  <span className="text-gray-900 dark:text-white font-medium">
-                    Delete: {formatDetailedDateTime(job.applyAt)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-gray-500 dark:text-gray-400">Day 5</span>
-                  <span className="text-gray-900 dark:text-white font-medium">
-                    Notify:{" "}
-                    {formatDetailedDateTime(job.createdAt + 5 * 24 * 60 * 60 * 1000)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-gray-500 dark:text-gray-400">Day 3</span>
-                  <span className="text-gray-900 dark:text-white font-medium">
-                    Notify:{" "}
-                    {formatDetailedDateTime(job.createdAt + 3 * 24 * 60 * 60 * 1000)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-gray-500 dark:text-gray-400">Day 1</span>
-                  <span className="text-gray-900 dark:text-white font-medium">
-                    Notify:{" "}
-                    {formatDetailedDateTime(job.createdAt + 1 * 24 * 60 * 60 * 1000)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
+            )}
 
-          {job?.applyAt !== null && job?.reminder && job.reminder !== "none" && (
-            <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 p-4">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-gray-500 dark:text-gray-400">Reminder</span>
-                <span className="text-gray-900 dark:text-white font-medium">
-                  {job.reminder === "custom" && job.reminderAt
-                    ? formatDetailedDateTime(job.reminderAt)
-                    : job.reminder && job.applyAt
-                    ? (() => {
-                        const m = String(job.reminder).match(/^(\d+)d$/);
-                        if (m) {
-                          const days = Number(m[1]);
-                          return formatDetailedDateTime(job.applyAt - days * 24 * 60 * 60 * 1000);
-                        }
-                        return "—";
-                      })()
-                    : "—"}
-                </span>
+          {job?.applyAt !== null &&
+            job?.reminder &&
+            job.reminder !== "none" && (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/30 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-gray-500 dark:text-gray-400">
+                    Reminder
+                  </span>
+                  <span className="text-gray-900 dark:text-white font-medium">
+                    {job.reminder === "custom" && job.reminderAt
+                      ? formatDetailedDateTime(job.reminderAt)
+                      : job.reminder && job.applyAt
+                        ? (() => {
+                            const m = String(job.reminder).match(/^(\d+)d$/);
+                            if (m) {
+                              const days = Number(m[1]);
+                              return formatDetailedDateTime(
+                                job.applyAt - days * 24 * 60 * 60 * 1000,
+                              );
+                            }
+                            return "—";
+                          })()
+                        : "—"}
+                  </span>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
           <div className="flex items-center gap-2 justify-between">
             <div className="text-[11px] text-gray-500 dark:text-gray-400">
@@ -196,7 +219,11 @@ export default function RetentionDetailsModal({
               <button
                 onClick={() => {
                   // Small hint in case the user clicks "edit" without a job.
-                  if (!job) add("No current retention found. Opening scheduler...", "info");
+                  if (!job)
+                    add(
+                      "No current retention found. Opening scheduler...",
+                      "info",
+                    );
                   onEdit();
                 }}
                 className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors shadow-sm"
@@ -218,7 +245,8 @@ export default function RetentionDetailsModal({
           <div className="flex items-start gap-2 text-[11px] text-gray-500 dark:text-gray-400">
             <Trash2 size={14} className="mt-0.5" />
             <span>
-              This retention feature schedules actions locally (workspace) and applies the delete/move at the scheduled time.
+              This retention feature schedules actions locally (workspace) and
+              applies the delete/move at the scheduled time.
             </span>
           </div>
         </div>
@@ -226,4 +254,3 @@ export default function RetentionDetailsModal({
     </div>
   );
 }
-

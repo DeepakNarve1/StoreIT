@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   X,
   Clock,
@@ -27,6 +28,7 @@ export default function FileVersionsModal({
   onClose,
 }: FileVersionsModalProps) {
   const queryClient = useQueryClient();
+  const [openingVersionId, setOpeningVersionId] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["file-versions", file.id],
@@ -53,6 +55,23 @@ export default function FileVersionsModal({
   });
 
   const versions = data?.versions ?? [];
+
+  const openPreviousVersion = async (versionId: string) => {
+    try {
+      setOpeningVersionId(versionId);
+      const res = await api.get(`/files/${file.id}/versions/${versionId}/view`);
+      const url = res.data?.viewUrl as string | undefined;
+      if (!url) {
+        alert("Failed to open previous version");
+        return;
+      }
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch {
+      alert("Failed to open previous version");
+    } finally {
+      setOpeningVersionId(null);
+    }
+  };
 
   return (
     <>
@@ -164,21 +183,38 @@ export default function FileVersionsModal({
                     {/* Actions */}
                     <div className="flex items-center gap-1 shrink-0">
                       {!ver.isCurrent && (
-                        <button
-                          onClick={() => {
-                            if (confirm(`Restore to version ${ver.version}?`)) {
-                              restore.mutate(ver.id);
-                            }
-                          }}
-                          disabled={restore.isPending}
-                          className="flex items-center gap-1 px-2 py-1.5 text-xs
-                                     font-medium text-primary-500 hover:bg-primary-50
-                                     rounded-lg transition-colors disabled:opacity-50"
-                          title="Restore this version"
-                        >
-                          <RotateCcw size={12} />
-                          Restore
-                        </button>
+                        <>
+                          <button
+                            onClick={() => openPreviousVersion(ver.id)}
+                            disabled={openingVersionId === ver.id}
+                            className="flex items-center gap-1 px-2 py-1.5 text-xs
+                                       font-medium text-gray-600 hover:bg-gray-100
+                                       rounded-lg transition-colors disabled:opacity-50"
+                            title="Open this version"
+                          >
+                            {openingVersionId === ver.id ? (
+                              <Loader size={12} className="animate-spin" />
+                            ) : (
+                              <History size={12} />
+                            )}
+                            View
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (confirm(`Restore to version ${ver.version}?`)) {
+                                restore.mutate(ver.id);
+                              }
+                            }}
+                            disabled={restore.isPending}
+                            className="flex items-center gap-1 px-2 py-1.5 text-xs
+                                       font-medium text-primary-500 hover:bg-primary-50
+                                       rounded-lg transition-colors disabled:opacity-50"
+                            title="Restore this version"
+                          >
+                            <RotateCcw size={12} />
+                            Restore
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>

@@ -22,6 +22,7 @@ import {
   CheckCircle,
   Hash,
   AlertTriangle,
+  GripVertical,
 } from "lucide-react";
 import { useState } from "react";
 import { useAuthStore } from "../../store/authStore";
@@ -79,9 +80,14 @@ interface FileListProps {
     type: boolean;
     size: boolean;
     modified: boolean;
+    version: boolean;
+    approval: boolean;
     retention: boolean;
+    metaNotFound: boolean;
   };
   onRetentionClick?: (file: FileItem) => void;
+  preserveOrder?: boolean;
+  onReorder?: (fromId: string, toId: string) => void;
 }
 
 const getFileIcon = (mimeType: string) => {
@@ -199,9 +205,14 @@ export default function FileList({
     type: true,
     size: true,
     modified: true,
+    version: false,
+    approval: false,
     retention: false,
+    metaNotFound: true,
   },
   onRetentionClick,
+  preserveOrder = false,
+  onReorder,
 }: FileListProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const { user } = useAuthStore();
@@ -230,23 +241,26 @@ export default function FileList({
     return false;
   };
 
-  const sorted = [...files].sort((a, b) => {
-    const dir = sortDir === "desc" ? -1 : 1;
-    switch (sortBy) {
-      case "size":
-        return (a.size - b.size) * dir;
-      case "mimeType":
-        return a.mimeType.localeCompare(b.mimeType) * dir;
-      case "createdAt":
-        return (
-          (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) *
-          dir
-        );
-      case "name":
-      default:
-        return a.name.localeCompare(b.name) * dir;
-    }
-  });
+  const sorted = preserveOrder
+    ? [...files]
+    : [...files].sort((a, b) => {
+        const dir = sortDir === "desc" ? -1 : 1;
+        switch (sortBy) {
+          case "size":
+            return (a.size - b.size) * dir;
+          case "mimeType":
+            return a.mimeType.localeCompare(b.mimeType) * dir;
+          case "createdAt":
+            return (
+              (new Date(a.createdAt).getTime() -
+                new Date(b.createdAt).getTime()) *
+              dir
+            );
+          case "name":
+          default:
+            return a.name.localeCompare(b.name) * dir;
+        }
+      });
 
   if (files.length === 0) return null;
 
@@ -273,7 +287,10 @@ export default function FileList({
   const hasStar = !!onStar;
   const checkboxSpan = hasCheckbox ? 1 : 0;
   const starSpan = hasStar ? 1 : 0;
+  const versionEnabled = !!visibleColumns.version;
+  const approvalEnabled = !!visibleColumns.approval;
   const retentionEnabled = !!visibleColumns.retention;
+  const metaNotFoundEnabled = !!visibleColumns.metaNotFound;
   type DataKey = "type" | "size" | "modified";
   const visibleKeys: DataKey[] = [];
   if (visibleColumns.type) visibleKeys.push("type");
@@ -288,10 +305,18 @@ export default function FileList({
     dataSlots[start + i] = k;
   });
 
-  // Meta column is always present (col-span-1).
-  // Retention column is optional (col-span-1).
-  // We keep the same name width logic as before, while switching the grid track count.
+  // Optional right-side columns (each col-span-2): version, approval, retention, meta.
+  // Keep same name width logic and increase total grid tracks based on enabled columns.
   const nameSpan = Math.max(2, 4 - checkboxSpan - starSpan);
+  const optionalColUnits =
+    (versionEnabled ? 2 : 0) +
+    (approvalEnabled ? 2 : 0) +
+    (retentionEnabled ? 2 : 0) +
+    (metaNotFoundEnabled ? 2 : 0);
+  const totalCols = 12 + optionalColUnits;
+  const gridTemplateStyle = {
+    gridTemplateColumns: `repeat(${totalCols}, minmax(0, 1fr))`,
+  };
 
   const RETENTION_QUEUE_KEY = "storeit_retention_queue_v1";
   type RetentionJob = {
@@ -368,7 +393,8 @@ export default function FileList({
     <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-visible">
       {/* Header */}
       <div
-        className={`grid ${retentionEnabled ? "grid-cols-13" : "grid-cols-12"} gap-3 px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-white/5 items-center`}
+        className="grid gap-3 px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-white/5 items-center"
+        style={gridTemplateStyle}
       >
         {hasCheckbox && (
           <div className="col-span-1 flex items-center">
@@ -463,13 +489,24 @@ export default function FileList({
             {!slot && <span className="opacity-0">—</span>}
           </div>
         ))}
-        {/* Meta header (FolderIT-style always visible) */}
-        <div className="col-span-1 text-xs font-medium text-gray-500">
-          Meta not found
-        </div>
+        {versionEnabled && (
+          <div className="col-span-2 text-xs font-medium text-gray-500 text-center whitespace-nowrap">
+            Version
+          </div>
+        )}
+        {approvalEnabled && (
+          <div className="col-span-2 text-xs font-medium text-gray-500 text-center whitespace-nowrap">
+            Approval
+          </div>
+        )}
         {retentionEnabled && (
-          <div className="col-span-1 text-xs font-medium text-gray-500">
+          <div className="col-span-2 text-xs font-medium text-gray-500 text-center whitespace-nowrap">
             Retention
+          </div>
+        )}
+        {metaNotFoundEnabled && (
+          <div className="col-span-2 text-xs font-medium text-gray-500 text-center whitespace-nowrap">
+            Meta not found
           </div>
         )}
         {/* Actions header placeholder */}
@@ -484,12 +521,25 @@ export default function FileList({
         return (
           <div
             key={file.id}
-            className={`relative group grid ${retentionEnabled ? "grid-cols-13" : "grid-cols-12"} gap-3 px-4 py-3 border-b
+            className={`relative group grid gap-3 px-4 py-3 border-b
                        border-gray-100 dark:border-gray-800 last:border-b-0
                        hover:bg-gray-50 dark:hover:bg-white/5 transition-colors items-center`}
+            style={gridTemplateStyle}
             draggable={!!onDragStart}
             onDragStart={() => onDragStart?.(file)}
             onDragEnd={() => onDragEnd?.()}
+            onDragOver={(e) => {
+              if (!onReorder) return;
+              e.preventDefault();
+            }}
+            onDrop={(e) => {
+              if (!onReorder) return;
+              e.preventDefault();
+              const fromId = e.dataTransfer.getData(
+                "text/storeit-file-order-id",
+              );
+              onReorder(fromId, file.id);
+            }}
           >
             {/* Checkbox */}
             {hasCheckbox && (
@@ -517,6 +567,22 @@ export default function FileList({
               className={`col-span-${nameSpan} flex flex-col justify-center text-left min-w-0`}
             >
               <div className="flex items-center gap-3 min-w-0">
+                {onReorder && (
+                  <span
+                    draggable
+                    onDragStart={(e) =>
+                      e.dataTransfer.setData(
+                        "text/storeit-file-order-id",
+                        file.id,
+                      )
+                    }
+                    onClick={(e) => e.stopPropagation()}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 dark:text-gray-500 cursor-grab active:cursor-grabbing"
+                    title="Drag to reorder"
+                  >
+                    <GripVertical size={14} />
+                  </span>
+                )}
                 <Icon size={16} className={color} />
                 <span className="flex-1 min-w-0 text-sm text-gray-800 dark:text-gray-100 truncate hover:text-primary-500 dark:hover:text-pink-400 transition-colors font-medium">
                   {file.name}
@@ -524,41 +590,6 @@ export default function FileList({
               </div>
 
               <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
-                {(file.version ?? 0) > 1 && (
-                  <span className="text-xs bg-pink-100 dark:bg-pink-900/40 text-primary-500 dark:text-pink-300 px-1.5 py-0.5 rounded-full font-medium">
-                    v{file.version}
-                  </span>
-                )}
-
-                {/* ── Approval badge — hoverable tooltip + clickable for detail panel ── */}
-                {file.approvalStatus && (
-                  <ApprovalTooltip
-                    note={file.approvalNote}
-                    reviewerName={file.approvedBy?.name}
-                  >
-                    <span
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onApprovalDetail?.(file);
-                      }}
-                      className={`text-xs px-1.5 py-0.5 rounded-full font-medium cursor-pointer inline-flex items-center whitespace-nowrap
-                                  transition-opacity hover:opacity-80 ${
-                                    file.approvalStatus === "approved"
-                                      ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400"
-                                      : file.approvalStatus === "rejected"
-                                        ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-400"
-                                        : "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400"
-                                  }`}
-                    >
-                      {file.approvalStatus === "approved"
-                        ? "✓ Approved"
-                        : file.approvalStatus === "rejected"
-                          ? "✗ Rejected"
-                          : "⏳ Pending"}
-                    </span>
-                  </ApprovalTooltip>
-                )}
-
                 {file.isLocked && (
                   <span className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
                     🔒 Locked
@@ -614,28 +645,52 @@ export default function FileList({
               </div>
             ))}
 
-            {/* Meta column */}
-            <div className="col-span-1 flex items-center justify-center">
-              {!!file.metaRequiredMissingCount &&
-                file.metaRequiredMissingCount > 0 && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onMetadata?.(file);
-                    }}
-                    className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium
-                               bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-100 dark:border-red-900/30
-                               whitespace-normal leading-tight"
-                    title="Missing required metadata values"
+            {versionEnabled && (
+              <div className="col-span-2 flex items-center justify-center">
+                <span className="text-xs bg-pink-100 dark:bg-pink-900/40 text-primary-500 dark:text-pink-300 px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap">
+                  v{Math.max(1, file.version ?? 1)}
+                </span>
+              </div>
+            )}
+
+            {approvalEnabled && (
+              <div className="col-span-2 flex items-center justify-center">
+                {file.approvalStatus ? (
+                  <ApprovalTooltip
+                    note={file.approvalNote}
+                    reviewerName={file.approvedBy?.name}
                   >
-                    <AlertTriangle size={12} />
-                    <span>Missing some required meta values</span>
-                  </button>
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onApprovalDetail?.(file);
+                      }}
+                      className={`text-xs px-1.5 py-0.5 rounded-full font-medium cursor-pointer inline-flex items-center whitespace-nowrap
+                                  transition-opacity hover:opacity-80 ${
+                                    file.approvalStatus === "approved"
+                                      ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400"
+                                      : file.approvalStatus === "rejected"
+                                        ? "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-400"
+                                        : "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400"
+                                  }`}
+                    >
+                      {file.approvalStatus === "approved"
+                        ? "✓ Approved"
+                        : file.approvalStatus === "rejected"
+                          ? "✗ Rejected"
+                          : "⏳ Pending"}
+                    </span>
+                  </ApprovalTooltip>
+                ) : (
+                  <span className="text-xs text-gray-400 dark:text-gray-500">
+                    —
+                  </span>
                 )}
-            </div>
+              </div>
+            )}
 
             {retentionEnabled && (
-              <div className="col-span-1 flex items-center justify-center">
+              <div className="col-span-2 flex items-center justify-center">
                 <button
                   type="button"
                   onClick={(e) => {
@@ -647,6 +702,34 @@ export default function FileList({
                 >
                   {formatRetention(retentionByFileId.get(file.id)) ?? "—"}
                 </button>
+              </div>
+            )}
+
+            {metaNotFoundEnabled && (
+              <div className="col-span-2 flex items-center justify-center">
+                {!!file.metaRequiredMissingCount &&
+                file.metaRequiredMissingCount > 0 ? (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (fileCan(file.id, "edit_metadata")) onMetadata?.(file);
+                    }}
+                    className="inline-flex w-full max-w-full items-center justify-center gap-1 px-2 py-1 text-xs font-medium rounded-full border transition-colors whitespace-nowrap
+                               bg-white dark:bg-gray-800 text-red-600 dark:text-red-300 border-red-200 dark:border-red-800/70
+                               hover:border-red-300 dark:hover:border-red-700 hover:bg-red-50 dark:hover:bg-red-900/20
+                               overflow-hidden"
+                    title="Missing required metadata values"
+                  >
+                    <AlertTriangle size={12} className="shrink-0" />
+                    <span className="truncate whitespace-nowrap">
+                      Missing required meta ({file.metaRequiredMissingCount})
+                    </span>
+                  </button>
+                ) : (
+                  <span className="text-xs text-gray-400 dark:text-gray-500">
+                    —
+                  </span>
+                )}
               </div>
             )}
 
@@ -805,7 +888,7 @@ export default function FileList({
                             <Hash size={14} /> Assign category
                           </button>
                         )}
-                      {fileCan(file.id, "edit_file_attrs") && onMetadata && (
+                      {fileCan(file.id, "edit_metadata") && onMetadata && (
                         <button
                           onClick={() => {
                             onMetadata(file);

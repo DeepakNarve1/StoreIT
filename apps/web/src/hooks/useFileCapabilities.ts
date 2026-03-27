@@ -12,6 +12,8 @@ const ALL_TRUE: Record<string, boolean> = {
   add_files: true,
   delete_files: true,
   edit_file_attrs: true,
+  view_metadata: true,
+  edit_metadata: true,
   see_files: true,
   see_folders: true,
   share_files: true,

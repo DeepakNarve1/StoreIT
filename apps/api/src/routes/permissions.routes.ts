@@ -88,6 +88,8 @@ router.post(
         "add_files",
         "delete_files",
         "edit_file_attrs",
+        "view_metadata",
+        "edit_metadata",
         "see_files",
         "see_folders",
         "share_files",
@@ -206,6 +208,8 @@ router.post(
             add_files: coarseWrite,
             delete_files: coarseDelete || isOwner,
             edit_file_attrs: coarseWrite || isOwner,
+            view_metadata: coarseWrite || isOwner,
+            edit_metadata: coarseWrite || isOwner,
             share_files: action === "admin",
             share_folders: action === "admin",
           };
@@ -216,6 +220,8 @@ router.post(
           result[fileId]["preview_files"] = true;
           result[fileId]["download_files"] = true;
           result[fileId]["edit_file_attrs"] = true;
+          result[fileId]["view_metadata"] = true;
+          result[fileId]["edit_metadata"] = true;
           result[fileId]["delete_files"] = true;
         }
       }
@@ -228,6 +234,116 @@ router.post(
       }
       console.error("my-capabilities error:", err);
       res.status(500).json({ error: "Failed to resolve capabilities" });
+    }
+  },
+);
+
+// ─── POST /api/permissions/my-folder-capabilities ────────────────────────────
+// Accepts { folderIds: string[] }, returns { capabilities: { [folderId]: Record<string,boolean> } }
+router.post(
+  "/my-folder-capabilities",
+  verifyAuth,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { folderIds } = z
+        .object({ folderIds: z.array(z.string().uuid()).max(200) })
+        .parse(req.body);
+
+      const { userId, role } = req.user!;
+      const privileged = ["SUPERADMIN", "ORG_ADMIN", "MANAGER", "EDITOR"];
+      const ALL_FOLDER_CAPS = [
+        "create_folders",
+        "see_folders",
+        "download_folders",
+        "edit_folders",
+        "move_folders",
+        "delete_folders",
+        "duplicate_folders",
+        "share_folders",
+        "share_public_link_folder",
+        "see_audit_trails",
+        "view_metadata",
+        "edit_metadata",
+      ] as const;
+
+      if (privileged.includes(role)) {
+        const fullCaps = ALL_FOLDER_CAPS.reduce(
+          (acc, k) => ({ ...acc, [k]: true }),
+          {} as Record<string, boolean>,
+        );
+        const result: Record<string, Record<string, boolean>> = {};
+        folderIds.forEach((id) => (result[id] = fullCaps));
+        res.json({ capabilities: result });
+        return;
+      }
+
+      const userRecord = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { departmentId: true },
+      });
+
+      const orClauses: any[] = [
+        { grantedTo: "all" },
+        { grantedTo: "user", userId },
+      ];
+      if (userRecord?.departmentId) {
+        orClauses.push({
+          grantedTo: "department",
+          departmentId: userRecord.departmentId,
+        });
+      }
+
+      const folderPerms = await prisma.permission.findMany({
+        where: {
+          resourceType: "folder",
+          resourceId: { in: folderIds },
+          OR: orClauses,
+          AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
+        },
+      });
+
+      const result: Record<string, Record<string, boolean>> = {};
+      for (const folderId of folderIds) {
+        const perm = folderPerms.find((p) => p.resourceId === folderId);
+        const caps = (perm as any)?.capabilities as
+          | Record<string, boolean>
+          | null
+          | undefined;
+        if (caps && typeof caps === "object" && Object.keys(caps).length > 0) {
+          result[folderId] = ALL_FOLDER_CAPS.reduce(
+            (acc, k) => ({ ...acc, [k]: caps[k] === true }),
+            {} as Record<string, boolean>,
+          );
+          continue;
+        }
+
+        const action = perm?.action ?? "read";
+        const coarseWrite = ["write", "delete", "admin"].includes(action);
+        const coarseDelete = ["delete", "admin"].includes(action);
+        result[folderId] = {
+          create_folders: coarseWrite,
+          see_folders: !!perm,
+          download_folders: coarseWrite,
+          edit_folders: coarseWrite,
+          move_folders: coarseWrite,
+          delete_folders: coarseDelete,
+          duplicate_folders: coarseWrite,
+          share_folders: action === "admin",
+          share_public_link_folder: action === "admin",
+          see_audit_trails: action === "admin",
+          view_metadata: coarseWrite,
+          edit_metadata: coarseWrite,
+        };
+      }
+
+      res.json({ capabilities: result });
+    } catch (err: any) {
+      if (err.name === "ZodError") {
+        res.status(400).json({ error: "Invalid input" });
+        return;
+      }
+      console.error("my-folder-capabilities error:", err);
+      res.status(500).json({ error: "Failed to resolve folder capabilities" });
     }
   },
 );

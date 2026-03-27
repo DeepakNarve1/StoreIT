@@ -1,13 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  Plus,
-  Trash2,
-  Save,
-  X,
-  Tag,
-  Loader2,
-} from "lucide-react";
+import { Plus, Trash2, Save, X, Tag, Loader2 } from "lucide-react";
 import api from "../../api/axios";
 import { useToast } from "../ui/Toast";
 
@@ -15,6 +8,7 @@ interface Props {
   fileId: string;
   fileName: string;
   onClose: () => void;
+  variant?: "sidebar" | "page";
 }
 
 type FieldType =
@@ -35,12 +29,14 @@ interface MetaField {
   type?: FieldType;
   required?: boolean;
   isDefault?: boolean;
+  options?: string[];
 }
 
 export default function FileMetadataPanel({
   fileId,
   fileName,
   onClose,
+  variant = "sidebar",
 }: Props) {
   const queryClient = useQueryClient();
   const { add } = useToast();
@@ -61,7 +57,28 @@ export default function FileMetadataPanel({
       const res = await api.get(`/files/${fileId}/metadata-schema`);
       return res.data as {
         folderId: string | null;
-        fields: { key: string; type: string; required: boolean }[];
+        fields: { key: string; type: string; required: boolean; options?: string[] }[];
+      };
+    },
+    staleTime: 10_000,
+  });
+
+  const { data: historyData } = useQuery({
+    queryKey: ["file-metadata-history", fileId],
+    queryFn: async () => {
+      const res = await api.get(`/files/${fileId}/metadata-history`);
+      return res.data as {
+        logs: Array<{
+          id: string;
+          action: string;
+          createdAt: string;
+          metadata?: {
+            fieldCount?: number;
+            keys?: string[];
+            changes?: Array<{ key?: string; before?: string; after?: string }>;
+          } | null;
+          user?: { name?: string | null; email?: string | null } | null;
+        }>;
       };
     },
     staleTime: 10_000,
@@ -79,13 +96,16 @@ export default function FileMetadataPanel({
     const schemaFields = schemaData.fields ?? [];
     const schemaKeySet = new Set(schemaFields.map((f) => f.key.toLowerCase()));
 
-    const defaultFields: MetaField[] = schemaFields.map((f) => ({
-      key: f.key,
-      value: valueByKey.get(f.key.toLowerCase()) ?? "",
-      type: f.type as FieldType,
-      required: !!f.required,
-      isDefault: true,
-    }));
+    const defaultFields: MetaField[] = schemaFields.map((f) => {
+      return {
+        key: f.key,
+        value: valueByKey.get(f.key.toLowerCase()) ?? "",
+        type: f.type as FieldType,
+        required: !!f.required,
+        isDefault: true,
+        options: f.type === "list" ? f.options ?? [] : [],
+      };
+    });
 
     const customFields: MetaField[] = (data.metadata ?? [])
       .filter((m) => !schemaKeySet.has(m.key.toLowerCase()))
@@ -98,7 +118,15 @@ export default function FileMetadataPanel({
       }));
 
     if (defaultFields.length === 0 && customFields.length === 0) {
-      setFields([{ key: "", value: "", type: undefined, required: false, isDefault: false }]);
+      setFields([
+        {
+          key: "",
+          value: "",
+          type: undefined,
+          required: false,
+          isDefault: false,
+        },
+      ]);
       return;
     }
 
@@ -121,6 +149,58 @@ export default function FileMetadataPanel({
         );
         return;
       }
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const decimalRegex = /^-?\d+(\.\d+)?$/;
+      const invalidFields: string[] = [];
+
+      for (const f of validFields) {
+        const raw = f.value?.trim() ?? "";
+        if (!raw) continue;
+        const type = f.type;
+
+        if (type === "email" && !emailRegex.test(raw)) {
+          invalidFields.push(`${f.key} (email)`);
+          continue;
+        }
+        if (type === "number") {
+          const n = Number(raw);
+          if (!Number.isFinite(n)) invalidFields.push(`${f.key} (number)`);
+          continue;
+        }
+        if (type === "integer") {
+          const n = Number(raw);
+          if (!Number.isInteger(n)) invalidFields.push(`${f.key} (integer)`);
+          continue;
+        }
+        if (type === "decimal") {
+          if (!decimalRegex.test(raw)) invalidFields.push(`${f.key} (decimal)`);
+          continue;
+        }
+        if (type === "date" || type === "datetime") {
+          if (Number.isNaN(new Date(raw).getTime())) {
+            invalidFields.push(`${f.key} (${type})`);
+          }
+          continue;
+        }
+        if (type === "boolean") {
+          if (raw !== "true" && raw !== "false") {
+            invalidFields.push(`${f.key} (boolean)`);
+          }
+          continue;
+        }
+        if (type === "list") {
+          const opts = f.options ?? [];
+          if (opts.length > 0 && !opts.includes(raw)) {
+            invalidFields.push(`${f.key} (list)`);
+          }
+        }
+      }
+
+      if (invalidFields.length > 0) {
+        add(`Invalid metadata values: ${invalidFields.join(", ")}`, "error");
+        return;
+      }
       const payloadFields = validFields.map((f) => ({
         key: f.key,
         value: f.value,
@@ -139,7 +219,13 @@ export default function FileMetadataPanel({
   const addRow = () =>
     setFields([
       ...fields,
-      { key: "", value: "", type: undefined, required: false, isDefault: false },
+      {
+        key: "",
+        value: "",
+        type: undefined,
+        required: false,
+        isDefault: false,
+      },
     ]);
   const removeRow = (i: number) =>
     setFields(fields.filter((_, idx) => idx !== i));
@@ -163,7 +249,9 @@ export default function FileMetadataPanel({
     queryKey: ["folder-metadata-fields", folderIdForSchema],
     enabled: showFolderFieldsEditor && !!folderIdForSchema,
     queryFn: async () => {
-      const res = await api.get(`/folders/${folderIdForSchema}/metadata-fields`);
+      const res = await api.get(
+        `/folders/${folderIdForSchema}/metadata-fields`,
+      );
       return res.data as { fields: FolderFieldDef[] };
     },
   });
@@ -181,10 +269,7 @@ export default function FileMetadataPanel({
       { key: "", type: "text", required: false, recursive: false },
     ]);
 
-  const updateFolderField = (
-    i: number,
-    patch: Partial<FolderFieldDef>,
-  ) => {
+  const updateFolderField = (i: number, patch: Partial<FolderFieldDef>) => {
     const next = [...folderFields];
     next[i] = { ...next[i], ...patch };
     setFolderFields(next);
@@ -215,8 +300,12 @@ export default function FileMetadataPanel({
 
   return (
     <div
-      className="flex flex-col border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 w-72 shrink-0 rounded-r-xl overflow-hidden"
-      style={{ borderLeft: "none" }}
+      className={
+        variant === "page"
+          ? "flex flex-col border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 w-full max-w-5xl mx-auto rounded-xl overflow-hidden min-h-[70vh]"
+          : "flex flex-col border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 w-72 shrink-0 rounded-r-xl overflow-hidden"
+      }
+      style={variant === "page" ? undefined : { borderLeft: "none" }}
     >
       {/* Header */}
       <div className="flex items-center gap-2.5 px-4 py-3.5 border-b border-gray-100 dark:border-gray-800 shrink-0">
@@ -230,6 +319,17 @@ export default function FileMetadataPanel({
           <p className="text-xs text-gray-400 truncate" title={fileName}>
             {fileName}
           </p>
+          <div className="mt-1 flex items-center gap-2 text-[10px]">
+            <span className="px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+              {fields.length} field{fields.length !== 1 ? "s" : ""}
+            </span>
+            <span className="px-1.5 py-0.5 rounded-full bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-300">
+              {fields.filter((f) => !!f.required).length} required
+            </span>
+            <span className="px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300">
+              {fields.filter((f) => !!f.isDefault).length} default
+            </span>
+          </div>
         </div>
         <button
           onClick={onClose}
@@ -241,10 +341,10 @@ export default function FileMetadataPanel({
 
       {/* Folder schema editor (FolderIT-style) */}
       {!schemaLoading && !!folderIdForSchema && (
-        <div className="px-4 pt-3 pb-1 shrink-0">
+        <div className="px-4 pt-3 pb-2 shrink-0 border-b border-gray-100 dark:border-gray-800">
           <button
             onClick={() => setShowFolderFieldsEditor(true)}
-            className="w-full flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-600 dark:text-gray-300 hover:border-purple-300 dark:hover:border-purple-600 transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-600 dark:text-gray-300 hover:border-purple-300 dark:hover:border-purple-600 transition-colors"
           >
             Manage all metadata fields
           </button>
@@ -253,11 +353,11 @@ export default function FileMetadataPanel({
 
       {showFolderFieldsEditor && folderIdForSchema && (
         <div
-          className="fixed inset-0 z-30"
+          className="fixed inset-0 z-40 bg-black/40 flex items-center justify-center p-4"
           onClick={() => setShowFolderFieldsEditor(false)}
         >
           <div
-            className="absolute right-0 top-0 bottom-0 w-[360px] bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 shadow-xl p-4 overflow-y-auto"
+            className="w-full max-w-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl shadow-xl p-4 max-h-[75vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-3">
@@ -286,16 +386,20 @@ export default function FileMetadataPanel({
                 </div>
 
                 {folderFields.map((f, i) => (
-                  <div key={`${f.key}-${i}`} className="grid grid-cols-5 gap-2 items-center">
+                  <div key={i} className="grid grid-cols-5 gap-2 items-center">
                     <input
                       value={f.key}
-                      onChange={(e) => updateFolderField(i, { key: e.target.value })}
+                      onChange={(e) =>
+                        updateFolderField(i, { key: e.target.value })
+                      }
                       placeholder="key"
                       className="col-span-2 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent placeholder-gray-300 dark:placeholder-gray-600 transition-colors"
                     />
                     <select
                       value={f.type}
-                      onChange={(e) => updateFolderField(i, { type: e.target.value })}
+                      onChange={(e) =>
+                        updateFolderField(i, { type: e.target.value })
+                      }
                       className="border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent"
                     >
                       <option value="text">String</option>
@@ -384,101 +488,135 @@ export default function FileMetadataPanel({
         ) : (
           <div className="space-y-2">
             {/* Column headers */}
-            <div className="grid grid-cols-2 gap-1.5 mb-1">
-              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-1">
-                Key
-              </p>
-              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-1">
-                Value
-              </p>
+            <div className="grid grid-cols-12 gap-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1 px-1">
+              <p className="col-span-4">Key</p>
+              <p className="col-span-7">Value</p>
+              <p className="col-span-1 text-right">Action</p>
             </div>
 
-            {fields.map((field, i) => (
-              <div key={i} className="flex items-center gap-1.5 group">
-                <input
-                  value={field.key}
-                  onChange={(e) => updateRow(i, "key", e.target.value)}
-                  placeholder="key"
-                  disabled={!!field.isDefault}
-                  readOnly={!!field.isDefault}
-                  className={`flex-1 min-w-0 border border-gray-200 dark:border-gray-700 ${
-                    field.isDefault
-                      ? "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-not-allowed"
-                      : "bg-gray-50 dark:bg-gray-800 dark:text-gray-100"
-                  } rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent placeholder-gray-300 dark:placeholder-gray-600 transition-colors`}
-                />
-                {!!field.required && field.isDefault && (
-                  <span className="text-red-500 text-xs font-semibold">*</span>
-                )}
-
-                {field.type === "date" ? (
-                  <input
-                    type="date"
-                    value={field.value}
-                    onChange={(e) => updateRow(i, "value", e.target.value)}
-                    className="flex-1 min-w-0 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent transition-colors"
-                  />
-                ) : field.type === "datetime" ? (
-                  <input
-                    type="datetime-local"
-                    value={field.value}
-                    onChange={(e) => updateRow(i, "value", e.target.value)}
-                    className="flex-1 min-w-0 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent transition-colors"
-                  />
-                ) : field.type === "number" ||
-                    field.type === "integer" ||
-                    field.type === "decimal" ? (
-                  <input
-                    type="number"
-                    value={field.value}
-                    onChange={(e) => updateRow(i, "value", e.target.value)}
-                    placeholder="0"
-                    className="flex-1 min-w-0 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent placeholder-gray-300 dark:placeholder-gray-600 transition-colors"
-                  />
-                ) : field.type === "longText" ? (
-                  <textarea
-                    value={field.value}
-                    onChange={(e) => updateRow(i, "value", e.target.value)}
-                    placeholder="value"
-                    rows={2}
-                    className="flex-1 min-w-0 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent transition-colors resize-none"
-                  />
-                ) : (
-                  field.type === "boolean" ? (
-                    <label className="flex items-center gap-2 px-2">
-                      <input
-                        type="checkbox"
-                        checked={field.value === "true"}
-                        onChange={(e) =>
-                          updateRow(i, "value", e.target.checked ? "true" : "false")
-                        }
-                        className="w-3.5 h-3.5"
-                      />
-                      <span className="text-xs text-gray-600 dark:text-gray-300">
-                        {field.value === "true" ? "True" : "False"}
-                      </span>
-                    </label>
-                  ) : (
-                    <input
-                      value={field.value}
-                      onChange={(e) =>
-                        updateRow(i, "value", e.target.value)
-                      }
-                      placeholder="value"
-                      className="flex-1 min-w-0 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent placeholder-gray-300 dark:placeholder-gray-600 transition-colors"
-                    />
-                  )
-                )}
-                {!field.isDefault && (
-                  <button
-                    onClick={() => removeRow(i)}
-                    className="p-1 text-gray-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 shrink-0"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                )}
+            {fields.length === 0 ? (
+              <div className="text-xs text-gray-500 dark:text-gray-400 py-8 text-center border border-dashed border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50/60 dark:bg-gray-800/30">
+                No metadata fields yet. Add one to continue.
               </div>
-            ))}
+            ) : (
+              fields.map((field, i) => (
+                <div
+                  key={i}
+                  className="grid grid-cols-12 gap-2 items-start rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-2 group"
+                >
+                  <div className="col-span-4 min-w-0">
+                    <input
+                      value={field.key}
+                      onChange={(e) => updateRow(i, "key", e.target.value)}
+                      placeholder="key"
+                      disabled={!!field.isDefault}
+                      readOnly={!!field.isDefault}
+                      className={`w-full min-w-0 border border-gray-200 dark:border-gray-700 ${
+                        field.isDefault
+                          ? "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-not-allowed"
+                          : "bg-gray-50 dark:bg-gray-800 dark:text-gray-100"
+                      } rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent placeholder-gray-300 dark:placeholder-gray-600 transition-colors`}
+                    />
+                    <div className="mt-1 text-[10px] text-gray-400">
+                      {field.type ?? "custom"}
+                      {!!field.required && field.isDefault && (
+                        <span className="ml-1 text-red-500 font-semibold">*</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="col-span-7 min-w-0">
+                    {field.type === "date" ? (
+                      <input
+                        type="date"
+                        value={field.value}
+                        onChange={(e) => updateRow(i, "value", e.target.value)}
+                        className="w-full min-w-0 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent transition-colors"
+                      />
+                    ) : field.type === "datetime" ? (
+                      <input
+                        type="datetime-local"
+                        value={field.value}
+                        onChange={(e) => updateRow(i, "value", e.target.value)}
+                        className="w-full min-w-0 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent transition-colors"
+                      />
+                    ) : field.type === "number" ||
+                      field.type === "integer" ||
+                      field.type === "decimal" ? (
+                      <input
+                        type="number"
+                        value={field.value}
+                        onChange={(e) => updateRow(i, "value", e.target.value)}
+                        placeholder="0"
+                        className="w-full min-w-0 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent placeholder-gray-300 dark:placeholder-gray-600 transition-colors"
+                      />
+                    ) : field.type === "longText" ? (
+                      <textarea
+                        value={field.value}
+                        onChange={(e) => updateRow(i, "value", e.target.value)}
+                        placeholder="value"
+                        rows={2}
+                        className="w-full min-w-0 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent transition-colors resize-none"
+                      />
+                    ) : field.type === "boolean" ? (
+                      <label className="flex items-center gap-2 px-2 py-1">
+                        <input
+                          type="checkbox"
+                          checked={field.value === "true"}
+                          onChange={(e) =>
+                            updateRow(
+                              i,
+                              "value",
+                              e.target.checked ? "true" : "false",
+                            )
+                          }
+                          className="w-3.5 h-3.5"
+                        />
+                        <span className="text-xs text-gray-600 dark:text-gray-300">
+                          {field.value === "true" ? "True" : "False"}
+                        </span>
+                      </label>
+                    ) : field.type === "list" ? (
+                      <select
+                        value={field.value}
+                        onChange={(e) => updateRow(i, "value", e.target.value)}
+                        disabled={(field.options?.length ?? 0) === 0}
+                        className="w-full min-w-0 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent transition-colors"
+                      >
+                        <option value="">
+                          {(field.options?.length ?? 0) > 0
+                            ? "Select..."
+                            : "No options configured"}
+                        </option>
+                        {(field.options ?? []).map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        value={field.value}
+                        onChange={(e) => updateRow(i, "value", e.target.value)}
+                        placeholder="value"
+                        className="w-full min-w-0 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent placeholder-gray-300 dark:placeholder-gray-600 transition-colors"
+                      />
+                    )}
+                  </div>
+
+                  <div className="col-span-1 flex justify-end pt-1">
+                    {!field.isDefault && (
+                      <button
+                        onClick={() => removeRow(i)}
+                        className="p-1 text-gray-300 dark:text-gray-600 hover:text-red-500 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 shrink-0"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
 
             <button
               onClick={addRow}
@@ -486,6 +624,51 @@ export default function FileMetadataPanel({
             >
               <Plus size={12} /> Add field
             </button>
+          </div>
+        )}
+      </div>
+
+      {/* Metadata history */}
+      <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-800 bg-gray-50/40 dark:bg-gray-800/10">
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
+          Metadata history
+        </p>
+        {(historyData?.logs ?? []).length === 0 ? (
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            No metadata changes yet.
+          </p>
+        ) : (
+          <div className="space-y-1.5 max-h-28 overflow-y-auto pr-1">
+            {(historyData?.logs ?? []).map((log) => (
+              <div
+                key={log.id}
+                className="text-xs rounded-lg border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 px-2 py-1.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-gray-700 dark:text-gray-200">
+                    {log.action === "file.metadata.bulk_update"
+                      ? "Bulk metadata update"
+                      : "Metadata update"}
+                  </span>
+                  <span className="text-gray-400">
+                    {new Date(log.createdAt).toLocaleString()}
+                  </span>
+                </div>
+                <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                  {(log.user?.name ?? "System")} ·{" "}
+                  {log.metadata?.fieldCount ?? 0} field(s)
+                </div>
+                {(log.metadata?.changes ?? []).length > 0 && (
+                  <div className="mt-1 space-y-0.5">
+                    {(log.metadata?.changes ?? []).slice(0, 5).map((c, idx) => (
+                      <div key={idx} className="text-[11px] text-gray-500 dark:text-gray-400">
+                        {c.key}: "{c.before ?? ""}" → "{c.after ?? ""}"
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>

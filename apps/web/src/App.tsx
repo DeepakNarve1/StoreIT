@@ -24,6 +24,7 @@ import TemplatesPage from "./pages/admin/TemplatesPage";
 import SharedLinksPage from "./pages/admin/SharedLinksPage";
 import PermissionsOverviewPage from "./pages/admin/PermissionsOverviewPage";
 import GuestAccessPage from "./pages/GuestAccessPage";
+import MetadataPage from "./pages/MetadataPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -184,6 +185,22 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <SearchPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/metadata/file/:fileId"
+            element={
+              <ProtectedRoute>
+                <MetadataPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/metadata/folder/:folderId"
+            element={
+              <ProtectedRoute>
+                <MetadataPage />
               </ProtectedRoute>
             }
           />

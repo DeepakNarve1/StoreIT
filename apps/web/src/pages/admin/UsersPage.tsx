@@ -18,6 +18,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import AppShell from "../../components/layout/AppShell";
 import api from "../../api/axios";
+import { useAuthStore } from "../../store/authStore";
 
 interface User {
   id: string;
@@ -58,6 +59,7 @@ const roleColors: Record<string, string> = {
 export default function UsersPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { user: currentUser } = useAuthStore();
   const [showInviteForm, setShowInviteForm] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<Role>("VIEWER");
@@ -68,6 +70,9 @@ export default function UsersPage() {
     "users" | "invites" | "departments"
   >("users");
   const [newDeptName, setNewDeptName] = useState("");
+  const [roleUpdatingUserId, setRoleUpdatingUserId] = useState<string | null>(
+    null,
+  );
   // Controlled map of userId -> departmentId for the assignment dropdowns
   const [deptMap, setDeptMap] = useState<Record<string, string>>({});
 
@@ -174,6 +179,18 @@ export default function UsersPage() {
     },
   });
 
+  const updateUserRole = useMutation({
+    mutationFn: async ({ id, role }: { id: string; role: Role }) => {
+      await api.patch(`/users/${id}`, { role });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+    },
+    onSettled: () => {
+      setRoleUpdatingUserId(null);
+    },
+  });
+
   const deleteUser = useMutation({
     mutationFn: async (id: string) => {
       await api.delete(`/users/${id}/permanent`);
@@ -222,6 +239,8 @@ export default function UsersPage() {
 
   const users = (usersData?.users ?? []).filter((u) => u.role !== "SUPERADMIN");
   const invites = invitesData?.invites ?? [];
+  const canEditRoles =
+    currentUser?.role === "ORG_ADMIN" || currentUser?.role === "SUPERADMIN";
 
   const maxUsers = billing?.limits?.maxUsers ?? null;
   const usedUsers = billing?.usage?.users ?? users.length;
@@ -239,7 +258,7 @@ export default function UsersPage() {
 
   return (
     <AppShell>
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         {atLimit && (
           <div className="flex items-center justify-between gap-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-4 py-3 mb-5">
             <div className="flex items-center gap-2.5">
@@ -284,7 +303,7 @@ export default function UsersPage() {
 
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-blue-50 dark:bg-blue-500/10 rounded-xl flex items-center justify-center">
+            <div className="w-10 h-10 bg-blue-50 dark:bg-blue-500/10 rounded-xl flex items-center justify-center">
               <Users size={18} className="text-blue-600 dark:text-blue-400" />
             </div>
             <div>
@@ -436,7 +455,7 @@ export default function UsersPage() {
         )}
 
         {/* ── Tabs ── */}
-        <div className="flex gap-1 mb-4 bg-gray-100 dark:bg-white/5 p-1 rounded-lg w-fit">
+        <div className="flex gap-1 mb-5 bg-gray-100 dark:bg-white/5 p-1 rounded-xl w-fit">
           <button
             onClick={() => setActiveTab("users")}
             className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
@@ -482,20 +501,25 @@ export default function UsersPage() {
             ) : (
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-gray-100 dark:border-[#1e1e1e] bg-gray-50 dark:bg-white/5">
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
+                  <tr className="border-b border-gray-100 dark:border-[#1e1e1e] bg-gray-50/80 dark:bg-white/5">
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       Member
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       Role
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Department
+                    </th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       Status
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       Joined
                     </th>
-                    <th className="px-4 py-3" />
+                    <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -507,7 +531,7 @@ export default function UsersPage() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           <div
-                            className="w-8 h-8 bg-blue-100 dark:bg-blue-900/40 rounded-full flex items-center
+                            className="w-9 h-9 bg-blue-100 dark:bg-blue-900/40 rounded-full flex items-center
                                           justify-center text-blue-700 dark:text-blue-400 text-xs font-semibold"
                           >
                             {user.name
@@ -528,11 +552,57 @@ export default function UsersPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                          className={`text-xs font-medium px-2 py-1 rounded-full ${roleColors[user.role] || "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}
-                        >
-                          {user.role?.replace("_", " ")}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap ${roleColors[user.role] || "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}
+                          >
+                            {user.role?.replace("_", " ")}
+                          </span>
+                          <select
+                            value={user.role}
+                            disabled={
+                              !canEditRoles ||
+                              user.id === currentUser?.id ||
+                              (updateUserRole.isPending &&
+                                roleUpdatingUserId === user.id)
+                            }
+                            onChange={(e) => {
+                              const nextRole = e.target.value as Role;
+                              if (nextRole === user.role) return;
+                              setRoleUpdatingUserId(user.id);
+                              updateUserRole.mutate({
+                                id: user.id,
+                                role: nextRole,
+                              });
+                            }}
+                            className="text-xs bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg px-2.5 py-1.5
+                                       focus:outline-none focus:ring-2 focus:ring-blue-400 dark:text-white appearance-none disabled:opacity-60"
+                            title={
+                              !canEditRoles
+                                ? "Only Org Admin can change roles"
+                                : user.id === currentUser?.id
+                                  ? "You cannot change your own role"
+                                  : "Change user role"
+                            }
+                          >
+                            {ROLES.map((r) => (
+                              <option
+                                key={r}
+                                value={r}
+                                className="dark:bg-gray-900"
+                              >
+                                {r.replace("_", " ")}
+                              </option>
+                            ))}
+                          </select>
+                          {updateUserRole.isPending &&
+                            roleUpdatingUserId === user.id && (
+                              <Loader
+                                size={13}
+                                className="animate-spin text-gray-400"
+                              />
+                            )}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <span className="text-xs text-gray-500 dark:text-gray-400">
@@ -554,7 +624,7 @@ export default function UsersPage() {
                           {user.isActive ? "Active" : "Disabled"}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-400 dark:text-gray-500">
+                      <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
                         {new Date(user.createdAt).toLocaleDateString("en-US", {
                           month: "short",
                           day: "numeric",
@@ -562,7 +632,7 @@ export default function UsersPage() {
                         })}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center justify-end gap-2">
                           <button
                             onClick={() =>
                               toggleUser.mutate({
@@ -638,20 +708,22 @@ export default function UsersPage() {
             ) : (
               <table className="w-full">
                 <thead>
-                  <tr className="border-b border-gray-100 dark:border-[#1e1e1e] bg-gray-50 dark:bg-white/5">
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
+                  <tr className="border-b border-gray-100 dark:border-[#1e1e1e] bg-gray-50/80 dark:bg-white/5">
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       Email
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       Role
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       Invited by
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 dark:text-gray-400">
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       Expires
                     </th>
-                    <th className="px-4 py-3" />
+                    <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -690,7 +762,7 @@ export default function UsersPage() {
                       <td className="px-4 py-3">
                         <button
                           onClick={() => cancelInvite.mutate(invite.id)}
-                          className="text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                          className="ml-auto block text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
                           title="Cancel invite"
                         >
                           <Trash2 size={14} />

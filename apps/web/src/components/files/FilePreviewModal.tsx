@@ -37,6 +37,12 @@ interface FilePreviewModalProps {
   onClose: () => void;
 }
 
+type FileMetadataRow = {
+  id: string;
+  key: string;
+  value: string;
+};
+
 const formatBytes = (bytes: number) => {
   if (bytes === 0) return "0 B";
   const k = 1024;
@@ -138,6 +144,7 @@ export default function FilePreviewModal({
   const { icon: Icon, color, bg } = getFileIcon(file.mimeType);
   const [viewUrl, setViewUrl] = useState<string | null>(file?.viewUrl || null);
   const [, setLoadingUrl] = useState(false);
+  const [showInlinePreview, setShowInlinePreview] = useState(false);
 
   const {
     data: auditData,
@@ -153,6 +160,24 @@ export default function FilePreviewModal({
   });
 
   const auditLogs = auditData?.logs ?? [];
+
+  const {
+    data: metadataData,
+    isLoading: metadataLoading,
+    error: metadataError,
+  } = useQuery({
+    queryKey: ["file-metadata-preview", file.id],
+    enabled: !!file?.id,
+    queryFn: async () => {
+      const res = await api.get(`/files/${file.id}/metadata`);
+      return res.data as { metadata: FileMetadataRow[] };
+    },
+  });
+
+  const metadataRows = metadataData?.metadata ?? [];
+  const metadataDenied =
+    (metadataError as any)?.response?.status === 403 ||
+    (metadataError as any)?.response?.status === 401;
 
   const formatDetailedDateTime = (dateStr: string) =>
     new Date(dateStr).toLocaleString("en-US", {
@@ -176,6 +201,10 @@ export default function FilePreviewModal({
       })
       .catch(console.error)
       .finally(() => setLoadingUrl(false));
+  }, [file?.id]);
+
+  useEffect(() => {
+    setShowInlinePreview(false);
   }, [file?.id]);
 
   const renderPreview = () => {
@@ -398,53 +427,143 @@ export default function FilePreviewModal({
           </div>
         </div>
 
-        {/* Preview content */}
+        {/* Detail-first content */}
         <div className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900">
-          {renderPreview()}
-
-          {/* Document details + audit log */}
-          <div className="px-4 pb-5 pt-4">
-            <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+          <div className="px-4 pt-4">
+            <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800">
                 <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                  Document details
+                  File details
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Click preview/open to view the document
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-3 text-xs">
-                <div className="text-gray-500 dark:text-gray-400">Type</div>
-                <div className="text-gray-900 dark:text-white">
-                  {file.mimeType}
-                </div>
+              <div className="p-4 grid grid-cols-1 lg:grid-cols-12 gap-4">
+                <button
+                  onClick={() => setShowInlinePreview(true)}
+                  className="lg:col-span-3 border border-gray-200 dark:border-gray-700 rounded-xl p-3 text-left hover:border-primary-400 dark:hover:border-primary-500 transition-colors bg-gray-50 dark:bg-gray-800/40"
+                >
+                  {fileType === "image" && viewUrl ? (
+                    <img
+                      src={viewUrl}
+                      alt={file.name}
+                      className="w-full h-28 object-contain rounded-lg bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-700"
+                    />
+                  ) : (
+                    <div
+                      className={`w-full h-28 rounded-lg border border-gray-100 dark:border-gray-700 flex items-center justify-center ${bg}`}
+                    >
+                      <Icon size={30} className={color} />
+                    </div>
+                  )}
+                  <p className="text-xs text-primary-600 dark:text-primary-400 mt-2 font-medium">
+                    Open preview
+                  </p>
+                </button>
 
-                <div className="text-gray-500 dark:text-gray-400">Size</div>
-                <div className="text-gray-900 dark:text-white">
-                  {formatBytes(file.size)}
-                </div>
+                <div className="lg:col-span-9 grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
+                  <div className="text-gray-500 dark:text-gray-400">Name</div>
+                  <div className="text-gray-900 dark:text-white wrap-break-word">
+                    {file.name}
+                  </div>
 
-                <div className="text-gray-500 dark:text-gray-400">
-                  Created / Modified
-                </div>
-                <div className="text-gray-900 dark:text-white">
-                  {formatDetailedDateTime(file.createdAt)}
-                </div>
+                  <div className="text-gray-500 dark:text-gray-400">Type</div>
+                  <div className="text-gray-900 dark:text-white">
+                    {file.mimeType}
+                  </div>
 
-                <div className="text-gray-500 dark:text-gray-400">Version</div>
-                <div className="text-gray-900 dark:text-white">
-                  {file.version ? `v${file.version}` : "—"}
-                </div>
+                  <div className="text-gray-500 dark:text-gray-400">Size</div>
+                  <div className="text-gray-900 dark:text-white">
+                    {formatBytes(file.size)}
+                  </div>
 
-                <div className="text-gray-500 dark:text-gray-400">Lock</div>
-                <div className="text-gray-900 dark:text-white">
-                  {file.isLocked ? "Locked" : "Not locked"}
-                </div>
+                  <div className="text-gray-500 dark:text-gray-400">
+                    Created
+                  </div>
+                  <div className="text-gray-900 dark:text-white">
+                    {formatDetailedDateTime(file.createdAt)}
+                  </div>
 
-                <div className="text-gray-500 dark:text-gray-400">
-                  Approval
+                  <div className="text-gray-500 dark:text-gray-400">
+                    Version
+                  </div>
+                  <div className="text-gray-900 dark:text-white">
+                    {file.version ? `v${file.version}` : "—"}
+                  </div>
+
+                  <div className="text-gray-500 dark:text-gray-400">Lock</div>
+                  <div className="text-gray-900 dark:text-white">
+                    {file.isLocked ? "Locked" : "Not locked"}
+                  </div>
                 </div>
-                <div className="text-gray-900 dark:text-white">
-                  {file.approvalStatus ? file.approvalStatus : "—"}
+              </div>
+
+              {showInlinePreview && (
+                <div className="border-t border-gray-100 dark:border-gray-800">
+                  <div className="px-4 py-2 flex items-center justify-between bg-gray-50 dark:bg-gray-800/50">
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-200">
+                      Document preview
+                    </p>
+                    <button
+                      onClick={() => setShowInlinePreview(false)}
+                      className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                    >
+                      Hide
+                    </button>
+                  </div>
+                  <div className="h-[58vh]">{renderPreview()}</div>
                 </div>
+              )}
+            </div>
+          </div>
+
+          {/* Document details + audit log */}
+          <div className="px-4 pb-5 pt-4">
+            <div className="mt-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                  Metadata
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Metadata values available for this document
+                </p>
+              </div>
+              <div className="px-4 py-3">
+                {metadataLoading ? (
+                  <div className="text-sm text-gray-600 dark:text-gray-300">
+                    Loading metadata...
+                  </div>
+                ) : metadataDenied ? (
+                  <div className="text-sm text-amber-700 dark:text-amber-400">
+                    You have preview access, but not metadata view permission.
+                  </div>
+                ) : metadataError ? (
+                  <div className="text-sm text-red-600 dark:text-red-400">
+                    Failed to load metadata.
+                  </div>
+                ) : metadataRows.length === 0 ? (
+                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                    No metadata assigned.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {metadataRows.map((row) => (
+                      <div
+                        key={row.id}
+                        className="grid grid-cols-12 gap-2 rounded-lg bg-gray-50 dark:bg-gray-800/60 px-3 py-2"
+                      >
+                        <div className="col-span-4 text-xs font-medium text-gray-700 dark:text-gray-200 wrap-break-word">
+                          {row.key}
+                        </div>
+                        <div className="col-span-8 text-xs text-gray-900 dark:text-white wrap-break-word">
+                          {row.value || "—"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 

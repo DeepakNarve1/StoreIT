@@ -8,7 +8,7 @@ import {
   Save,
   Loader,
   Edit2,
-  AlertCircle
+  AlertCircle,
 } from "lucide-react";
 import AppShell from "../../components/layout/AppShell";
 import api from "../../api/axios";
@@ -23,7 +23,11 @@ interface Template {
   id: string;
   name: string;
   description: string | null;
-  fields: { id: string; key: string; type: "text" | "number" | "date" | "boolean" }[];
+  fields: {
+    id: string;
+    key: string;
+    type: "text" | "number" | "date" | "boolean";
+  }[];
 }
 
 export default function TemplatesPage() {
@@ -62,7 +66,10 @@ export default function TemplatesPage() {
     setName(t.name);
     setDescription(t.description || "");
     setFields(
-      t.fields.map((f) => ({ key: f.key, type: f.type as TemplateField["type"] }))
+      t.fields.map((f) => ({
+        key: f.key,
+        type: f.type as TemplateField["type"],
+      })),
     );
     setIsModalOpen(true);
   };
@@ -75,11 +82,7 @@ export default function TemplatesPage() {
   const addField = () => setFields([...fields, { key: "", type: "text" }]);
   const removeField = (index: number) =>
     setFields(fields.filter((_, i) => i !== index));
-  const updateField = (
-    index: number,
-    key: "key" | "type",
-    val: string
-  ) => {
+  const updateField = (index: number, key: "key" | "type", val: string) => {
     const next = [...fields];
     next[index] = { ...next[index], [key]: val };
     setFields(next);
@@ -104,10 +107,7 @@ export default function TemplatesPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["templates"] });
-      add(
-        editingTemplate ? "Template updated" : "Template created",
-        "success"
-      );
+      add(editingTemplate ? "Template updated" : "Template created", "success");
       closeModal();
     },
     onError: () => add("Failed to save template", "error"),
@@ -133,7 +133,9 @@ export default function TemplatesPage() {
               Metadata Templates
             </h1>
             <p className="text-sm text-gray-500 mt-1 max-w-lg">
-              Define reusable sets of custom metadata fields (like "Invoice Data" or "Contract Info") so users don't have to manually type field names.
+              Define reusable sets of custom metadata fields (like "Invoice
+              Data" or "Contract Info") so users don't have to manually type
+              field names.
             </p>
           </div>
           <button
@@ -153,17 +155,21 @@ export default function TemplatesPage() {
           ) : templates.length === 0 ? (
             <div className="text-center py-20 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-dashed border-gray-300 dark:border-gray-700">
               <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <TableProperties size={32} className="text-primary-600 dark:text-primary-400" />
+                <TableProperties
+                  size={32}
+                  className="text-primary-600 dark:text-primary-400"
+                />
               </div>
               <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">
                 No Templates Yet
               </h3>
               <p className="text-sm text-gray-500 max-w-md mx-auto mb-6">
-                Create metadata templates to standardize how your organization categorizes and searches for specific types of documents.
+                Create metadata templates to standardize how your organization
+                categorizes and searches for specific types of documents.
               </p>
               <button
                 onClick={openNewModal}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-white border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 text-sm font-semibold rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition"
+                className=" inline-flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-medium text-sm rounded-lg shadow-sm transition-colors"
               >
                 <Plus size={16} /> Create Your First Template
               </button>
@@ -189,7 +195,11 @@ export default function TemplatesPage() {
                       </button>
                       <button
                         onClick={() => {
-                          if (window.confirm("Are you sure you want to delete this template?")) {
+                          if (
+                            window.confirm(
+                              "Are you sure you want to delete this template?",
+                            )
+                          ) {
                             deleteMutation.mutate(t.id);
                           }
                         }}
@@ -218,11 +228,16 @@ export default function TemplatesPage() {
                           key={f.id}
                           className="inline-flex items-center gap-1 px-2 py-1 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md text-xs font-medium text-gray-700 dark:text-gray-300"
                         >
-                          {f.key} <span className="text-[10px] text-gray-400 font-normal">({f.type})</span>
+                          {f.key}{" "}
+                          <span className="text-[10px] text-gray-400 font-normal">
+                            ({f.type})
+                          </span>
                         </span>
                       ))}
                       {t.fields.length === 0 && (
-                        <span className="text-xs text-gray-400 italic">No fields defined</span>
+                        <span className="text-xs text-gray-400 italic">
+                          No fields defined
+                        </span>
                       )}
                     </div>
                   </div>
@@ -267,7 +282,8 @@ export default function TemplatesPage() {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                  Description <span className="text-gray-400 font-normal">(optional)</span>
+                  Description{" "}
+                  <span className="text-gray-400 font-normal">(optional)</span>
                 </label>
                 <textarea
                   value={description}
@@ -293,12 +309,16 @@ export default function TemplatesPage() {
 
                 <div className="space-y-3">
                   {fields.length === 0 && (
-                     <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg dark:bg-amber-900/20 dark:border-amber-800">
-                       <AlertCircle size={16} className="text-amber-500 shrink-0" />
-                       <p className="text-xs text-amber-700 dark:text-amber-400">
-                         This template has no fields. Users won't see anything if applied. Add a field above.
-                       </p>
-                     </div>
+                    <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg dark:bg-amber-900/20 dark:border-amber-800">
+                      <AlertCircle
+                        size={16}
+                        className="text-amber-500 shrink-0"
+                      />
+                      <p className="text-xs text-amber-700 dark:text-amber-400">
+                        This template has no fields. Users won't see anything if
+                        applied. Add a field above.
+                      </p>
+                    </div>
                   )}
 
                   {fields.map((f, i) => (
@@ -306,7 +326,9 @@ export default function TemplatesPage() {
                       <div className="flex-1">
                         <input
                           value={f.key}
-                          onChange={(e) => updateField(i, "key", e.target.value)}
+                          onChange={(e) =>
+                            updateField(i, "key", e.target.value)
+                          }
                           placeholder="Field name (e.g. Total Amount)"
                           className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:text-white placeholder-gray-400"
                         />
@@ -314,7 +336,9 @@ export default function TemplatesPage() {
                       <div className="w-32 shrink-0">
                         <select
                           value={f.type}
-                          onChange={(e) => updateField(i, "type", e.target.value)}
+                          onChange={(e) =>
+                            updateField(i, "type", e.target.value)
+                          }
                           className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm dark:text-white"
                         >
                           <option value="text">Text (ABC)</option>
@@ -347,7 +371,11 @@ export default function TemplatesPage() {
                 disabled={!name.trim() || saveMutation.isPending}
                 className="flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 rounded-xl shadow-sm shadow-primary-500/30 disabled:opacity-50 transition"
               >
-                {saveMutation.isPending ? <Loader size={16} className="animate-spin" /> : <Save size={16} />}
+                {saveMutation.isPending ? (
+                  <Loader size={16} className="animate-spin" />
+                ) : (
+                  <Save size={16} />
+                )}
                 {saveMutation.isPending ? "Saving..." : "Save Template"}
               </button>
             </div>
