@@ -5,6 +5,8 @@ export default defineConfig({
   schema: "prisma/schema.prisma",
   datasource: {
     url: env("DATABASE_URL"), // ✅ use env() helper, not process.env
-    shadowDatabaseUrl: env("SHADOW_DATABASE_URL"),
+    // Optional in runtime/deploy environments (Render).
+    // Needed only for commands that require a shadow DB (migrate dev/diff).
+    shadowDatabaseUrl: process.env.SHADOW_DATABASE_URL,
   },
 });
