@@ -41,6 +41,19 @@ router.get("/stats", verifyAuth, async (req: AuthRequest, res: Response) => {
         ? { OR: [{ id: { in: allowedFileIds } }, { uploadedById: userId }] }
         : {}),
     };
+    const docMime = [
+      { mimeType: { contains: "pdf" } },
+      { mimeType: { contains: "word" } },
+      { mimeType: { contains: "text" } },
+    ];
+    const imageMime = [{ mimeType: { startsWith: "image/" } }];
+    const mediaMime = [
+      { mimeType: { startsWith: "video/" } },
+      { mimeType: { startsWith: "audio/" } },
+    ];
+    const otherMime = [
+      { NOT: { OR: [...docMime, ...imageMime, ...mediaMime] } },
+    ];
 
     const [
       tenantData,
@@ -50,6 +63,14 @@ router.get("/stats", verifyAuth, async (req: AuthRequest, res: Response) => {
       storageResult,
       recentFiles,
       categoryCount,
+      docsAgg,
+      imagesAgg,
+      mediaAgg,
+      othersAgg,
+      docsLatest,
+      imagesLatest,
+      mediaLatest,
+      othersLatest,
     ] = await Promise.all([
       prisma.tenant.findUnique({
         where: { id: tenantId },
@@ -77,6 +98,46 @@ router.get("/stats", verifyAuth, async (req: AuthRequest, res: Response) => {
         },
       }),
       prisma.category.count({ where: { tenantId } }),
+      prisma.file.aggregate({
+        where: { AND: [fileWhere, { OR: docMime }] },
+        _sum: { size: true },
+        _count: { _all: true },
+      }),
+      prisma.file.aggregate({
+        where: { AND: [fileWhere, { OR: imageMime }] },
+        _sum: { size: true },
+        _count: { _all: true },
+      }),
+      prisma.file.aggregate({
+        where: { AND: [fileWhere, { OR: mediaMime }] },
+        _sum: { size: true },
+        _count: { _all: true },
+      }),
+      prisma.file.aggregate({
+        where: { AND: [fileWhere, ...otherMime] },
+        _sum: { size: true },
+        _count: { _all: true },
+      }),
+      prisma.file.findFirst({
+        where: { AND: [fileWhere, { OR: docMime }] },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      }),
+      prisma.file.findFirst({
+        where: { AND: [fileWhere, { OR: imageMime }] },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      }),
+      prisma.file.findFirst({
+        where: { AND: [fileWhere, { OR: mediaMime }] },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      }),
+      prisma.file.findFirst({
+        where: { AND: [fileWhere, ...otherMime] },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      }),
     ]);
 
     const storageBytes = storageResult._sum.size || 0;
@@ -94,6 +155,28 @@ router.get("/stats", verifyAuth, async (req: AuthRequest, res: Response) => {
         storageMB: Math.round((storageBytes / 1024 / 1024) * 10) / 10,
         storageLimit,
         plan: tenantData?.plan ?? "free",
+      },
+      typeStats: {
+        documents: {
+          count: docsAgg._count._all ?? 0,
+          sizeBytes: docsAgg._sum.size ?? 0,
+          lastUpdate: docsLatest?.createdAt ?? null,
+        },
+        images: {
+          count: imagesAgg._count._all ?? 0,
+          sizeBytes: imagesAgg._sum.size ?? 0,
+          lastUpdate: imagesLatest?.createdAt ?? null,
+        },
+        media: {
+          count: mediaAgg._count._all ?? 0,
+          sizeBytes: mediaAgg._sum.size ?? 0,
+          lastUpdate: mediaLatest?.createdAt ?? null,
+        },
+        others: {
+          count: othersAgg._count._all ?? 0,
+          sizeBytes: othersAgg._sum.size ?? 0,
+          lastUpdate: othersLatest?.createdAt ?? null,
+        },
       },
       recentFiles,
     });

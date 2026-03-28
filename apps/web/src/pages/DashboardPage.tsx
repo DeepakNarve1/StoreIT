@@ -148,6 +148,12 @@ export default function DashboardPage() {
           storageLimit?: number;
           plan?: string;
         };
+        typeStats: {
+          documents: { count: number; sizeBytes: number; lastUpdate: string | null };
+          images: { count: number; sizeBytes: number; lastUpdate: string | null };
+          media: { count: number; sizeBytes: number; lastUpdate: string | null };
+          others: { count: number; sizeBytes: number; lastUpdate: string | null };
+        };
         recentFiles: any[];
       };
     },
@@ -155,27 +161,9 @@ export default function DashboardPage() {
   });
 
   const stats = data?.stats;
+  const typeStats = data?.typeStats;
   const recentFiles = data?.recentFiles ?? [];
   const totalBytes = stats?.storageLimit ?? 100 * 1024 * 1024 * 1024;
-
-  const docFiles = recentFiles.filter(
-    (f) =>
-      f.mimeType.includes("pdf") ||
-      f.mimeType.includes("word") ||
-      f.mimeType.includes("text"),
-  );
-  const imageFiles = recentFiles.filter((f) => f.mimeType.startsWith("image/"));
-  const mediaFiles = recentFiles.filter(
-    (f) => f.mimeType.startsWith("video/") || f.mimeType.startsWith("audio/"),
-  );
-  const otherFiles = recentFiles.filter(
-    (f) =>
-      !f.mimeType.includes("pdf") &&
-      !f.mimeType.includes("word") &&
-      !f.mimeType.startsWith("image/") &&
-      !f.mimeType.startsWith("video/") &&
-      !f.mimeType.startsWith("audio/"),
-  );
 
   const storageGB = stats ? stats.storageBytes / 1024 / 1024 / 1024 : 0;
   const storageMB = stats ? stats.storageBytes / 1024 / 1024 : 0;
@@ -191,48 +179,60 @@ export default function DashboardPage() {
 
   const TYPE_CARDS = [
     {
+      type: "pdf",
       label: "Documents",
       icon: FileText,
       iconBg: "bg-red-100 dark:bg-red-900/30",
       iconColor: "text-red-500",
       size: formatBytes(
-        docFiles.reduce((s: number, f: any) => s + (f.size ?? 0), 0),
+        typeStats?.documents.sizeBytes ?? 0,
       ),
-      count: docFiles.length,
-      lastUpdate: docFiles[0] ? formatDate(docFiles[0].createdAt) : "—",
+      count: typeStats?.documents.count ?? 0,
+      lastUpdate: typeStats?.documents.lastUpdate
+        ? formatDate(typeStats.documents.lastUpdate)
+        : "—",
     },
     {
+      type: "image",
       label: "Images",
       icon: Image,
       iconBg: "bg-pink-100 dark:bg-pink-900/30",
       iconColor: "text-pink-500",
       size: formatBytes(
-        imageFiles.reduce((s: number, f: any) => s + (f.size ?? 0), 0),
+        typeStats?.images.sizeBytes ?? 0,
       ),
-      count: imageFiles.length,
-      lastUpdate: imageFiles[0] ? formatDate(imageFiles[0].createdAt) : "—",
+      count: typeStats?.images.count ?? 0,
+      lastUpdate: typeStats?.images.lastUpdate
+        ? formatDate(typeStats.images.lastUpdate)
+        : "—",
     },
     {
+      type: "video",
       label: "Media",
       icon: Film,
       iconBg: "bg-orange-100 dark:bg-orange-900/30",
       iconColor: "text-orange-500",
       size: formatBytes(
-        mediaFiles.reduce((s: number, f: any) => s + (f.size ?? 0), 0),
+        typeStats?.media.sizeBytes ?? 0,
       ),
-      count: mediaFiles.length,
-      lastUpdate: mediaFiles[0] ? formatDate(mediaFiles[0].createdAt) : "—",
+      count: typeStats?.media.count ?? 0,
+      lastUpdate: typeStats?.media.lastUpdate
+        ? formatDate(typeStats.media.lastUpdate)
+        : "—",
     },
     {
+      type: "all",
       label: "Others",
       icon: Archive,
       iconBg: "bg-rose-100 dark:bg-rose-900/30",
       iconColor: "text-rose-500",
       size: formatBytes(
-        otherFiles.reduce((s: number, f: any) => s + (f.size ?? 0), 0),
+        typeStats?.others.sizeBytes ?? 0,
       ),
-      count: otherFiles.length,
-      lastUpdate: otherFiles[0] ? formatDate(otherFiles[0].createdAt) : "—",
+      count: typeStats?.others.count ?? 0,
+      lastUpdate: typeStats?.others.lastUpdate
+        ? formatDate(typeStats.others.lastUpdate)
+        : "—",
     },
   ];
 
@@ -275,6 +275,28 @@ export default function DashboardPage() {
               </div>
             </div>
 
+            {/* Quick counts */}
+            <div className="grid grid-cols-2 gap-4">
+              <button
+                onClick={() => navigate("/browse?type=all")}
+                className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl p-4 text-left hover:shadow-sm transition-all"
+              >
+                <p className="text-xs text-gray-500 dark:text-gray-400">Files</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
+                  {isLoading ? "—" : (stats?.files ?? 0)}
+                </p>
+              </button>
+              <button
+                onClick={() => navigate("/browse?type=all")}
+                className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl p-4 text-left hover:shadow-sm transition-all"
+              >
+                <p className="text-xs text-gray-500 dark:text-gray-400">Folders</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">
+                  {isLoading ? "—" : (stats?.folders ?? 0)}
+                </p>
+              </button>
+            </div>
+
             {/* Type cards */}
             <div className="grid grid-cols-2 gap-4">
               {TYPE_CARDS.map((card) => {
@@ -282,7 +304,7 @@ export default function DashboardPage() {
                 return (
                   <button
                     key={card.label}
-                    onClick={() => navigate("/browse")}
+                    onClick={() => navigate(`/browse?type=${card.type}`)}
                     className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800
                                rounded-2xl p-5 text-left hover:shadow-md transition-all hover:-translate-y-0.5 group"
                   >

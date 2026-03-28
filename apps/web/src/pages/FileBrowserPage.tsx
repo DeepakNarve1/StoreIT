@@ -18,6 +18,7 @@ import {
   FolderInput,
   Download,
   Loader2,
+  X,
   Settings,
   Share2,
   Tag,
@@ -76,6 +77,19 @@ export default function FileBrowserPage() {
     if (searchParams.get("upload") === "1") {
       setShowUpload(true);
     }
+  }, [searchParams]);
+  useEffect(() => {
+    const qType = (searchParams.get("type") ?? "all").toLowerCase();
+    const allowed = new Set([
+      "all",
+      "pdf",
+      "image",
+      "video",
+      "word",
+      "excel",
+      "zip",
+    ]);
+    setTypeFilter(allowed.has(qType) ? qType : "all");
   }, [searchParams]);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
@@ -331,9 +345,12 @@ export default function FileBrowserPage() {
 
   // ── Fetch files ───────────────────────────────────────────────────────────
   const { data: filesData, isLoading: filesLoading } = useQuery({
-    queryKey: ["files", folderId ?? "root"],
+    queryKey: ["files", folderId ?? "root", typeFilter],
     queryFn: async () => {
-      const res = await api.get("/files", { params: { folderId } });
+      const includeAll = !folderId && typeFilter !== "all";
+      const res = await api.get("/files", {
+        params: { folderId, ...(includeAll ? { includeAll: "1" } : {}) },
+      });
       return res.data as { files: any[] };
     },
   });
@@ -795,28 +812,51 @@ export default function FileBrowserPage() {
   };
 
   const allFiles = filesData?.files ?? [];
+  const hasExt = (name: string | undefined, exts: string[]) => {
+    const n = String(name ?? "").toLowerCase();
+    return exts.some((ext) => n.endsWith(ext));
+  };
   const filteredFiles = allFiles
     .filter((f) => {
+      const mime = String(f.mimeType ?? "").toLowerCase();
       if (typeFilter === "all") return true;
-      if (typeFilter === "pdf") return f.mimeType.includes("pdf");
-      if (typeFilter === "image") return f.mimeType.startsWith("image/");
-      if (typeFilter === "video") return f.mimeType.startsWith("video/");
+      if (typeFilter === "pdf")
+        return mime.includes("pdf") || hasExt(f.name, [".pdf"]);
+      if (typeFilter === "image")
+        return (
+          mime.startsWith("image/") ||
+          hasExt(f.name, [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"])
+        );
+      if (typeFilter === "video")
+        return (
+          mime.startsWith("video/") || hasExt(f.name, [".mp4", ".mov", ".avi", ".mkv", ".webm"])
+        );
       if (typeFilter === "word")
         return (
-          f.mimeType.includes("msword") ||
-          f.mimeType.includes("wordprocessingml")
+          mime.includes("msword") ||
+          mime.includes("wordprocessingml") ||
+          hasExt(f.name, [".doc", ".docx"])
         );
       if (typeFilter === "excel")
         return (
-          f.mimeType.includes("excel") || f.mimeType.includes("spreadsheetml")
+          mime.includes("excel") ||
+          mime.includes("spreadsheetml") ||
+          hasExt(f.name, [".xls", ".xlsx", ".csv"])
         );
       if (typeFilter === "zip")
-        return f.mimeType.includes("zip") || f.mimeType.includes("compressed");
+        return (
+          mime.includes("zip") ||
+          mime.includes("compressed") ||
+          hasExt(f.name, [".zip", ".rar", ".7z", ".tar", ".gz"])
+        );
       return true;
     });
   const files = applyManualOrder(filteredFiles, manualOrder.files);
   const foldersRaw = foldersData?.folders ?? [];
-  const folders = applyManualOrder(foldersRaw, manualOrder.folders);
+  const folders =
+    typeFilter === "all"
+      ? applyManualOrder(foldersRaw, manualOrder.folders)
+      : [];
   const folderIds = folderId
     ? Array.from(new Set([...folders.map((f) => f.id), folderId]))
     : folders.map((f) => f.id);
@@ -830,7 +870,11 @@ export default function FileBrowserPage() {
     queryClient.invalidateQueries({ queryKey: ["files", folderId ?? "root"] });
   };
 
-  const handleFileClick = (file: any) => setDetailFile(file);
+  const handleFileClick = (file: any) => {
+    setSelectedFiles([]);
+    setSelectedFolders([]);
+    setDetailFile(file);
+  };
   const handleOpenVersionUpload = (file: any) => {
     setVersionUploadTarget(file);
     versionFileInputRef.current?.click();
@@ -1139,6 +1183,19 @@ export default function FileBrowserPage() {
   };
 
   const openRetentionToolbar = () => {
+    // Detailed file view shortcut:
+    // if a file detail is open and nothing is selected, allow retention directly.
+    if (
+      detailFile &&
+      selectedFiles.length === 0 &&
+      selectedFolders.length === 0
+    ) {
+      setSelectedFiles([detailFile.id]);
+      setSelectedFolders([]);
+      setRetentionScope("file");
+      setShowRetentionModal(true);
+      return;
+    }
     if (selectedFiles.length === 0 && selectedFolders.length === 0) {
       useToast.getState().add("Select file(s) or folder(s) to apply retention");
       return;
@@ -2253,7 +2310,17 @@ export default function FileBrowserPage() {
 
           {/* Upload zone */}
           {showUpload && (
-            <div className="mb-6">
+            <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
+              <div className="mb-2 flex items-center justify-end">
+                <button
+                  onClick={() => setShowUpload(false)}
+                  className="inline-flex items-center justify-center rounded-md p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
+                  title="Close upload panel"
+                  aria-label="Close upload panel"
+                >
+                  <X size={14} />
+                </button>
+              </div>
               <UploadZone
                 folderId={folderId}
                 onUploadComplete={handleUploadComplete}

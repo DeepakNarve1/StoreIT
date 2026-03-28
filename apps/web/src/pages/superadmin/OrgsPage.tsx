@@ -71,7 +71,7 @@ const formatBytes = (bytes: number) => {
 
 export default function OrgsPage() {
   const queryClient = useQueryClient();
-  const { setAuth } = useAuthStore();
+  const { setAuth, user } = useAuthStore();
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [selectedOrg, setSelectedOrg] = useState<Org | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -86,12 +86,18 @@ export default function OrgsPage() {
   const [formError, setFormError] = useState("");
 
   // Fetch all orgs
-  const { data, isLoading } = useQuery({
+  const {
+    data,
+    isLoading,
+    isError: orgsError,
+    error: orgsErrorObj,
+  } = useQuery({
     queryKey: ["superadmin", "orgs"],
     queryFn: async () => {
       const res = await api.get("/superadmin/orgs");
       return res.data as { orgs: Org[] };
     },
+    enabled: user?.role === "SUPERADMIN",
   });
 
   // Fetch org stats
@@ -234,6 +240,19 @@ export default function OrgsPage() {
             New Organisation
           </button>
         </div>
+
+        {user?.role !== "SUPERADMIN" && (
+          <div className="mb-5 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+            Superadmin data is available only for `SUPERADMIN` accounts.
+          </div>
+        )}
+
+        {orgsError && (
+          <div className="mb-5 rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+            Failed to load organisations.{" "}
+            {(orgsErrorObj as any)?.response?.data?.error ?? "Please retry."}
+          </div>
+        )}
 
         {/* Stats summary */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

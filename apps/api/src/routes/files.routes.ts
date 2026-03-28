@@ -198,8 +198,16 @@ const fileSelect = {
 // ─── GET /api/files ───────────────────────────────────────────────────────────
 router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
-    const { folderId } = req.query;
+    const { folderId, includeAll } = req.query;
     const { userId, tenantId, role } = req.user!;
+    const includeAllRaw = String(includeAll ?? "").toLowerCase();
+    const includeAllFiles =
+      includeAllRaw === "1" || includeAllRaw === "true";
+    const folderFilter = includeAllFiles
+      ? undefined
+      : isValidUUID(folderId)
+        ? folderId
+        : null;
 
     const isPrivileged = [
       "SUPERADMIN",
@@ -214,7 +222,7 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
       files = await prisma.file.findMany({
         where: {
           tenantId,
-          folderId: isValidUUID(folderId) ? folderId : null,
+          folderId: folderFilter,
           isDeleted: false,
         },
         orderBy: { createdAt: "desc" },
@@ -282,7 +290,7 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
       files = await prisma.file.findMany({
         where: {
           tenantId,
-          folderId: isValidUUID(folderId) ? folderId : null,
+          folderId: folderFilter,
           isDeleted: false,
           OR: [
             { id: { in: allowedFileIds } },

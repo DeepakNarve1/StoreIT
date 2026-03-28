@@ -76,7 +76,12 @@ export default function UsersPage() {
   // Controlled map of userId -> departmentId for the assignment dropdowns
   const [deptMap, setDeptMap] = useState<Record<string, string>>({});
 
-  const { data: usersData, isLoading: usersLoading } = useQuery({
+  const {
+    data: usersData,
+    isLoading: usersLoading,
+    isError: usersError,
+    error: usersErrorObj,
+  } = useQuery({
     queryKey: ["users"],
     queryFn: async () => {
       const res = await api.get("/users");
@@ -237,7 +242,7 @@ export default function UsersPage() {
     },
   });
 
-  const users = (usersData?.users ?? []).filter((u) => u.role !== "SUPERADMIN");
+  const users = usersData?.users ?? [];
   const invites = invitesData?.invites ?? [];
   const canEditRoles =
     currentUser?.role === "ORG_ADMIN" || currentUser?.role === "SUPERADMIN";
@@ -279,6 +284,13 @@ export default function UsersPage() {
               Upgrade plan
               <ArrowUpRight size={12} />
             </button>
+          </div>
+        )}
+
+        {usersError && (
+          <div className="mb-5 rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+            Failed to load users.{" "}
+            {(usersErrorObj as any)?.response?.data?.error ?? "Please retry."}
           </div>
         )}
 
