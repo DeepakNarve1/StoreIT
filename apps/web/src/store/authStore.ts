@@ -8,6 +8,13 @@ interface User {
   role: string;
   tenantId: string;
   tenantName: string;
+  roleProfile?: {
+    id: string | null;
+    name: string;
+    baseRole: string;
+    capabilities: Record<string, boolean>;
+  } | null;
+  roleCapabilities?: Record<string, boolean>;
 }
 
 interface AuthState {

@@ -19,6 +19,13 @@ import AppShell from "../components/layout/AppShell";
 import FilePreviewModal from "../components/files/FilePreviewModal";
 import api from "../api/axios";
 import clsx from "clsx";
+import type { BrowserFileItem } from "../types/file-browser";
+
+/** Search API file hit — includes optional relations for display */
+type SearchFileRow = BrowserFileItem & {
+  folder?: { name: string } | null;
+  category?: { name: string } | null;
+};
 
 const formatBytes = (bytes: number) => {
   if (bytes === 0) return "0 B";
@@ -84,28 +91,22 @@ export default function SearchPage() {
   const [typeFilter, setTypeFilter] = useState(
     searchParams.get("type") || "all",
   );
-  const [previewFile, setPreviewFile] = useState<any>(null);
+  const [previewFile, setPreviewFile] = useState<SearchFileRow | null>(null);
 
   const query = searchParams.get("q") || "";
   const queryClient = useQueryClient();
 
-  // Update URL when input changes (debounced)
+  // Keep URL in sync with input + type (debounced; avoids stale closures in search)
   useEffect(() => {
-    if (input.trim()) {
-      const timer = setTimeout(() => {
-        setSearchParams({ q: input.trim(), type: typeFilter });
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-  }, [input]);
-
-  useEffect(() => {
-    if (query) {
-      setSearchParams({ q: query, type: typeFilter });
-    } else {
-      setSearchParams({});
-    }
-  }, [typeFilter]);
+    const timer = window.setTimeout(() => {
+      if (!input.trim()) {
+        setSearchParams({});
+        return;
+      }
+      setSearchParams({ q: input.trim(), type: typeFilter });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [input, typeFilter, setSearchParams]);
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ["search", query, typeFilter],
@@ -118,9 +119,19 @@ export default function SearchPage() {
         },
       });
       return res.data as {
-        files: any[];
-        folders: any[];
-        categories: any[];
+        files: SearchFileRow[];
+        folders: Array<{
+          id: string;
+          name: string;
+          createdAt: string;
+          _count: { files: number };
+          category?: { name: string };
+        }>;
+        categories: Array<{
+          id: string;
+          name: string;
+          _count: { files: number; folders: number };
+        }>;
         total: number;
         query: string;
       };
@@ -407,7 +418,7 @@ export default function SearchPage() {
                             {formatBytes(file.size)}
                             {file.folder && ` · ${file.folder.name}`}
                             {file.category && ` · ${file.category.name}`}
-                            {file.version > 1 && ` · v${file.version}`}
+                            {(file.version ?? 0) > 1 && ` · v${file.version}`}
                           </p>
                         </div>
                         <div className="text-right shrink-0">

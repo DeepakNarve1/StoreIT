@@ -46,6 +46,7 @@ export default function MetadataPage() {
 
         {fileId ? (
           <FileMetadataPanel
+            key={fileId}
             fileId={fileId}
             fileName={state.fileName ?? "File"}
             variant="page"
@@ -53,6 +54,7 @@ export default function MetadataPage() {
           />
         ) : folderId ? (
           <FolderMetadataPanel
+            key={folderId}
             folderId={folderId}
             folderName={state.folderName ?? "Folder"}
             variant="page"

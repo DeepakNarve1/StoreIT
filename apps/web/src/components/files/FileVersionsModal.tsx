@@ -11,9 +11,18 @@ import {
 import api from "../../api/axios";
 
 interface FileVersionsModalProps {
-  file: { id: string; name: string; version: number };
+  file: { id: string; name: string; version?: number };
   onClose: () => void;
 }
+
+type FileVersionRow = {
+  id: string;
+  version: number;
+  isCurrent?: boolean;
+  createdAt: string;
+  size: number;
+  uploadedBy?: { name?: string | null } | null;
+};
 
 const formatBytes = (bytes: number) => {
   if (bytes === 0) return "0 B";
@@ -35,7 +44,7 @@ export default function FileVersionsModal({
     queryFn: async () => {
       const res = await api.get(`/files/${file.id}/versions`);
       return res.data as {
-        versions: any[];
+        versions: FileVersionRow[];
         currentVersion: number;
       };
     },

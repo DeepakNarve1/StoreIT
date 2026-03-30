@@ -161,9 +161,15 @@ router.patch("/orgs/:id", async (req: AuthRequest, res: Response) => {
       data: {
         ...(plan !== undefined && { plan }),
         ...(isActive !== undefined && { isActive }),
-        // If a superadmin manually overrides the plan, clear the Stripe
-        // subscription reference so the billing page doesn't show stale data.
-        ...(plan !== undefined && { stripeSubscriptionId: null }),
+        // Manual plan overrides should clear any live billing linkage so the
+        // tenant billing page does not show stale subscription information.
+        ...(plan !== undefined && {
+          stripeSubscriptionId: null,
+          stripeCustomerId: null,
+          razorpaySubscriptionId: null,
+          razorpayCustomerId: null,
+          razorpayPlanId: null,
+        }),
       },
       select: { id: true, name: true, slug: true, plan: true, isActive: true },
     });
@@ -239,6 +245,9 @@ router.get("/orgs/:id/stats", async (req: AuthRequest, res: Response) => {
         isActive: true,
         stripeCustomerId: true,
         stripeSubscriptionId: true,
+        razorpayCustomerId: true,
+        razorpaySubscriptionId: true,
+        razorpayPlanId: true,
       },
     });
     if (!tenant) {

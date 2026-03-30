@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import AppShell from "../../components/layout/AppShell";
 import api from "../../api/axios";
-import { useToast } from "../../components/ui/Toast";
+import { useToast } from "../../components/ui/toastStore";
 
 interface TemplateField {
   key: string;

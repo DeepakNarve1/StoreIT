@@ -24,6 +24,7 @@ import {
   Tag,
   Info,
   GripVertical,
+  Workflow,
 } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import FileGrid from "../components/files/FileGrid";
@@ -38,7 +39,7 @@ import FileVersionsModal from "../components/files/FileVersionsModal";
 import MoveFileModal from "../components/files/MoveFileModal";
 import AssignCategoryModal from "../components/files/AssignCategoryModal";
 import AssignTagModal from "../components/files/AssignTagModal.tsx";
-import { useToast } from "../components/ui/Toast";
+import { useToast } from "../components/ui/toastStore";
 import FileCommentsPanel from "../components/files/FileCommentsPanel";
 import RetentionModal, {
   type RetentionAction,
@@ -49,6 +50,12 @@ import ApprovalDetailPanel from "../components/files/ApprovalDetailPanel";
 import { useFileCapabilities } from "../hooks/useFileCapabilities";
 import { useFolderCapabilities } from "../hooks/useFolderCapabilities";
 import DeleteModal from "../components/common/DeleteModal";
+import ApprovalWorkflowPanel from "../components/files/ApprovalWorkflowPanel";
+import ApprovalWorkflowComposerModal from "../components/files/ApprovalWorkflowComposerModal";
+import ApprovalWorkflowCenterPanel from "../components/files/ApprovalWorkflowCenterPanel";
+import axios from "axios";
+import type { BrowserFileItem, CategoryOption } from "../types/file-browser";
+import type { StartedApprovalWorkflow, WorkflowWithFile } from "../types/workflow";
 
 type ViewMode = "grid" | "list";
 
@@ -59,6 +66,37 @@ interface StoreITem {
   _count: { files: number; children: number };
   totalFiles?: number;
   totalMissingMeta?: number;
+  categoryId?: string | null;
+}
+
+const RETENTION_QUEUE_KEY = "storeit_retention_queue_v1";
+
+type RetentionJob = {
+  id: string;
+  scope: "file" | "folder";
+  action: RetentionAction;
+  resourceIds: string[];
+  applyAt: number | null;
+  createdAt: number;
+  retention: string;
+  reminder?: string | null;
+  reminderAt?: number | null;
+};
+
+function loadRetentionQueue(): RetentionJob[] {
+  try {
+    const raw = localStorage.getItem(RETENTION_QUEUE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed as RetentionJob[];
+  } catch {
+    return [];
+  }
+}
+
+function saveRetentionQueue(queue: RetentionJob[]) {
+  localStorage.setItem(RETENTION_QUEUE_KEY, JSON.stringify(queue));
 }
 
 export default function FileBrowserPage() {
@@ -93,20 +131,19 @@ export default function FileBrowserPage() {
   }, [searchParams]);
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
-  const [previewFile, setPreviewFile] = useState<any>(null);
-  const [detailFile, setDetailFile] = useState<any>(null);
+  const [previewFile, setPreviewFile] = useState<BrowserFileItem | null>(null);
+  const [detailFile, setDetailFile] = useState<BrowserFileItem | null>(null);
   const versionFileInputRef = useRef<HTMLInputElement | null>(null);
-  const [versionUploadTarget, setVersionUploadTarget] = useState<any | null>(
-    null,
-  );
+  const [versionUploadTarget, setVersionUploadTarget] =
+    useState<BrowserFileItem | null>(null);
   const [permissionsResource, setPermissionsResource] = useState<{
     id: string;
     type: "file" | "folder";
     name: string;
   } | null>(null);
-  const [versionsFile, setVersionsFile] = useState<any>(null);
-  const handleVersions = (file: any) => setVersionsFile(file);
-  const [moveFiles, setMoveFiles] = useState<any[]>([]);
+  const [versionsFile, setVersionsFile] = useState<BrowserFileItem | null>(null);
+  const handleVersions = (file: BrowserFileItem) => setVersionsFile(file);
+  const [moveFiles, setMoveFiles] = useState<BrowserFileItem[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
   const [newFolderCategoryId, setNewFolderCategoryId] = useState<string>("");
@@ -126,7 +163,7 @@ export default function FileBrowserPage() {
     files: [],
     folders: [],
   });
-  const [commentsFile, setCommentsFile] = useState<any>(null);
+  const [commentsFile, setCommentsFile] = useState<BrowserFileItem | null>(null);
   const [categoryResource, setCategoryResource] = useState<{
     id: string;
     type: "file" | "folder";
@@ -141,17 +178,29 @@ export default function FileBrowserPage() {
     id: string;
     name: string;
   } | null>(null);
-  const [approvalFile, setApprovalFile] = useState<any>(null);
+  const [approvalFile, setApprovalFile] = useState<BrowserFileItem | null>(null);
   const [renameName, setRenameName] = useState("");
   const [renameFolderName, setRenameFolderName] = useState("");
   const [approvalNote, setApprovalNote] = useState("");
-  const [approvalDetailFile, setApprovalDetailFile] = useState<any>(null);
+  const [approvalDetailFile, setApprovalDetailFile] =
+    useState<BrowserFileItem | null>(null);
+  const [workflowPanelFile, setWorkflowPanelFile] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [workflowComposerFile, setWorkflowComposerFile] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [showWorkflowCenter, setShowWorkflowCenter] = useState(false);
+  const [workflowTemplateApproverIds, setWorkflowTemplateApproverIds] =
+    useState<string[]>([]);
   const [showBulkMetadataModal, setShowBulkMetadataModal] = useState(false);
   const [bulkMetadataFields, setBulkMetadataFields] = useState<
     Array<{ key: string; value: string }>
   >([{ key: "", value: "" }]);
 
-  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<BrowserFileItem | null>(null);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
   const [showBulkFolderDelete, setShowBulkFolderDelete] = useState(false);
   const [showRetentionModal, setShowRetentionModal] = useState(false);
@@ -169,12 +218,13 @@ export default function FileBrowserPage() {
       retentionUntil?: string | null;
       action: RetentionAction;
     } | null>(null);
+  /** Bumps on each open so RetentionModal remounts with fresh local state */
+  const [retentionModalNonce, setRetentionModalNonce] = useState(0);
 
   const [showRetentionDetailsModal, setShowRetentionDetailsModal] =
     useState(false);
-  const [retentionDetailsFile, setRetentionDetailsFile] = useState<any | null>(
-    null,
-  );
+  const [retentionDetailsFile, setRetentionDetailsFile] =
+    useState<BrowserFileItem | null>(null);
   const [retentionDetailsJob, setRetentionDetailsJob] = useState<{
     id: string;
     scope: "file" | "folder";
@@ -185,35 +235,6 @@ export default function FileBrowserPage() {
     retention: string;
   } | null>(null);
 
-  const RETENTION_QUEUE_KEY = "storeit_retention_queue_v1";
-
-  type RetentionJob = {
-    id: string;
-    scope: "file" | "folder";
-    action: RetentionAction;
-    resourceIds: string[];
-    applyAt: number | null; // epoch ms (null = Infinite / never auto-trigger)
-    createdAt: number; // epoch ms
-    retention: string;
-    reminder?: string | null; // '1d','3d','5d','7d','custom','none'
-    reminderAt?: number | null; // epoch ms for custom reminder
-  };
-
-  const loadRetentionQueue = (): RetentionJob[] => {
-    try {
-      const raw = localStorage.getItem(RETENTION_QUEUE_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      return parsed as RetentionJob[];
-    } catch {
-      return [];
-    }
-  };
-
-  const saveRetentionQueue = (queue: RetentionJob[]) => {
-    localStorage.setItem(RETENTION_QUEUE_KEY, JSON.stringify(queue));
-  };
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDeletingFolders, setIsDeletingFolders] = useState(false);
   const [showModifyMenu, setShowModifyMenu] = useState(false);
@@ -225,12 +246,13 @@ export default function FileBrowserPage() {
     version: false,
     approval: false,
     retention: false,
+    lock: true,
     metaNotFound: true,
   });
 
   // ── Tag modal state ───────────────────────────────────────────────────────
   // Stores the full file object so AssignTagModal can read its current tags
-  const [tagFile, setTagFile] = useState<any>(null);
+  const [tagFile, setTagFile] = useState<BrowserFileItem | null>(null);
 
   // ── Bulk download progress state ──────────────────────────────────────────
   const [isZipping, setIsZipping] = useState(false);
@@ -255,6 +277,18 @@ export default function FileBrowserPage() {
       }
       if (approvalDetailFile) {
         setApprovalDetailFile(null);
+        return;
+      }
+      if (workflowPanelFile) {
+        setWorkflowPanelFile(null);
+        return;
+      }
+      if (workflowComposerFile) {
+        setWorkflowComposerFile(null);
+        return;
+      }
+      if (showWorkflowCenter) {
+        setShowWorkflowCenter(false);
         return;
       }
       if (renameFile) {
@@ -319,7 +353,11 @@ export default function FileBrowserPage() {
   }, [
     approvalFile,
     approvalDetailFile,
+    workflowPanelFile,
+    workflowComposerFile,
+    showWorkflowCenter,
     renameFile,
+    renameFolder,
     tagFile,
     commentsFile,
     versionsFile,
@@ -351,16 +389,18 @@ export default function FileBrowserPage() {
       const res = await api.get("/files", {
         params: { folderId, ...(includeAll ? { includeAll: "1" } : {}) },
       });
-      return res.data as { files: any[] };
+      return res.data as { files: BrowserFileItem[] };
     },
   });
   const { user } = useAuthStore();
-  const canWrite = ["SUPERADMIN", "ORG_ADMIN", "MANAGER", "EDITOR"].includes(
-    user?.role ?? "",
-  );
+  const canWrite =
+    user?.role === "SUPERADMIN" ||
+    user?.roleCapabilities?.add_files === true ||
+    user?.roleCapabilities?.create_folders === true ||
+    ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(user?.role ?? "");
 
   // ── Granular per-file capabilities for VIEWER role ───────────────────────
-  const fileIds = (filesData?.files ?? []).map((f: any) => f.id as string);
+  const fileIds = (filesData?.files ?? []).map((f) => f.id);
   const { capMap } = useFileCapabilities(fileIds);
 
   // ── Fetch subfolders ──────────────────────────────────────────────────────
@@ -371,6 +411,19 @@ export default function FileBrowserPage() {
         params: { parentId: folderId ?? null },
       });
       return res.data as { folders: StoreITem[] };
+    },
+  });
+
+  const { data: workflowInboxData } = useQuery({
+    queryKey: ["workflow-inbox"],
+    queryFn: async () => {
+      const res = await api.get("/workflow/inbox");
+      return res.data as {
+        items: Array<{
+          workflowId: string;
+          file: { id: string; name: string; approvalStatus?: string | null };
+        }>;
+      };
     },
   });
 
@@ -473,7 +526,7 @@ export default function FileBrowserPage() {
       targetFile,
       selectedFile,
     }: {
-      targetFile: any;
+      targetFile: BrowserFileItem;
       selectedFile: File;
     }) => {
       const form = new FormData();
@@ -490,7 +543,7 @@ export default function FileBrowserPage() {
       const res = await api.post("/files/upload", form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      return res.data as { files?: any[] };
+      return res.data as { files?: BrowserFileItem[] };
     },
     onSuccess: (data, vars) => {
       queryClient.invalidateQueries({
@@ -499,27 +552,34 @@ export default function FileBrowserPage() {
       queryClient.invalidateQueries({ queryKey: ["recent-files"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       const updated =
-        data.files?.find((f: any) => f.id === vars.targetFile.id) ?? null;
+        data.files?.find((f) => f.id === vars.targetFile.id) ?? null;
       if (updated) {
-        setDetailFile((prev: any) => ({
+        setDetailFile((prev) => ({
           ...(prev ?? vars.targetFile),
           ...updated,
+          ...(prev?.approvalStatus === "in_review"
+            ? {
+                approvalStatus: "draft",
+                activeWorkflowId: null,
+                currentStepOrder: null,
+              }
+            : {}),
         }));
       }
       useToast.getState().add("New file version uploaded");
     },
-    onError: (e: any) => {
-      useToast
-        .getState()
-        .add(
-          e?.response?.data?.error || "Failed to upload new version",
-          "error",
-        );
+    onError: (e: unknown) => {
+      const msg = axios.isAxiosError(e)
+        ? String(
+            (e.response?.data as { error?: string } | undefined)?.error ?? "",
+          ) || "Failed to upload new version"
+        : "Failed to upload new version";
+      useToast.getState().add(msg, "error");
     },
   });
 
   const starMutation = useMutation({
-    mutationFn: async (file: any) => {
+    mutationFn: async (file: BrowserFileItem) => {
       await api.patch(`/files/${file.id}/star`);
     },
     onSuccess: (_, file) => {
@@ -564,7 +624,7 @@ export default function FileBrowserPage() {
     queryKey: ["categories"],
     queryFn: async () => {
       const res = await api.get("/categories");
-      return res.data as { categories: any[] };
+      return res.data as { categories: CategoryOption[] };
     },
   });
   const categories = categoriesData?.categories ?? [];
@@ -870,12 +930,12 @@ export default function FileBrowserPage() {
     queryClient.invalidateQueries({ queryKey: ["files", folderId ?? "root"] });
   };
 
-  const handleFileClick = (file: any) => {
+  const handleFileClick = (file: BrowserFileItem) => {
     setSelectedFiles([]);
     setSelectedFolders([]);
     setDetailFile(file);
   };
-  const handleOpenVersionUpload = (file: any) => {
+  const handleOpenVersionUpload = (file: BrowserFileItem) => {
     setVersionUploadTarget(file);
     versionFileInputRef.current?.click();
   };
@@ -924,7 +984,7 @@ export default function FileBrowserPage() {
     });
     setVersionUploadTarget(null);
   };
-  const handleShare = (file: any) => {
+  const handleShare = (file: BrowserFileItem) => {
     setPermissionsResource({ id: file.id, type: "file", name: file.name });
   };
   const handleFolderShare = (folder: StoreITem) => {
@@ -961,7 +1021,7 @@ export default function FileBrowserPage() {
       setSortDir("asc");
     }
   };
-  const handleDelete = (file: any) => setDeleteTarget(file);
+  const handleDelete = (file: BrowserFileItem) => setDeleteTarget(file);
 
   const fileCan = (fileId: string, cap: string) =>
     canWrite || capMap[fileId]?.[cap] === true;
@@ -1013,6 +1073,40 @@ export default function FileBrowserPage() {
     selectedFiles.length === 1
       ? files.find((f) => f.id === selectedFiles[0])
       : null;
+  const workflowInboxItems = workflowInboxData?.items ?? [];
+  const workflowToolbarFile = detailFile ?? singleSelectedFile ?? null;
+
+  const openWorkflowComposer = (
+    file: { id: string; name: string },
+    initialApproverIds: string[] = [],
+  ) => {
+    setWorkflowTemplateApproverIds(initialApproverIds);
+    setWorkflowComposerFile({ id: file.id, name: file.name });
+  };
+
+  const patchDetailWorkflowState = (
+    workflow: StartedApprovalWorkflow | WorkflowWithFile,
+  ) => {
+    const targetId =
+      workflow.fileId ?? (workflow as WorkflowWithFile).file?.id;
+    if (!targetId) return;
+    const wf = workflow as WorkflowWithFile;
+    setDetailFile((prev) =>
+      prev && prev.id === targetId
+        ? {
+            ...prev,
+            approvalStatus:
+              workflow.file?.approvalStatus ?? wf.status ?? prev.approvalStatus,
+            activeWorkflowId:
+              wf.status === "in_review" ? workflow.id : null,
+            currentStepOrder:
+              workflow.file?.currentStepOrder ??
+              workflow.currentStepOrder ??
+              null,
+          }
+        : prev,
+    );
+  };
 
   const singleSelectedFolder =
     selectedFolders.length === 1
@@ -1050,9 +1144,18 @@ export default function FileBrowserPage() {
       queryClient.invalidateQueries({ queryKey: ["recent-files"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       useToast.getState().add("File deleted successfully");
-    } catch (e: any) {
-      if (e.response?.data?.error) {
-        useToast.getState().add(e.response.data.error, "error");
+    } catch (e: unknown) {
+      if (
+        axios.isAxiosError(e) &&
+        e.response?.data &&
+        typeof e.response.data === "object" &&
+        e.response.data !== null &&
+        "error" in e.response.data
+      ) {
+        useToast.getState().add(
+          String((e.response.data as { error: string }).error),
+          "error",
+        );
       } else {
         useToast.getState().add("Failed to delete file", "error");
       }
@@ -1066,8 +1169,8 @@ export default function FileBrowserPage() {
     if (!newFolderName.trim()) return;
     createFolder.mutate(newFolderName.trim());
   };
-  const handleMove = (file: any) => setMoveFiles([file]);
-  const handleFolderAssignCategory = (folder: any) =>
+  const handleMove = (file: BrowserFileItem) => setMoveFiles([file]);
+  const handleFolderAssignCategory = (folder: StoreITem) =>
     setCategoryResource({
       id: folder.id,
       type: "folder",
@@ -1193,6 +1296,7 @@ export default function FileBrowserPage() {
       setSelectedFiles([detailFile.id]);
       setSelectedFolders([]);
       setRetentionScope("file");
+      setRetentionModalNonce((n) => n + 1);
       setShowRetentionModal(true);
       return;
     }
@@ -1211,10 +1315,12 @@ export default function FileBrowserPage() {
     }
     if (selectedFiles.length > 0) {
       setRetentionScope("file");
+      setRetentionModalNonce((n) => n + 1);
       setShowRetentionModal(true);
       return;
     }
     setRetentionScope("folder");
+    setRetentionModalNonce((n) => n + 1);
     setShowRetentionModal(true);
   };
 
@@ -1391,7 +1497,7 @@ export default function FileBrowserPage() {
     return best;
   };
 
-  const openRetentionDetails = (file: any) => {
+  const openRetentionDetails = (file: BrowserFileItem) => {
     const job = getCurrentRetentionJobForFile(file.id);
     setRetentionDetailsFile(file);
     setRetentionDetailsJob(job);
@@ -1426,6 +1532,7 @@ export default function FileBrowserPage() {
       setRetentionModalInitialValues(null);
     }
 
+    setRetentionModalNonce((n) => n + 1);
     setShowRetentionModal(true);
   };
 
@@ -1769,6 +1876,22 @@ export default function FileBrowserPage() {
                 <span className="text-[10px] font-medium">Folder</span>
               </button>
             )}
+            <button
+              onClick={() => {
+                if (!workflowToolbarFile) {
+                  setShowWorkflowCenter(true);
+                  return;
+                }
+                setWorkflowPanelFile({
+                  id: workflowToolbarFile.id,
+                  name: workflowToolbarFile.name,
+                });
+              }}
+              className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-primary-600 transition-colors"
+            >
+              <Workflow size={16} />
+              <span className="text-[10px] font-medium">Workflow</span>
+            </button>
             <div className="relative">
               <button
                 onClick={() => {
@@ -1927,8 +2050,7 @@ export default function FileBrowserPage() {
                                       type: "file",
                                       name: singleSelectedFile.name,
                                       currentCategoryId:
-                                        (singleSelectedFile as any)
-                                          .categoryId ?? null,
+                                        singleSelectedFile.categoryId ?? null,
                                     });
                                   }}
                                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
@@ -2029,8 +2151,7 @@ export default function FileBrowserPage() {
                                     type: "folder",
                                     name: singleSelectedFolder.name,
                                     currentCategoryId:
-                                      (singleSelectedFolder as any)
-                                        .categoryId ?? null,
+                                      singleSelectedFolder.categoryId ?? null,
                                   });
                                 }}
                                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
@@ -2174,6 +2295,20 @@ export default function FileBrowserPage() {
                         className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-primary-500 cursor-pointer"
                       />
                       Retention
+                    </label>
+                    <label className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={visibleColumns.lock}
+                        onChange={(e) =>
+                          setVisibleColumns((v) => ({
+                            ...v,
+                            lock: e.target.checked,
+                          }))
+                        }
+                        className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-primary-500 cursor-pointer"
+                      />
+                      Lock
                     </label>
                     <label className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg cursor-pointer">
                       <input
@@ -2499,25 +2634,25 @@ export default function FileBrowserPage() {
 
           {/* Pending approvals badge */}
           {!detailFile &&
-            (user?.role === "ORG_ADMIN" ||
-              user?.role === "MANAGER" ||
-              user?.role === "SUPERADMIN") &&
-            files.some((f) => f.approvalStatus === "pending") && (
+            workflowInboxItems.length > 0 && (
               <div className="flex items-center gap-2 mb-4 p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-xl">
                 <span className="text-sm text-amber-700 dark:text-amber-400 font-medium">
-                  {files.filter((f) => f.approvalStatus === "pending").length}{" "}
-                  file(s) pending approval
+                  {workflowInboxItems.length} workflow item(s) waiting for your
+                  approval
                 </span>
                 <div className="flex gap-1.5 ml-auto flex-wrap">
-                  {files
-                    .filter((f) => f.approvalStatus === "pending")
-                    .map((f) => (
+                  {workflowInboxItems.map((item) => (
                       <button
-                        key={f.id}
-                        onClick={() => setApprovalFile(f)}
+                        key={`${item.workflowId}-${item.file.id}`}
+                        onClick={() =>
+                          setWorkflowPanelFile({
+                            id: item.file.id,
+                            name: item.file.name,
+                          })
+                        }
                         className="text-xs px-2.5 py-1 bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-800 font-medium truncate max-w-35"
                       >
-                        Review: {f.name}
+                        Review: {item.file.name}
                       </button>
                     ))}
                 </div>
@@ -2555,9 +2690,12 @@ export default function FileBrowserPage() {
                 return new Date(job.applyAt).toLocaleString();
               })()}
               onOpenRetention={(file) => openRetentionDetails(file)}
+              onOpenWorkflow={(file) =>
+                setWorkflowPanelFile({ id: file.id, name: file.name })
+              }
               onToggleLock={(file) => {
                 const previous = !!file.isLocked;
-                setDetailFile((prev: any) =>
+                setDetailFile((prev) =>
                   prev && prev.id === file.id
                     ? { ...prev, isLocked: !previous }
                     : prev,
@@ -2566,7 +2704,7 @@ export default function FileBrowserPage() {
                   { fileId: file.id, isLocked: previous },
                   {
                     onError: () => {
-                      setDetailFile((prev: any) =>
+                      setDetailFile((prev) =>
                         prev && prev.id === file.id
                           ? { ...prev, isLocked: previous }
                           : prev,
@@ -2580,6 +2718,11 @@ export default function FileBrowserPage() {
               canViewMetadata={fileCan(detailFile.id, "view_metadata")}
               isLocking={lockMutation.isPending}
               isUploadingVersion={uploadNewVersionMutation.isPending}
+              workflowButtonLabel={
+                detailFile.approvalStatus === "in_review"
+                  ? "Open workflow"
+                  : "Approval workflow"
+              }
             />
           ) : isLoading ? (
             <div className="flex items-center justify-center py-20">
@@ -3142,9 +3285,7 @@ export default function FileBrowserPage() {
                       onDragEnd={() => setDraggedFileId(null)}
                       onMetadata={(file) => openFileMetadataPage(file)}
                       onComments={(file) => setCommentsFile(file)}
-                      onSubmitApproval={(file) =>
-                        submitApprovalMutation.mutate(file.id)
-                      }
+                      onSubmitApproval={(file) => openWorkflowComposer(file)}
                       onLock={(file) =>
                         lockMutation.mutate({
                           fileId: file.id,
@@ -3160,7 +3301,9 @@ export default function FileBrowserPage() {
                         })
                       }
                       onAssignTag={(file) => setTagFile(file)}
-                      onApprovalDetail={(file) => setApprovalDetailFile(file)}
+                      onApprovalDetail={(file) =>
+                        setWorkflowPanelFile({ id: file.id, name: file.name })
+                      }
                       capabilitiesMap={capMap}
                       visibleColumns={visibleColumns}
                       onRetentionClick={(file) => openRetentionDetails(file)}
@@ -3326,6 +3469,48 @@ export default function FileBrowserPage() {
         />
       )}
 
+      {workflowComposerFile && (
+        <ApprovalWorkflowComposerModal
+          file={workflowComposerFile}
+          initialApproverUserIds={workflowTemplateApproverIds}
+          onClose={() => {
+            setWorkflowComposerFile(null);
+            setWorkflowTemplateApproverIds([]);
+          }}
+          onSuccess={(workflow) => {
+            patchDetailWorkflowState(workflow);
+            setWorkflowPanelFile(workflowComposerFile);
+          }}
+        />
+      )}
+
+      {showWorkflowCenter && (
+        <ApprovalWorkflowCenterPanel
+          onClose={() => setShowWorkflowCenter(false)}
+          onOpenWorkflow={(file) => {
+            setShowWorkflowCenter(false);
+            setWorkflowPanelFile(file);
+          }}
+        />
+      )}
+
+      {workflowPanelFile && (
+        <ApprovalWorkflowPanel
+          file={workflowPanelFile}
+          onClose={() => setWorkflowPanelFile(null)}
+          onStartWorkflow={(templateApproverUserIds) => {
+            setWorkflowPanelFile(null);
+            openWorkflowComposer(
+              workflowPanelFile,
+              templateApproverUserIds ?? [],
+            );
+          }}
+          onWorkflowChanged={(workflow) => {
+            patchDetailWorkflowState(workflow);
+          }}
+        />
+      )}
+
       {approvalFile && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-md p-6 shadow-xl">
@@ -3411,6 +3596,7 @@ export default function FileBrowserPage() {
 
       {showRetentionModal && (
         <RetentionModal
+          key={retentionModalNonce}
           scope={retentionScope}
           count={
             retentionScope === "file"

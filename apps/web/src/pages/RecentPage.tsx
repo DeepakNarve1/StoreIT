@@ -13,6 +13,12 @@ import {
 import AppShell from "../components/layout/AppShell";
 import FilePreviewModal from "../components/files/FilePreviewModal";
 import api from "../api/axios";
+import type { BrowserFileItem } from "../types/file-browser";
+
+type RecentFileRow = BrowserFileItem & {
+  updatedAt?: string;
+  folder?: { name: string } | null;
+};
 import clsx from "clsx";
 
 const getFileIcon = (mimeType: string) => {
@@ -74,13 +80,13 @@ const timeAgo = (dateStr: string) => {
 
 export default function RecentPage() {
   const queryClient = useQueryClient();
-  const [previewFile, setPreviewFile] = useState<any>(null);
+  const [previewFile, setPreviewFile] = useState<RecentFileRow | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["recent-files"],
     queryFn: async () => {
       const res = await api.get("/files/recent");
-      return res.data as { files: any[] };
+      return res.data as { files: RecentFileRow[] };
     },
   });
 

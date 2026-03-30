@@ -7,17 +7,24 @@ import FilePreviewModal from "../components/files/FilePreviewModal";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
+import type { BrowserFileItem } from "../types/file-browser";
 
 export default function CategoryPage() {
   const { categoryId } = useParams();
   const navigate = useNavigate();
-  const [previewFile, setPreviewFile] = useState<any>(null);
+  const [previewFile, setPreviewFile] = useState<BrowserFileItem | null>(null);
+
+  type CategoryFolderRow = { id: string; name: string };
 
   const { data, isLoading } = useQuery({
     queryKey: ["category", categoryId],
     queryFn: async () => {
       const res = await api.get(`/categories/${categoryId}/files`);
-      return res.data;
+      return res.data as {
+        category?: { name?: string };
+        files: BrowserFileItem[];
+        folders: CategoryFolderRow[];
+      };
     },
     enabled: !!categoryId,
   });
@@ -74,7 +81,7 @@ export default function CategoryPage() {
                   Folders ({folders.length})
                 </p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                  {folders.map((folder: any) => (
+                  {folders.map((folder) => (
                     <button
                       key={folder.id}
                       onClick={() => navigate(`/browse/${folder.id}`)}

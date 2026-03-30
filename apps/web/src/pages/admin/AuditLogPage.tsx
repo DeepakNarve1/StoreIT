@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import type { LucideIcon } from "lucide-react";
 import {
   Activity,
   Upload,
@@ -23,7 +24,7 @@ const ACTION_CONFIG: Record<
   string,
   {
     label: string;
-    icon: any;
+    icon: LucideIcon;
     color: string;
     bg: string;
   }
@@ -152,12 +153,21 @@ export default function AuditLogPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["audit-logs", page, filterAction, filterType],
     queryFn: async () => {
-      const params: any = { page, limit: 50 };
+      const params: Record<string, string | number> = { page, limit: 50 };
       if (filterAction) params.action = filterAction;
       if (filterType) params.resourceType = filterType;
       const res = await api.get("/audit", { params });
       return res.data as {
-        logs: any[];
+        logs: Array<{
+          id: string;
+          action: string;
+          createdAt: string;
+          resourceName?: string | null;
+          resourceType?: string | null;
+          resourceId?: string | null;
+          user?: { name?: string | null; email?: string | null } | null;
+          metadata?: Record<string, unknown> | null;
+        }>;
         pagination: {
           page: number;
           limit: number;

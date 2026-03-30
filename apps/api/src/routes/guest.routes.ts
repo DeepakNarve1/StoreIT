@@ -6,6 +6,11 @@ import { v4 as uuid } from "uuid";
 import { getFileViewUrl } from "../services/storage.service";
 import { sendGuestAccessEmail } from "../services/email.service";
 import { createAuditLog } from "../services/audit.service";
+import {
+  userCanAccessFile,
+  userHasFilePermission,
+} from "../services/file-access.service";
+import { userHasCapability } from "./permissions.routes";
 
 const router = Router();
 
@@ -44,6 +49,48 @@ router.post(
       });
       if (!file) {
         res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      const canAccess = await userCanAccessFile(
+        file.id,
+        req.user!.userId,
+        req.user!.tenantId,
+        req.user!.role,
+        file.uploadedById,
+        file.folderId,
+      );
+      if (!canAccess) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
+      const canShareGuest =
+        (await userHasFilePermission(
+          file.id,
+          req.user!.userId,
+          file.uploadedById,
+          req.user!.role,
+          "admin",
+        )) ||
+        (await userHasCapability(
+          req.user!.userId,
+          req.user!.tenantId,
+          req.user!.role,
+          "file",
+          file.id,
+          "share_files",
+        )) ||
+        (await userHasCapability(
+          req.user!.userId,
+          req.user!.tenantId,
+          req.user!.role,
+          "file",
+          file.id,
+          "share_public_link_file",
+        ));
+      if (!canShareGuest) {
+        res.status(403).json({ error: "Forbidden" });
         return;
       }
 

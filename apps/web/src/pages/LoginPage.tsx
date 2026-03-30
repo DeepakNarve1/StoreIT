@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/authStore";
 import api from "../api/axios";
+import { apiErrorMessage } from "../utils/apiError";
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -19,8 +20,8 @@ export default function LoginPage() {
       const res = await api.post("/auth/login", { email, password });
       setAuth(res.data.user, res.data.accessToken);
       navigate("/");
-    } catch (err: any) {
-      setError(err.response?.data?.error || "Login failed");
+    } catch (err: unknown) {
+      setError(apiErrorMessage(err, "Login failed"));
     } finally {
       setLoading(false);
     }

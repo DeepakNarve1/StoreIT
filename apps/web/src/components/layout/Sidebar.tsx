@@ -62,6 +62,14 @@ const NAV_ITEMS = [
 ];
 const NAV_ORDER_KEY = "storeit_sidebar_nav_order_v1";
 
+function mergeNavWithDefaults(order: string[]): string[] {
+  const defaults = NAV_ITEMS.map((i) => i.path);
+  const known = new Set(defaults);
+  const cleaned = order.filter((p) => known.has(p));
+  const missing = defaults.filter((p) => !cleaned.includes(p));
+  return [...cleaned, ...missing];
+}
+
 // ─── Folder node (recursive) ──────────────────────────────────────────────────
 function FolderNode({
   folder,
@@ -230,34 +238,27 @@ export default function Sidebar({ isOpen }: SidebarProps) {
   const location = useLocation();
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
-  const canWrite = ["SUPERADMIN", "ORG_ADMIN", "MANAGER", "EDITOR"].includes(
-    user?.role ?? "",
-  );
+  const canWrite =
+    user?.role === "SUPERADMIN" ||
+    user?.roleCapabilities?.create_folders === true ||
+    user?.roleCapabilities?.add_files === true ||
+    ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(user?.role ?? "");
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [draggingNavPath, setDraggingNavPath] = useState<string | null>(null);
   const [dragOverNavPath, setDragOverNavPath] = useState<string | null>(null);
-  const [navOrder, setNavOrder] = useState<string[]>(() => {
+  const mergedLocal = useMemo(() => {
     if (typeof window === "undefined") return NAV_ITEMS.map((i) => i.path);
     try {
       const raw = window.localStorage.getItem(NAV_ORDER_KEY);
       if (!raw) return NAV_ITEMS.map((i) => i.path);
-      const parsed = JSON.parse(raw);
+      const parsed = JSON.parse(raw) as unknown;
       if (!Array.isArray(parsed)) return NAV_ITEMS.map((i) => i.path);
-      return parsed.filter((x): x is string => typeof x === "string");
+      const paths = parsed.filter((x): x is string => typeof x === "string");
+      return mergeNavWithDefaults(paths);
     } catch {
       return NAV_ITEMS.map((i) => i.path);
     }
-  });
-
-  useEffect(() => {
-    const defaults = NAV_ITEMS.map((i) => i.path);
-    setNavOrder((prev) => {
-      const known = new Set(defaults);
-      const cleaned = prev.filter((p) => known.has(p));
-      const missing = defaults.filter((p) => !cleaned.includes(p));
-      return [...cleaned, ...missing];
-    });
   }, []);
 
   const { data: sidebarPrefData } = useQuery({
@@ -267,13 +268,23 @@ export default function Sidebar({ isOpen }: SidebarProps) {
       return res.data as { order: string[] };
     },
   });
-  useEffect(() => {
-    if (!sidebarPrefData) return;
-    const remote = Array.isArray(sidebarPrefData.order)
-      ? sidebarPrefData.order.filter((x): x is string => typeof x === "string")
-      : [];
-    if (remote.length > 0) setNavOrder(remote);
+
+  const remoteOrder = useMemo(() => {
+    if (!sidebarPrefData?.order) return null;
+    const o = sidebarPrefData.order.filter(
+      (x): x is string => typeof x === "string",
+    );
+    return o.length > 0 ? mergeNavWithDefaults(o) : null;
   }, [sidebarPrefData]);
+
+  const [manualNavOrder, setManualNavOrder] = useState<string[] | null>(null);
+
+  const navOrder = useMemo(() => {
+    const raw =
+      manualNavOrder ??
+      (remoteOrder && remoteOrder.length > 0 ? remoteOrder : mergedLocal);
+    return mergeNavWithDefaults(raw);
+  }, [manualNavOrder, remoteOrder, mergedLocal]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -295,11 +306,14 @@ export default function Sidebar({ isOpen }: SidebarProps) {
 
   const reorderNav = (fromPath: string, toPath: string) => {
     if (!fromPath || !toPath || fromPath === toPath) return;
-    setNavOrder((prev) => {
-      const base = prev.length ? [...prev] : NAV_ITEMS.map((i) => i.path);
+    setManualNavOrder((prevManual) => {
+      const baseRaw =
+        prevManual ??
+        (remoteOrder && remoteOrder.length > 0 ? remoteOrder : mergedLocal);
+      const base = [...mergeNavWithDefaults(baseRaw)];
       const fromIdx = base.indexOf(fromPath);
       const toIdx = base.indexOf(toPath);
-      if (fromIdx < 0 || toIdx < 0) return prev;
+      if (fromIdx < 0 || toIdx < 0) return prevManual;
       const [moved] = base.splice(fromIdx, 1);
       base.splice(toIdx, 0, moved);
       saveSidebarOrder.mutate(base);
@@ -371,7 +385,14 @@ export default function Sidebar({ isOpen }: SidebarProps) {
     queryKey: ["dashboard-stats"],
     queryFn: async () => {
       const res = await api.get("/dashboard/stats");
-      return res.data as { stats: any };
+      return res.data as {
+        stats: {
+          plan?: string;
+          storageLimit: number | null;
+          storageBytes: number;
+          storageMB: number;
+        };
+      };
     },
     staleTime: 60 * 1000,
   });
@@ -427,7 +448,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
           )}
           {orderedNavItems
             .filter(
-              (item: any) =>
+              (item) =>
                 !item.adminOnly ||
                 ["ORG_ADMIN", "SUPERADMIN"].includes(user?.role ?? ""),
             )
@@ -711,7 +732,22 @@ export default function Sidebar({ isOpen }: SidebarProps) {
           </button>
         )}
         {/* Storage quota */}
-        {stats && (
+        {stats && (() => {
+          const cap = stats.storageLimit;
+          const unlimited = cap === null || cap > 1e15;
+          const pct =
+            unlimited || !cap
+              ? 5
+              : Math.min(100, Math.round((stats.storageBytes / cap) * 100));
+          const barTone =
+            unlimited
+              ? "bg-primary-500"
+              : stats.storageBytes / cap > 0.9
+                ? "bg-red-500"
+                : stats.storageBytes / cap > 0.75
+                  ? "bg-amber-500"
+                  : "bg-primary-500";
+          return (
           <div className="mx-2 mb-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
@@ -723,20 +759,9 @@ export default function Sidebar({ isOpen }: SidebarProps) {
             </div>
             <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mb-1.5">
               <div
-                className={`h-1.5 rounded-full transition-all ${
-                  stats.storageLimit === null || stats.storageLimit > 1e15
-                    ? "bg-primary-500"
-                    : stats.storageBytes / stats.storageLimit > 0.9
-                      ? "bg-red-500"
-                      : stats.storageBytes / stats.storageLimit > 0.75
-                        ? "bg-amber-500"
-                        : "bg-primary-500"
-                }`}
+                className={`h-1.5 rounded-full transition-all ${barTone}`}
                 style={{
-                  width:
-                    stats.storageLimit > 1e15
-                      ? "5%"
-                      : `${Math.min(100, Math.round((stats.storageBytes / stats.storageLimit) * 100))}%`,
+                  width: unlimited ? "5%" : `${pct}%`,
                 }}
               />
             </div>
@@ -744,11 +769,12 @@ export default function Sidebar({ isOpen }: SidebarProps) {
               {stats.storageMB < 1024
                 ? `${stats.storageMB} MB`
                 : `${(stats.storageMB / 1024).toFixed(1)} GB`}
-              {stats.storageLimit <= 1e15 &&
-                ` of ${Math.round(stats.storageLimit / 1024 / 1024 / 1024)} GB used`}
+              {cap !== null && cap <= 1e15 &&
+                ` of ${Math.round(cap / 1024 / 1024 / 1024)} GB used`}
             </p>
           </div>
-        )}
+          );
+        })()}
       </div>
     </aside>
   );

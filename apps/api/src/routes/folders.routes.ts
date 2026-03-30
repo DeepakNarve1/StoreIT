@@ -8,6 +8,7 @@ import https from "https";
 import http from "http";
 import { getFileViewUrl } from "../services/storage.service";
 import { userHasCapability } from "./permissions.routes";
+import { getEffectiveRoleProfileForUser } from "../services/role-profiles.service";
 
 const router = Router();
 
@@ -21,21 +22,24 @@ async function getVisibleFolderIdSetForUser(opts: {
   role: string;
 }): Promise<Set<string>> {
   const { userId, tenantId, role } = opts;
-  if (PRIVILEGED.includes(role)) return new Set<string>();
-
-  const userRecord = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { departmentId: true },
-  });
+  const roleContext = await getEffectiveRoleProfileForUser(userId);
+  if (
+    roleContext &&
+    roleContext.tenantId === tenantId &&
+    roleContext.baseRole !== "VIEWER" &&
+    roleContext.capabilities.see_folders
+  ) {
+    return new Set<string>();
+  }
 
   const orClauses: any[] = [
     { grantedTo: "all" },
     { grantedTo: "user", userId },
   ];
-  if (userRecord?.departmentId) {
+  if (roleContext?.departmentId) {
     orClauses.push({
       grantedTo: "department",
-      departmentId: userRecord.departmentId,
+      departmentId: roleContext.departmentId,
     });
   }
 
@@ -306,6 +310,7 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
     const { parentId } = req.query;
     const { userId, tenantId, role } = req.user!;
+    const roleContext = await getEffectiveRoleProfileForUser(userId);
     const visibleSet = await getVisibleFolderIdSetForUser({
       userId,
       tenantId,
@@ -337,9 +342,12 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
       },
     });
 
+    const hasTenantWideFolderAccess =
+      roleContext?.baseRole === "SUPERADMIN" ||
+      (roleContext?.baseRole !== "VIEWER" && roleContext?.capabilities.see_folders);
     const filtered =
-      PRIVILEGED.includes(role) || visibleSet.size === 0
-        ? PRIVILEGED.includes(role)
+      hasTenantWideFolderAccess || visibleSet.size === 0
+        ? hasTenantWideFolderAccess
           ? folders
           : []
         : folders.filter((f) => visibleSet.has(f.id));
@@ -350,7 +358,7 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
       select: { id: true, parentId: true },
     });
     const allowedFolderIds = new Set(
-      PRIVILEGED.includes(role)
+      hasTenantWideFolderAccess
         ? allTenantFolders.map((f) => f.id)
         : allTenantFolders.filter((f) => visibleSet.has(f.id)).map((f) => f.id),
     );
@@ -502,6 +510,7 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
 router.get("/all", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
     const { userId, tenantId, role } = req.user!;
+    const roleContext = await getEffectiveRoleProfileForUser(userId);
     const visibleSet = await getVisibleFolderIdSetForUser({
       userId,
       tenantId,
@@ -524,9 +533,12 @@ router.get("/all", verifyAuth, async (req: AuthRequest, res: Response) => {
         },
       },
     });
+    const hasTenantWideFolderAccess =
+      roleContext?.baseRole === "SUPERADMIN" ||
+      (roleContext?.baseRole !== "VIEWER" && roleContext?.capabilities.see_folders);
     const filtered =
-      PRIVILEGED.includes(role) || visibleSet.size === 0
-        ? PRIVILEGED.includes(role)
+      hasTenantWideFolderAccess || visibleSet.size === 0
+        ? hasTenantWideFolderAccess
           ? folders
           : []
         : folders.filter((f) => visibleSet.has(f.id));
@@ -548,12 +560,11 @@ router.post("/", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
     const { name, parentId, categoryId } = createFolderSchema.parse(req.body);
     const { userId, tenantId, role } = req.user!;
-    const isPrivileged = [
-      "SUPERADMIN",
-      "ORG_ADMIN",
-      "MANAGER",
-      "EDITOR",
-    ].includes(role);
+    const roleContext = await getEffectiveRoleProfileForUser(userId);
+    const isPrivileged =
+      roleContext?.baseRole === "SUPERADMIN" ||
+      (roleContext?.baseRole !== "VIEWER" &&
+        roleContext?.capabilities.create_folders);
 
     // VIEWERs can only create folders inside a folder they have write access to
     if (!isPrivileged) {

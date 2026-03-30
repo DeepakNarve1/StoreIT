@@ -1,7 +1,8 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, type InputHTMLAttributes } from "react";
 import { useDropzone } from "react-dropzone";
 import { Upload, X, CheckCircle, AlertCircle, Loader } from "lucide-react";
 import clsx from "clsx";
+import axios from "axios";
 import api from "../../api/axios";
 
 interface UploadFile {
@@ -49,10 +50,16 @@ export default function UploadZone({
         });
         updateUpload(uploadItem.id, { status: "done", progress: 100 });
         onUploadComplete();
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const msg = axios.isAxiosError(err)
+          ? String(
+              (err.response?.data as { error?: string } | undefined)?.error ??
+                "",
+            ) || "Upload failed"
+          : "Upload failed";
         updateUpload(uploadItem.id, {
           status: "error",
-          error: err.response?.data?.error || "Upload failed",
+          error: msg,
         });
       }
     },
@@ -67,13 +74,18 @@ export default function UploadZone({
         status: "pending" as const,
         progress: 0,
         // webkitRelativePath gives us the folder structure
-        relativePath: (file as any).webkitRelativePath || file.name,
+        relativePath:
+          "webkitRelativePath" in file &&
+          typeof (file as File & { webkitRelativePath?: string })
+            .webkitRelativePath === "string"
+            ? (file as File & { webkitRelativePath: string }).webkitRelativePath
+            : file.name,
       }));
 
       setUploads((prev) => [...prev, ...newUploads]);
       newUploads.forEach((u) => uploadFile(u));
     },
-    [folderId],
+    [uploadFile],
   );
 
   const { getRootProps, getInputProps } = useDropzone({
@@ -138,7 +150,11 @@ export default function UploadZone({
             <input
               type="file"
               className="hidden"
-              {...({ webkitdirectory: "", directory: "" } as any)}
+              // Non-standard attrs for folder picker (supported in Chromium)
+              {...({
+                webkitdirectory: "",
+                directory: "",
+              } as InputHTMLAttributes<HTMLInputElement>)}
               onChange={(e) => {
                 const files = Array.from(e.target.files || []);
                 if (files.length > 0) onDrop(files);

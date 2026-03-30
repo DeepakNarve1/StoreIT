@@ -25,9 +25,10 @@ interface TopBarProps {
 export default function TopBar({ onToggleSidebar }: TopBarProps) {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
-  const canWrite = ["SUPERADMIN", "ORG_ADMIN", "MANAGER", "EDITOR"].includes(
-    user?.role ?? "",
-  );
+  const canWrite =
+    user?.role === "SUPERADMIN" ||
+    user?.roleCapabilities?.add_files === true ||
+    ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(user?.role ?? "");
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const { isDark, toggle } = useThemeStore();

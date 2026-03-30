@@ -12,6 +12,7 @@ import {
 import AppShell from "../components/layout/AppShell";
 import FilePreviewModal from "../components/files/FilePreviewModal";
 import api from "../api/axios";
+import type { BrowserFileItem } from "../types/file-browser";
 
 const getFileIcon = (mimeType: string) => {
   if (mimeType.startsWith("image/"))
@@ -61,13 +62,13 @@ const formatBytes = (bytes: number) => {
 
 export default function StarredPage() {
   const queryClient = useQueryClient();
-  const [previewFile, setPreviewFile] = useState<any>(null);
+  const [previewFile, setPreviewFile] = useState<BrowserFileItem | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["starred-files"],
     queryFn: async () => {
       const res = await api.get("/files/starred");
-      return res.data as { files: any[] };
+      return res.data as { files: BrowserFileItem[] };
     },
   });
 

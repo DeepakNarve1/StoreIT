@@ -6,16 +6,26 @@ import { prisma } from "../utils/prisma";
 import { sendInviteEmail } from "../services/email.service";
 import bcrypt from "bcryptjs";
 import { getPlanLimits } from "../utils/plans";
+import {
+  getRoleProfileByIdForTenant,
+  serializeRoleProfile,
+} from "../services/role-profiles.service";
 
 const router = Router();
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isValidUUID = (v: unknown): v is string => typeof v === "string" && UUID_REGEX.test(v);
 
-const inviteSchema = z.object({
-  email: z.string().email(),
-  role: z.enum(["ORG_ADMIN", "MANAGER", "EDITOR", "VIEWER"]).default("VIEWER"),
-});
+const inviteSchema = z
+  .object({
+    email: z.string().email(),
+    role: z.enum(["ORG_ADMIN", "MANAGER", "EDITOR", "VIEWER"]).optional(),
+    roleProfileId: z.string().uuid().optional(),
+  })
+  .refine((data) => data.roleProfileId || data.role, {
+    message: "Role or role profile is required",
+    path: ["roleProfileId"],
+  });
 
 // ─── GET /api/users — list all users in tenant ────────────────────────────────
 router.get(
@@ -32,13 +42,38 @@ router.get(
           name: true,
           email: true,
           role: true,
+          roleProfileId: true,
+          roleProfile: {
+            select: {
+              id: true,
+              name: true,
+              baseRole: true,
+              capabilities: true,
+            },
+          },
           isActive: true,
           createdAt: true,
           departmentId: true,
           department: { select: { id: true, name: true } },
         },
       });
-      res.json({ users });
+      res.json({
+        users: users.map((user) => ({
+          ...user,
+          roleProfile: serializeRoleProfile(
+            user.roleProfile
+              ? {
+                  id: user.roleProfile.id,
+                  name: user.roleProfile.name,
+                  baseRole: user.roleProfile.baseRole as any,
+                  capabilities: user.roleProfile.capabilities,
+                }
+              : user.role === "SUPERADMIN"
+                ? { name: "Superadmin", baseRole: "SUPERADMIN" }
+                : { name: user.role, baseRole: user.role as any },
+          ),
+        })),
+      });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch users" });
     }
@@ -49,10 +84,28 @@ router.get(
 router.post(
   "/invite",
   verifyAuth,
-  requireRole("ORG_ADMIN", "SUPERADMIN"),
+    requireRole("ORG_ADMIN", "SUPERADMIN"),
   async (req: AuthRequest, res: Response) => {
     try {
-      const { email, role } = inviteSchema.parse(req.body);
+      const { email, role, roleProfileId } = inviteSchema.parse(req.body);
+
+      let resolvedRole = role ?? "VIEWER";
+      let resolvedRoleProfileId: string | null = null;
+      let resolvedRoleName = resolvedRole.replace("_", " ");
+
+      if (roleProfileId) {
+        const roleProfile = await getRoleProfileByIdForTenant(
+          roleProfileId,
+          req.user!.tenantId,
+        );
+        if (!roleProfile) {
+          res.status(400).json({ error: "Selected role profile was not found" });
+          return;
+        }
+        resolvedRole = roleProfile.baseRole as any;
+        resolvedRoleProfileId = roleProfile.id;
+        resolvedRoleName = roleProfile.name;
+      }
 
       // Check not already a member
       const existing = await prisma.user.findUnique({ where: { email } });
@@ -113,7 +166,8 @@ router.post(
         data: {
           token,
           email,
-          role,
+          role: resolvedRole,
+          roleProfileId: resolvedRoleProfileId,
           expiresAt,
           tenantId: req.user!.tenantId,
           invitedById: req.user!.userId,
@@ -126,7 +180,7 @@ router.post(
         invitedByName: inviter?.name || "Admin",
         tenantName: tenant?.name || "Your Organisation",
         token,
-        role,
+        role: resolvedRoleName,
       });
 
       res.json({ message: `Invite sent to ${email}` });
@@ -159,12 +213,31 @@ router.get(
           id: true,
           email: true,
           role: true,
+          roleProfileId: true,
+          roleProfile: {
+            select: {
+              id: true,
+              name: true,
+              baseRole: true,
+            },
+          },
           expiresAt: true,
           createdAt: true,
           invitedBy: { select: { name: true } },
         },
       });
-      res.json({ invites });
+      res.json({
+        invites: invites.map((invite) => ({
+          ...invite,
+          roleProfile: invite.roleProfile
+            ? {
+                id: invite.roleProfile.id,
+                name: invite.roleProfile.name,
+                baseRole: invite.roleProfile.baseRole,
+              }
+            : null,
+        })),
+      });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch invites" });
     }
@@ -213,6 +286,14 @@ router.get(
           name: true,
           email: true,
           role: true,
+          roleProfile: {
+            select: {
+              id: true,
+              name: true,
+              baseRole: true,
+              capabilities: true,
+            },
+          },
           createdAt: true,
           tenant: { select: { name: true, plan: true } },
         },
@@ -221,7 +302,23 @@ router.get(
         res.status(404).json({ error: "User not found" });
         return;
       }
-      res.json({ user });
+      res.json({
+        user: {
+          ...user,
+          roleProfile: serializeRoleProfile(
+            user.roleProfile
+              ? {
+                  id: user.roleProfile.id,
+                  name: user.roleProfile.name,
+                  baseRole: user.roleProfile.baseRole as any,
+                  capabilities: user.roleProfile.capabilities,
+                }
+              : user.role === "SUPERADMIN"
+                ? { name: "Superadmin", baseRole: "SUPERADMIN" }
+                : { name: user.role, baseRole: user.role as any },
+          ),
+        },
+      });
     } catch {
       res.status(500).json({ error: "Failed to fetch profile" });
     }
@@ -389,9 +486,10 @@ router.patch(
   requireRole("ORG_ADMIN", "SUPERADMIN"),
   async (req: AuthRequest, res: Response) => {
     try {
-      const { role, isActive } = z
+      const { role, roleProfileId, isActive } = z
         .object({
           role: z.enum(["ORG_ADMIN", "MANAGER", "EDITOR", "VIEWER"]).optional(),
+          roleProfileId: z.string().uuid().nullable().optional(),
           isActive: z.boolean().optional(),
         })
         .parse(req.body);
@@ -426,10 +524,32 @@ router.patch(
         return;
       }
 
+      let resolvedRoleProfileId: string | null | undefined;
+      let resolvedRole = role;
+      if (roleProfileId !== undefined) {
+        if (roleProfileId === null) {
+          resolvedRoleProfileId = null;
+        } else {
+          const roleProfile = await getRoleProfileByIdForTenant(
+            roleProfileId,
+            req.user!.tenantId,
+          );
+          if (!roleProfile) {
+            res.status(400).json({ error: "Selected role profile was not found" });
+            return;
+          }
+          resolvedRoleProfileId = roleProfile.id;
+          resolvedRole = roleProfile.baseRole as any;
+        }
+      }
+
       const updated = await prisma.user.update({
         where: { id: req.params.id },
         data: {
-          ...(role !== undefined && { role }),
+          ...(resolvedRole !== undefined && { role: resolvedRole }),
+          ...(resolvedRoleProfileId !== undefined && {
+            roleProfileId: resolvedRoleProfileId,
+          }),
           ...(isActive !== undefined && { isActive }),
         },
         select: {
@@ -437,11 +557,36 @@ router.patch(
           name: true,
           email: true,
           role: true,
+          roleProfileId: true,
+          roleProfile: {
+            select: {
+              id: true,
+              name: true,
+              baseRole: true,
+              capabilities: true,
+            },
+          },
           isActive: true,
         },
       });
 
-      res.json({ user: updated });
+      res.json({
+        user: {
+          ...updated,
+          roleProfile: serializeRoleProfile(
+            updated.roleProfile
+              ? {
+                  id: updated.roleProfile.id,
+                  name: updated.roleProfile.name,
+                  baseRole: updated.roleProfile.baseRole as any,
+                  capabilities: updated.roleProfile.capabilities,
+                }
+              : updated.role === "SUPERADMIN"
+                ? { name: "Superadmin", baseRole: "SUPERADMIN" }
+                : { name: updated.role, baseRole: updated.role as any },
+          ),
+        },
+      });
     } catch (err: any) {
       if (err.name === "ZodError") {
         res.status(400).json({ error: "Invalid input" });

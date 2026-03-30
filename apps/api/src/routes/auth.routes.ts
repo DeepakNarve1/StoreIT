@@ -11,6 +11,7 @@ import { verifyAuth, AuthRequest, verifyCsrf } from "../middleware/auth";
 import { createAuditLog } from "../services/audit.service";
 import { sendPasswordResetEmail } from "../services/email.service";
 import { v4 as uuid } from "uuid";
+import { serializeRoleProfile } from "../services/role-profiles.service";
 
 const router = Router();
 
@@ -105,6 +106,14 @@ router.get("/me", verifyAuth, async (req: AuthRequest, res: Response) => {
         name: true,
         email: true,
         role: true,
+        roleProfile: {
+          select: {
+            id: true,
+            name: true,
+            baseRole: true,
+            capabilities: true,
+          },
+        },
         tenantId: true,
         isActive: true,
         createdAt: true,
@@ -117,7 +126,36 @@ router.get("/me", verifyAuth, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    res.json({ user });
+    res.json({
+      user: {
+        ...user,
+        roleProfile: serializeRoleProfile(
+          user.roleProfile
+            ? {
+                id: user.roleProfile.id,
+                name: user.roleProfile.name,
+                baseRole: user.roleProfile.baseRole as any,
+                capabilities: user.roleProfile.capabilities,
+              }
+            : user.role === "SUPERADMIN"
+              ? { name: "Superadmin", baseRole: "SUPERADMIN" }
+              : { name: user.role, baseRole: user.role as any },
+        ),
+        roleCapabilities:
+          serializeRoleProfile(
+            user.roleProfile
+              ? {
+                  id: user.roleProfile.id,
+                  name: user.roleProfile.name,
+                  baseRole: user.roleProfile.baseRole as any,
+                  capabilities: user.roleProfile.capabilities,
+                }
+              : user.role === "SUPERADMIN"
+                ? { name: "Superadmin", baseRole: "SUPERADMIN" }
+                : { name: user.role, baseRole: user.role as any },
+          )?.capabilities ?? {},
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: "Something went wrong" });
   }
@@ -130,6 +168,13 @@ router.get("/invite/:token", async (req: Request, res: Response) => {
     res.json({
       email: invite.email,
       role: invite.role,
+      roleProfile: invite.roleProfile
+        ? {
+            id: invite.roleProfile.id,
+            name: invite.roleProfile.name,
+            baseRole: invite.roleProfile.baseRole,
+          }
+        : null,
       tenantName: invite.tenant.name,
     });
   } catch (err: any) {
@@ -159,6 +204,7 @@ router.post("/invite/accept", async (req: Request, res: Response) => {
         name,
         password: hashedPassword,
         role: invite.role,
+        roleProfileId: invite.roleProfileId,
         tenantId: invite.tenantId,
         isActive: true,
       },

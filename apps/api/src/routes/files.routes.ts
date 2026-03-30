@@ -11,12 +11,18 @@ import {
   deleteFile,
 } from "../services/storage.service";
 import { createAuditLog } from "../services/audit.service";
+import { cancelActiveWorkflowForFile } from "../services/workflow.service";
 import { getPlanLimits } from "../utils/plans";
+import { getEffectiveRoleProfileForUser } from "../services/role-profiles.service";
 import archiver from "archiver";
 import https from "https";
 import http from "http";
 import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { userHasCapability } from "./permissions.routes";
+import {
+  userCanAccessFile,
+  userHasFilePermission,
+} from "../services/file-access.service";
 
 const router = Router();
 
@@ -38,71 +44,6 @@ function sanitizeFilename(raw: string): string {
   );
 }
 
-// ─── Helper: check if the current user has access to a file ──────────────────
-async function userCanAccessFile(
-  fileId: string,
-  userId: string,
-  tenantId: string,
-  role: string,
-  uploadedById: string | null,
-  folderId?: string | null,
-): Promise<boolean> {
-  const isPrivileged = [
-    "SUPERADMIN",
-    "ORG_ADMIN",
-    "MANAGER",
-    "EDITOR",
-  ].includes(role);
-
-  if (isPrivileged) return true;
-  if (uploadedById === userId) return true;
-
-  // Check file-level permission
-  const userRecord = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { departmentId: true },
-  });
-
-  const fileOrClauses: any[] = [
-    { grantedTo: "all" },
-    { grantedTo: "user", userId },
-  ];
-  if (userRecord?.departmentId) {
-    fileOrClauses.push({
-      grantedTo: "department",
-      departmentId: userRecord.departmentId,
-    });
-  }
-
-  const filePerm = await prisma.permission.findFirst({
-    where: {
-      resourceType: "file",
-      resourceId: fileId,
-      OR: fileOrClauses,
-      AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
-    },
-  });
-  if (filePerm) return true;
-
-  // Check folder-level permission (propagate to files inside)
-  if (folderId) {
-    const folderPerm = await prisma.permission.findFirst({
-      where: {
-        resourceType: "folder",
-        resourceId: folderId,
-        OR: fileOrClauses,
-        AND: [
-          { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
-          { folder: { tenantId } },
-        ],
-      },
-    });
-    if (folderPerm) return true;
-  }
-
-  return false;
-}
-
 // ─── Helper: enforce lock — returns true if the request should be blocked ────
 // Managers and above can always bypass locks.
 // The locker themselves can also bypass (so they can unlock or edit their own lock).
@@ -122,57 +63,6 @@ function isBlockedByLock(
   return true;
 }
 
-// ─── Helper: check if user has at least the required action on a file ─────────
-async function userHasFilePermission(
-  fileId: string,
-  userId: string,
-  uploadedById: string | null,
-  role: string,
-  requiredAction: "write" | "delete" | "admin",
-): Promise<boolean> {
-  // SUPERADMIN, ORG_ADMIN, MANAGER — full trust on all actions
-  if (["SUPERADMIN", "ORG_ADMIN", "MANAGER"].includes(role)) return true;
-  // EDITOR — can write/delete but NOT admin (and still subject to lock guard at route level)
-  if (role === "EDITOR" && requiredAction !== "admin") return true;
-  if (uploadedById === userId) return true;
-
-  const actionRank: Record<string, number> = {
-    read: 1,
-    write: 2,
-    delete: 3,
-    admin: 4,
-  };
-  const required = actionRank[requiredAction];
-
-  const userRec = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { departmentId: true },
-  });
-  const permOrClauses: any[] = [
-    { grantedTo: "all" },
-    { grantedTo: "user", userId },
-  ];
-  if (userRec?.departmentId) {
-    permOrClauses.push({
-      grantedTo: "department",
-      departmentId: userRec.departmentId,
-    });
-  }
-
-  const perm = await prisma.permission.findFirst({
-    where: {
-      resourceType: "file",
-      resourceId: fileId,
-      fileId,
-      OR: permOrClauses,
-      AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
-    },
-  });
-
-  if (!perm) return false;
-  return (actionRank[perm.action] ?? 0) >= required;
-}
-
 // ─── Shared file select fields ────────────────────────────────────────────────
 const fileSelect = {
   id: true,
@@ -190,6 +80,8 @@ const fileSelect = {
   approvalNote: true,
   approvedAt: true,
   approvedBy: { select: { name: true } },
+  activeWorkflowId: true,
+  currentStepOrder: true,
   tags: {
     select: { tag: { select: { id: true, name: true, color: true } } },
   },
@@ -200,6 +92,7 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
     const { folderId, includeAll } = req.query;
     const { userId, tenantId, role } = req.user!;
+    const roleContext = await getEffectiveRoleProfileForUser(userId);
     const includeAllRaw = String(includeAll ?? "").toLowerCase();
     const includeAllFiles =
       includeAllRaw === "1" || includeAllRaw === "true";
@@ -209,12 +102,9 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
         ? folderId
         : null;
 
-    const isPrivileged = [
-      "SUPERADMIN",
-      "ORG_ADMIN",
-      "MANAGER",
-      "EDITOR",
-    ].includes(role);
+    const isPrivileged =
+      roleContext?.baseRole === "SUPERADMIN" ||
+      (roleContext?.baseRole !== "VIEWER" && roleContext?.capabilities.see_files);
 
     let files;
 
@@ -456,12 +346,11 @@ router.post(
       const files = req.files as Express.Multer.File[];
       const { folderId, categoryId } = req.body;
       const { userId, role } = req.user!;
-      const isPrivileged = [
-        "SUPERADMIN",
-        "ORG_ADMIN",
-        "MANAGER",
-        "EDITOR",
-      ].includes(role);
+      const roleContext = await getEffectiveRoleProfileForUser(userId);
+      const isPrivileged =
+        roleContext?.baseRole === "SUPERADMIN" ||
+        (roleContext?.baseRole !== "VIEWER" &&
+          roleContext?.capabilities.add_files);
 
       // VIEWERs can only upload into folders they have write permission on
       if (!isPrivileged) {
@@ -605,27 +494,39 @@ router.post(
 
         if (existingFile) {
           const newVersion = existingFile.version + 1;
+          const { updated, cancelledWorkflow } = await prisma.$transaction(
+            async (tx) => {
+              await tx.fileVersion.create({
+                data: {
+                  version: existingFile.version,
+                  storageKey: existingFile.storageKey,
+                  size: existingFile.size,
+                  fileId: existingFile.id,
+                  uploadedById: existingFile.uploadedById,
+                },
+              });
 
-          await prisma.fileVersion.create({
-            data: {
-              version: existingFile.version,
-              storageKey: existingFile.storageKey,
-              size: existingFile.size,
-              fileId: existingFile.id,
-              uploadedById: existingFile.uploadedById,
-            },
-          });
+              const cancelledWorkflow = await cancelActiveWorkflowForFile(tx, {
+                fileId: existingFile.id,
+                tenantId: req.user!.tenantId,
+                actorUserId: req.user!.userId,
+                note: "Cancelled automatically because a new version was uploaded.",
+              });
 
-          const updated = await prisma.file.update({
-            where: { id: existingFile.id },
-            data: {
-              storageKey,
-              size: file.size,
-              version: newVersion,
-              uploadedById: req.user!.userId,
-              updatedAt: new Date(),
+              const updated = await tx.file.update({
+                where: { id: existingFile.id },
+                data: {
+                  storageKey,
+                  size: file.size,
+                  version: newVersion,
+                  uploadedById: req.user!.userId,
+                  updatedAt: new Date(),
+                },
+              });
+
+              return { updated, cancelledWorkflow };
             },
-          });
+          );
 
           savedFiles.push({
             id: updated.id,
@@ -650,6 +551,23 @@ router.post(
             },
             req,
           });
+
+          if (cancelledWorkflow) {
+            await createAuditLog({
+              action: "file.workflow.cancelled",
+              userId: req.user!.userId,
+              tenantId: req.user!.tenantId,
+              resourceType: "file",
+              resourceId: existingFile.id,
+              resourceName: safeName,
+              metadata: {
+                workflowId: cancelledWorkflow.id,
+                reason: "new_version_uploaded",
+                newVersion,
+              },
+              req,
+            });
+          }
         } else {
           const saved = await prisma.file.create({
             data: {

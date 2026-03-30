@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Users,
   UserPlus,
   Mail,
+  Info,
   Loader,
   X,
   Check,
@@ -14,17 +15,29 @@ import {
   ArrowUpRight,
   Building2,
   Plus,
+  Pencil,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import AppShell from "../../components/layout/AppShell";
 import api from "../../api/axios";
+import { apiErrorMessage } from "../../utils/apiError";
 import { useAuthStore } from "../../store/authStore";
+import RoleEditorModal, {
+  type RoleEditorValue,
+} from "../../components/admin/RoleEditorModal";
 
 interface User {
   id: string;
   name: string;
   email: string;
   role: string;
+  roleProfileId?: string | null;
+  roleProfile?: {
+    id: string | null;
+    name: string;
+    baseRole: string;
+    capabilities?: Record<string, boolean>;
+  } | null;
   isActive: boolean;
   createdAt: string;
   departmentId?: string | null;
@@ -35,8 +48,21 @@ interface Invite {
   id: string;
   email: string;
   role: string;
+  roleProfileId?: string | null;
+  roleProfile?: { id: string; name: string; baseRole: string } | null;
   expiresAt: string;
   invitedBy?: { name: string };
+}
+
+interface RoleProfile {
+  id: string;
+  name: string;
+  description?: string | null;
+  baseRole: Role;
+  isSystem: boolean;
+  systemKey?: string | null;
+  capabilities: Record<string, boolean>;
+  _count: { users: number; invites: number };
 }
 
 interface BillingStatus {
@@ -45,8 +71,7 @@ interface BillingStatus {
   usage: { users: number };
 }
 
-const ROLES = ["VIEWER", "EDITOR", "MANAGER", "ORG_ADMIN"] as const;
-type Role = (typeof ROLES)[number];
+type Role = "VIEWER" | "EDITOR" | "MANAGER" | "ORG_ADMIN";
 
 const roleColors: Record<string, string> = {
   SUPERADMIN: "bg-purple-100 text-purple-700",
@@ -55,6 +80,67 @@ const roleColors: Record<string, string> = {
   EDITOR: "bg-yellow-100 text-yellow-700",
   VIEWER: "bg-gray-100 text-gray-600",
 };
+
+const roleHelpItems = [
+  {
+    label: "See files / folders",
+    detail: "Lets the role open and browse content. Without this, people cannot really work inside that area.",
+  },
+  {
+    label: "Add files / create folders",
+    detail: "Lets the role add new content into the workspace.",
+  },
+  {
+    label: "Edit file attributes / edit folders",
+    detail: "Lets the role rename items and update basic details.",
+  },
+  {
+    label: "Update versions",
+    detail: "Lets the role upload a newer version of an existing file.",
+  },
+  {
+    label: "Share files / folders",
+    detail: "Lets the role give access to other people or create share links.",
+  },
+  {
+    label: "Delete files / folders",
+    detail: "Lets the role remove content, so this should be given carefully.",
+  },
+  {
+    label: "See audit trails",
+    detail: "Lets the role view activity history like who changed, downloaded, or approved something.",
+  },
+] as const;
+
+const baseRoleExamples = [
+  {
+    name: "Viewer",
+    detail: "Best for people who only need to open, preview, and download content.",
+  },
+  {
+    name: "Editor",
+    detail: "Best for people who create files, update versions, and maintain everyday content.",
+  },
+  {
+    name: "Manager",
+    detail: "Best for team leads who need broader control like sharing, deleting, and reviewing activity.",
+  },
+] as const;
+
+const toolbarAccessExamples = [
+  {
+    name: "Viewer",
+    detail: "Mostly read-only access. They can browse, search, preview, and download when allowed, but usually will not get create or upload actions.",
+  },
+  {
+    name: "Editor",
+    detail: "Gets everyday work actions in the toolbar and workspace, like upload, create, update, and organize content.",
+  },
+  {
+    name: "Manager",
+    detail: "Gets broader operational control, so they can handle team workflows and more advanced management actions.",
+  },
+] as const;
 
 export default function UsersPage() {
   const queryClient = useQueryClient();
@@ -67,14 +153,16 @@ export default function UsersPage() {
   const [inviteSuccess, setInviteSuccess] = useState("");
   const [isLimitError, setIsLimitError] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "users" | "invites" | "departments"
+    "users" | "invites" | "departments" | "roles"
   >("users");
   const [newDeptName, setNewDeptName] = useState("");
   const [roleUpdatingUserId, setRoleUpdatingUserId] = useState<string | null>(
     null,
   );
-  // Controlled map of userId -> departmentId for the assignment dropdowns
-  const [deptMap, setDeptMap] = useState<Record<string, string>>({});
+  const [inviteRoleProfileId, setInviteRoleProfileId] = useState<string>("");
+  const [roleModalOpen, setRoleModalOpen] = useState(false);
+  const [editingRole, setEditingRole] = useState<RoleProfile | null>(null);
+  const [showRoleHelp, setShowRoleHelp] = useState(false);
 
   const {
     data: usersData,
@@ -89,15 +177,22 @@ export default function UsersPage() {
     },
   });
 
-  // Sync deptMap whenever usersData refreshes
-  useEffect(() => {
-    if (!usersData?.users) return;
+  const serverDeptMap = useMemo(() => {
+    if (!usersData?.users) return {} as Record<string, string>;
     const map: Record<string, string> = {};
     usersData.users.forEach((u) => {
       map[u.id] = u.departmentId ?? "";
     });
-    setDeptMap(map);
+    return map;
   }, [usersData]);
+
+  const [deptOverrides, setDeptOverrides] = useState<Record<string, string>>(
+    {},
+  );
+  const deptMap = useMemo(
+    () => ({ ...serverDeptMap, ...deptOverrides }),
+    [serverDeptMap, deptOverrides],
+  );
 
   const { data: invitesData, isLoading: invitesLoading } = useQuery({
     queryKey: ["invites"],
@@ -126,11 +221,34 @@ export default function UsersPage() {
   });
   const departments = deptsData?.departments ?? [];
 
+  const { data: rolesData, isLoading: rolesLoading } = useQuery({
+    queryKey: ["role-profiles"],
+    queryFn: async () => {
+      const res = await api.get("/roles");
+      return res.data as { roles: RoleProfile[] };
+    },
+  });
+  const roleProfiles = useMemo(
+    () => rolesData?.roles ?? [],
+    [rolesData],
+  );
+
+  const defaultInviteProfile = useMemo(
+    () =>
+      roleProfiles.find((r) => r.baseRole === "VIEWER" && r.isSystem) ??
+      roleProfiles[0] ??
+      null,
+    [roleProfiles],
+  );
+
   const sendInvite = useMutation({
     mutationFn: async () => {
+      const profileId = inviteRoleProfileId || defaultInviteProfile?.id;
+      const profile = roleProfiles.find((r) => r.id === profileId);
       const res = await api.post("/users/invite", {
         email: inviteEmail,
-        role: inviteRole,
+        role: profile?.baseRole ?? inviteRole,
+        roleProfileId: profileId || undefined,
       });
       return res.data;
     },
@@ -138,6 +256,7 @@ export default function UsersPage() {
       setInviteSuccess(`Invite sent to ${inviteEmail}`);
       setInviteEmail("");
       setInviteRole("VIEWER");
+      setInviteRoleProfileId("");
       setInviteError("");
       setIsLimitError(false);
       queryClient.invalidateQueries({ queryKey: ["invites"] });
@@ -185,8 +304,16 @@ export default function UsersPage() {
   });
 
   const updateUserRole = useMutation({
-    mutationFn: async ({ id, role }: { id: string; role: Role }) => {
-      await api.patch(`/users/${id}`, { role });
+    mutationFn: async ({
+      id,
+      role,
+      roleProfileId,
+    }: {
+      id: string;
+      role: Role;
+      roleProfileId: string | null;
+    }) => {
+      await api.patch(`/users/${id}`, { role, roleProfileId });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -233,12 +360,51 @@ export default function UsersPage() {
       _data: unknown,
       vars: { userId: string; departmentId: string | null },
     ) => {
-      // Update local controlled state immediately so dropdown reflects change
-      setDeptMap((prev) => ({
-        ...prev,
-        [vars.userId]: vars.departmentId ?? "",
-      }));
+      setDeptOverrides((prev) => {
+        const next = { ...prev };
+        delete next[vars.userId];
+        return next;
+      });
       queryClient.invalidateQueries({ queryKey: ["users"] });
+    },
+  });
+
+  const saveRoleProfile = useMutation({
+    mutationFn: async (value: RoleEditorValue) => {
+      if (value.id) {
+        const res = await api.patch(`/roles/${value.id}`, {
+          name: value.name.trim(),
+          description: value.description?.trim() || null,
+          baseRole: value.baseRole,
+          capabilities: value.capabilities,
+        });
+        return res.data;
+      }
+      const res = await api.post("/roles", {
+        name: value.name.trim(),
+        description: value.description?.trim() || null,
+        baseRole: value.baseRole,
+        capabilities: value.capabilities,
+      });
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["role-profiles"] });
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["invites"] });
+      setRoleModalOpen(false);
+      setEditingRole(null);
+    },
+  });
+
+  const deleteRoleProfile = useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/roles/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["role-profiles"] });
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.invalidateQueries({ queryKey: ["invites"] });
     },
   });
 
@@ -258,6 +424,14 @@ export default function UsersPage() {
     setInviteError("");
     setIsLimitError(false);
     if (!inviteEmail.trim()) return;
+    const inviteProfileId =
+      inviteRoleProfileId || defaultInviteProfile?.id || "";
+    const selectedRole = roleProfiles.find(
+      (profile) => profile.id === inviteProfileId,
+    );
+    if (selectedRole) {
+      setInviteRole(selectedRole.baseRole);
+    }
     sendInvite.mutate();
   };
 
@@ -290,7 +464,7 @@ export default function UsersPage() {
         {usersError && (
           <div className="mb-5 rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-300">
             Failed to load users.{" "}
-            {(usersErrorObj as any)?.response?.data?.error ?? "Please retry."}
+            {apiErrorMessage(usersErrorObj, "Please retry.")}
           </div>
         )}
 
@@ -426,14 +600,20 @@ export default function UsersPage() {
                 />
               </div>
               <select
-                value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as Role)}
+                value={inviteRoleProfileId || defaultInviteProfile?.id || ""}
+                onChange={(e) => {
+                  const nextId = e.target.value;
+                  setInviteRoleProfileId(nextId);
+                  const nextRole = roleProfiles.find((role) => role.id === nextId);
+                  if (nextRole) setInviteRole(nextRole.baseRole);
+                }}
                 className="px-3 py-2 bg-white dark:bg-gray-900 border border-blue-200 dark:border-blue-800 rounded-lg text-sm
                            focus:outline-none focus:ring-2 focus:ring-blue-400 dark:text-white appearance-none"
+                disabled={rolesLoading}
               >
-                {ROLES.map((r) => (
-                  <option key={r} value={r} className="dark:bg-gray-900">
-                    {r.replace("_", " ")}
+                {roleProfiles.map((role) => (
+                  <option key={role.id} value={role.id} className="dark:bg-gray-900">
+                    {role.name} ({role.baseRole.replace("_", " ")})
                   </option>
                 ))}
               </select>
@@ -497,6 +677,16 @@ export default function UsersPage() {
             }`}
           >
             Departments ({departments.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("roles")}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+              activeTab === "roles"
+                ? "bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+            }`}
+          >
+            Roles ({roleProfiles.length})
           </button>
         </div>
 
@@ -568,10 +758,17 @@ export default function UsersPage() {
                           <span
                             className={`text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap ${roleColors[user.role] || "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}
                           >
-                            {user.role?.replace("_", " ")}
+                            {user.roleProfile?.name || user.role?.replace("_", " ")}
                           </span>
                           <select
-                            value={user.role}
+                            value={
+                              user.roleProfileId ??
+                              roleProfiles.find(
+                                (role) =>
+                                  role.baseRole === user.role && role.isSystem,
+                              )?.id ??
+                              ""
+                            }
                             disabled={
                               !canEditRoles ||
                               user.id === currentUser?.id ||
@@ -579,12 +776,16 @@ export default function UsersPage() {
                                 roleUpdatingUserId === user.id)
                             }
                             onChange={(e) => {
-                              const nextRole = e.target.value as Role;
-                              if (nextRole === user.role) return;
+                              const nextRoleProfile = roleProfiles.find(
+                                (role) => role.id === e.target.value,
+                              );
+                              if (!nextRoleProfile) return;
+                              if (nextRoleProfile.id === user.roleProfileId) return;
                               setRoleUpdatingUserId(user.id);
                               updateUserRole.mutate({
                                 id: user.id,
-                                role: nextRole,
+                                role: nextRoleProfile.baseRole,
+                                roleProfileId: nextRoleProfile.id,
                               });
                             }}
                             className="text-xs bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg px-2.5 py-1.5
@@ -597,13 +798,13 @@ export default function UsersPage() {
                                   : "Change user role"
                             }
                           >
-                            {ROLES.map((r) => (
+                            {roleProfiles.map((role) => (
                               <option
-                                key={r}
-                                value={r}
+                                key={role.id}
+                                value={role.id}
                                 className="dark:bg-gray-900"
                               >
-                                {r.replace("_", " ")}
+                                {role.name}
                               </option>
                             ))}
                           </select>
@@ -759,7 +960,7 @@ export default function UsersPage() {
                         <span
                           className={`text-xs font-medium px-2 py-1 rounded-full ${roleColors[invite.role] || "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}
                         >
-                          {invite.role?.replace("_", " ")}
+                          {invite.roleProfile?.name || invite.role?.replace("_", " ")}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
@@ -900,7 +1101,10 @@ export default function UsersPage() {
                         value={deptMap[user.id] ?? ""}
                         onChange={(e) => {
                           const val = e.target.value;
-                          setDeptMap((prev) => ({ ...prev, [user.id]: val }));
+                          setDeptOverrides((prev) => ({
+                            ...prev,
+                            [user.id]: val,
+                          }));
                           assignDept.mutate({
                             userId: user.id,
                             departmentId: val || null,
@@ -929,7 +1133,274 @@ export default function UsersPage() {
             )}
           </div>
         )}
+
+        {activeTab === "roles" && (
+          <div className="space-y-4">
+            <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white px-4 py-4 sm:flex-row sm:items-center sm:justify-between dark:border-gray-800 dark:bg-gray-900">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
+                    Role Profiles
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setShowRoleHelp(true)}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-gray-200 text-gray-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 dark:border-gray-700 dark:text-gray-400 dark:hover:border-blue-900 dark:hover:bg-blue-950/40 dark:hover:text-blue-300"
+                    title="Role help"
+                    aria-label="Open role help"
+                  >
+                    <Info size={14} />
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Create custom roles and tune built-in ones using the same permissions as sharing.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingRole(null);
+                  setRoleModalOpen(true);
+                }}
+                className="inline-flex w-full items-center justify-center gap-2 self-start rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 sm:w-auto sm:self-auto"
+              >
+                <Plus size={14} />
+                New role
+              </button>
+            </div>
+
+            {rolesLoading ? (
+              <div className="flex justify-center py-10">
+                <Loader size={20} className="animate-spin text-gray-400" />
+              </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2">
+                {roleProfiles.map((role) => {
+                  const enabledCount = Object.values(role.capabilities ?? {}).filter(Boolean)
+                    .length;
+                  return (
+                    <div
+                      key={role.id}
+                      className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900"
+                    >
+                      <div className="mb-3 flex items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`rounded-full px-2 py-1 text-xs font-medium ${roleColors[role.baseRole] || "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}
+                            >
+                              {role.baseRole.replace("_", " ")}
+                            </span>
+                            {role.isSystem && (
+                              <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                                Built-in
+                              </span>
+                            )}
+                          </div>
+                          <h3 className="mt-2 text-base font-semibold text-gray-900 dark:text-white">
+                            {role.name}
+                          </h3>
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            {role.description || "No description added yet."}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              setEditingRole(role);
+                              setRoleModalOpen(true);
+                            }}
+                            className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+                            title="Edit role"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          {!role.isSystem && (
+                            <button
+                              onClick={() => {
+                                if (
+                                  confirm(
+                                    `Delete "${role.name}"? Reassign anyone using it first.`,
+                                  )
+                                ) {
+                                  deleteRoleProfile.mutate(role.id);
+                                }
+                              }}
+                              className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
+                              title="Delete role"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800">
+                          <p className="text-[11px] uppercase tracking-wide text-gray-400">
+                            Members
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
+                            {role._count.users}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800">
+                          <p className="text-[11px] uppercase tracking-wide text-gray-400">
+                            Invites
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
+                            {role._count.invites}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-800">
+                          <p className="text-[11px] uppercase tracking-wide text-gray-400">
+                            Enabled
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">
+                            {enabledCount}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      <RoleEditorModal
+        open={roleModalOpen}
+        title={editingRole ? `Edit ${editingRole.name}` : "Create Role"}
+        initialRole={
+          editingRole
+            ? {
+                id: editingRole.id,
+                name: editingRole.name,
+                description: editingRole.description,
+                baseRole: editingRole.baseRole,
+                isSystem: editingRole.isSystem,
+                capabilities: editingRole.capabilities,
+              }
+            : null
+        }
+        isSaving={saveRoleProfile.isPending}
+        onClose={() => {
+          setRoleModalOpen(false);
+          setEditingRole(null);
+        }}
+        onSave={(value) => saveRoleProfile.mutate(value)}
+      />
+
+      {showRoleHelp && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4">
+          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-[#111111]">
+            <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+                  Role help
+                </h3>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  A quick guide to base role and the permissions that matter most.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRoleHelp(false)}
+                className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+                aria-label="Close role help"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-4 overflow-y-auto px-5 py-4">
+              <div className="rounded-xl bg-blue-50 px-4 py-3 dark:bg-blue-950/30">
+                <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                  What is base role?
+                </p>
+                <p className="mt-1 text-sm leading-6 text-blue-900/90 dark:text-blue-100/90">
+                  Base role is the role&apos;s starting level. It tells StoreIT what kind of
+                  role this is before the detailed permission switches are applied.
+                </p>
+                <p className="mt-2 text-sm leading-6 text-blue-900/90 dark:text-blue-100/90">
+                  It is there because some features still depend on role level, not only on the
+                  checkboxes. Think of it as the safety rail, and the permissions as the fine
+                  tuning.
+                </p>
+              </div>
+
+              <div>
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                  Base role examples
+                </p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {baseRoleExamples.map((role) => (
+                    <div
+                      key={role.name}
+                      className="rounded-xl border border-gray-200 px-3 py-2.5 dark:border-gray-800"
+                    >
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">
+                        {role.name}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">
+                        {role.detail}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-950/20">
+                <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
+                  Toolbar and area access
+                </p>
+                <p className="mt-1 text-sm leading-6 text-amber-900/90 dark:text-amber-100/90">
+                  Base role also affects which actions appear in the toolbar and which wider
+                  areas of StoreIT a user can access. Permissions refine this, but base role is
+                  still the first signal the app uses.
+                </p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {toolbarAccessExamples.map((role) => (
+                    <div
+                      key={role.name}
+                      className="rounded-xl border border-amber-200/80 bg-white/70 px-3 py-2.5 dark:border-amber-900/50 dark:bg-black/10"
+                    >
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">
+                        {role.name}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-400">
+                        {role.detail}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                  Important permissions
+                </p>
+                <div className="mt-3 space-y-2">
+                  {roleHelpItems.map((item) => (
+                    <div
+                      key={item.label}
+                      className="rounded-xl border border-gray-200 px-3 py-2.5 dark:border-gray-800"
+                    >
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">
+                        {item.label}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">
+                        {item.detail}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   );
 }

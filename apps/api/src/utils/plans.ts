@@ -11,10 +11,10 @@ export function getPlanLimits(plan: string) {
   return PLAN_LIMITS[plan as Plan] ?? PLAN_LIMITS.free;
 }
 
-// Map plan name → Stripe Price ID
-// Keys must match the plan IDs used in checkout and the names in .env
-export const STRIPE_PRICE_IDS: Record<string, string> = {
-  starter: process.env.STRIPE_PRICE_MINI ?? "",
-  pro: process.env.STRIPE_PRICE_MEDIUM ?? "",
-  enterprise: process.env.STRIPE_PRICE_TAILOR ?? "",
+// Map plan name → Razorpay Plan ID
+// Keys must match the plan IDs used in billing checkout and the names in .env
+export const RAZORPAY_PLAN_IDS: Record<string, string> = {
+  starter: process.env.RAZORPAY_PLAN_MINI ?? "",
+  pro: process.env.RAZORPAY_PLAN_MEDIUM ?? "",
+  enterprise: process.env.RAZORPAY_PLAN_TAILOR ?? "",
 };

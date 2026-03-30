@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { X } from "lucide-react";
-import { useToast } from "../ui/Toast";
+import { useToast } from "../ui/toastStore";
 
 export type RetentionAction = "move_to_trash" | "permanent_delete";
 
@@ -77,15 +77,6 @@ export default function RetentionModal({
     initialValues?.action ?? "move_to_trash",
   );
 
-  // When opening for edit, the modal might be mounted with new initialValues.
-  useEffect(() => {
-    if (!initialValues) return;
-    setRetentionValue(initialValues.retention);
-    setCustomUntil(initialValues.retentionUntil ?? "");
-    setAction(initialValues.action);
-    // If opening for edit, the modal might include reminder fields in future.
-  }, [initialValues]);
-
   const retentionPreset = useMemo(
     () => RETENTION_PRESETS.find((p) => p.value === retentionValue),
     [retentionValue],
@@ -105,7 +96,13 @@ export default function RetentionModal({
     if (requireUntil) return !!customUntil;
     if (requireReminderAt) return !!customReminderAt;
     return true;
-  }, [action, customUntil, requireUntil]);
+  }, [
+    action,
+    customUntil,
+    customReminderAt,
+    requireUntil,
+    requireReminderAt,
+  ]);
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">

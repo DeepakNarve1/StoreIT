@@ -5,6 +5,17 @@ import { prisma } from "../utils/prisma";
 import { v4 as uuid } from "uuid";
 import { getFileViewUrl } from "../services/storage.service";
 import { createAuditLog } from "../services/audit.service";
+import {
+  FILE_CAPABILITIES,
+  FOLDER_CAPABILITIES,
+  getEffectiveRoleProfileForUser,
+  mergeCapabilities,
+  normalizeCapabilities,
+} from "../services/role-profiles.service";
+import {
+  userCanAccessFile,
+  userHasFilePermission,
+} from "../services/file-access.service";
 
 const router = Router();
 
@@ -24,6 +35,84 @@ const grantSchema = z.object({
   capabilities: z.record(z.string(), z.boolean()).optional().nullable(),
 });
 
+function actionToFileCapabilities(action: string): Record<string, boolean> {
+  if (action === "admin") {
+    return normalizeCapabilities(
+      Object.fromEntries(FILE_CAPABILITIES.map((key) => [key, true])),
+    );
+  }
+  if (action === "delete") {
+    return normalizeCapabilities({
+      see_files: true,
+      preview_files: true,
+      download_files: true,
+      edit_file_attrs: true,
+      view_metadata: true,
+      edit_metadata: true,
+      update_versions: true,
+      edit_online: true,
+      move_files: true,
+      delete_files: true,
+      duplicate_files: true,
+    });
+  }
+  if (action === "write") {
+    return normalizeCapabilities({
+      add_files: true,
+      see_files: true,
+      preview_files: true,
+      download_files: true,
+      edit_file_attrs: true,
+      view_metadata: true,
+      edit_metadata: true,
+      update_versions: true,
+      edit_online: true,
+      move_files: true,
+      duplicate_files: true,
+    });
+  }
+  return normalizeCapabilities({
+    see_files: true,
+    preview_files: true,
+  });
+}
+
+function actionToFolderCapabilities(action: string): Record<string, boolean> {
+  if (action === "admin") {
+    return normalizeCapabilities(
+      Object.fromEntries(FOLDER_CAPABILITIES.map((key) => [key, true])),
+    );
+  }
+  if (action === "delete") {
+    return normalizeCapabilities({
+      create_folders: true,
+      see_folders: true,
+      download_folders: true,
+      edit_folders: true,
+      move_folders: true,
+      delete_folders: true,
+      duplicate_folders: true,
+      view_metadata: true,
+      edit_metadata: true,
+    });
+  }
+  if (action === "write") {
+    return normalizeCapabilities({
+      create_folders: true,
+      see_folders: true,
+      download_folders: true,
+      edit_folders: true,
+      move_folders: true,
+      duplicate_folders: true,
+      view_metadata: true,
+      edit_metadata: true,
+    });
+  }
+  return normalizeCapabilities({
+    see_folders: true,
+  });
+}
+
 // ─── Helper: check a specific granular capability ─────────────────────────────
 export async function userHasCapability(
   userId: string,
@@ -33,22 +122,24 @@ export async function userHasCapability(
   resourceId: string,
   capability: string,
 ): Promise<boolean> {
-  const privileged = ["SUPERADMIN", "ORG_ADMIN", "MANAGER", "EDITOR"];
-  if (privileged.includes(role)) return true;
+  const roleContext = await getEffectiveRoleProfileForUser(userId);
+  if (!roleContext || roleContext.tenantId !== tenantId) return false;
 
-  const userRecord = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { departmentId: true },
-  });
+  if (
+    roleContext.baseRole !== "VIEWER" &&
+    roleContext.capabilities[capability] === true
+  ) {
+    return true;
+  }
 
   const orClauses: any[] = [
     { grantedTo: "all" },
     { grantedTo: "user", userId },
   ];
-  if (userRecord?.departmentId) {
+  if (roleContext.departmentId) {
     orClauses.push({
       grantedTo: "department",
-      departmentId: userRecord.departmentId,
+      departmentId: roleContext.departmentId,
     });
   }
 
@@ -63,8 +154,14 @@ export async function userHasCapability(
 
   if (!perm) return false;
   const capabilities = (perm as any).capabilities;
-  if (!capabilities || typeof capabilities !== "object") return false;
-  return (capabilities as Record<string, boolean>)[capability] === true;
+  if (capabilities && typeof capabilities === "object") {
+    return (capabilities as Record<string, boolean>)[capability] === true;
+  }
+  const coarseCaps =
+    resourceType === "file"
+      ? actionToFileCapabilities(perm.action)
+      : actionToFolderCapabilities(perm.action);
+  return coarseCaps[capability] === true;
 }
 
 // ─── POST /api/permissions/my-capabilities ────────────────────────────────────
@@ -80,49 +177,21 @@ router.post(
         .object({ fileIds: z.array(z.string().uuid()).max(100) })
         .parse(req.body);
 
-      const { userId, tenantId, role } = req.user!;
-
-      const ALL_CAPS = [
-        "preview_files",
-        "download_files",
-        "add_files",
-        "delete_files",
-        "edit_file_attrs",
-        "view_metadata",
-        "edit_metadata",
-        "see_files",
-        "see_folders",
-        "share_files",
-        "share_folders",
-      ] as const;
-
-      const privileged = ["SUPERADMIN", "ORG_ADMIN", "MANAGER", "EDITOR"];
-      if (privileged.includes(role)) {
-        // All capabilities are true for privileged roles
-        const fullCaps = ALL_CAPS.reduce(
-          (acc, k) => ({ ...acc, [k]: true }),
-          {} as Record<string, boolean>,
-        );
-        const result: Record<string, Record<string, boolean>> = {};
-        fileIds.forEach((id) => (result[id] = fullCaps));
-        res.json({ capabilities: result });
+      const { userId, tenantId } = req.user!;
+      const roleContext = await getEffectiveRoleProfileForUser(userId);
+      if (!roleContext) {
+        res.status(401).json({ error: "User not found" });
         return;
       }
-
-      // Fetch current user's department
-      const userRecord = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { departmentId: true },
-      });
 
       const orClauses: any[] = [
         { grantedTo: "all" },
         { grantedTo: "user", userId },
       ];
-      if (userRecord?.departmentId) {
+      if (roleContext.departmentId) {
         orClauses.push({
           grantedTo: "department",
-          departmentId: userRecord.departmentId,
+          departmentId: roleContext.departmentId,
         });
       }
 
@@ -162,6 +231,8 @@ router.post(
 
       // Build result map
       const result: Record<string, Record<string, boolean>> = {};
+      const baseCaps = normalizeCapabilities(roleContext.capabilities);
+      const ALL_CAPS = [...FILE_CAPABILITIES, "see_folders", "share_folders"] as const;
 
       for (const fileId of fileIds) {
         const file = files.find((f) => f.id === fileId);
@@ -181,16 +252,26 @@ router.post(
           | null
           | undefined;
 
-        if (!activePerm && !isOwner) {
+        const hasExplicitCaps =
+          !!caps && typeof caps === "object" && Object.keys(caps).length > 0;
+        const sharedCaps =
+          hasExplicitCaps
+            ? normalizeCapabilities(caps as Record<string, boolean>)
+            : activePerm
+              ? actionToFileCapabilities(activePerm.action)
+              : normalizeCapabilities({});
+        const seededCaps =
+          roleContext.baseRole === "VIEWER" && !activePerm && !isOwner
+            ? normalizeCapabilities({})
+            : baseCaps;
+        result[fileId] = mergeCapabilities(seededCaps, sharedCaps);
+        if (true) {
           // No grant at all — only preview allowed
-          result[fileId] = ALL_CAPS.reduce(
-            (acc, k) => ({ ...acc, [k]: k === "preview_files" }),
-            {} as Record<string, boolean>,
-          );
-        } else if (caps && typeof caps === "object" && Object.keys(caps).length > 0) {
+          result[fileId] = result[fileId];
+        } else if (caps && typeof caps === "object" && Object.keys(caps ?? {}).length > 0) {
           // Explicit granular capabilities from the permission record
           result[fileId] = ALL_CAPS.reduce(
-            (acc, k) => ({ ...acc, [k]: caps[k] === true }),
+            (acc, k) => ({ ...acc, [k]: (caps?.[k] ?? false) === true }),
             {} as Record<string, boolean>,
           );
           // Always allow preview
@@ -223,6 +304,7 @@ router.post(
           result[fileId]["view_metadata"] = true;
           result[fileId]["edit_metadata"] = true;
           result[fileId]["delete_files"] = true;
+          result[fileId]["update_versions"] = true;
         }
       }
 
@@ -249,8 +331,12 @@ router.post(
         .object({ folderIds: z.array(z.string().uuid()).max(200) })
         .parse(req.body);
 
-      const { userId, role } = req.user!;
-      const privileged = ["SUPERADMIN", "ORG_ADMIN", "MANAGER", "EDITOR"];
+      const { userId } = req.user!;
+      const roleContext = await getEffectiveRoleProfileForUser(userId);
+      if (!roleContext) {
+        res.status(401).json({ error: "User not found" });
+        return;
+      }
       const ALL_FOLDER_CAPS = [
         "create_folders",
         "see_folders",
@@ -266,7 +352,7 @@ router.post(
         "edit_metadata",
       ] as const;
 
-      if (privileged.includes(role)) {
+      if (false) {
         const fullCaps = ALL_FOLDER_CAPS.reduce(
           (acc, k) => ({ ...acc, [k]: true }),
           {} as Record<string, boolean>,
@@ -277,19 +363,14 @@ router.post(
         return;
       }
 
-      const userRecord = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { departmentId: true },
-      });
-
       const orClauses: any[] = [
         { grantedTo: "all" },
         { grantedTo: "user", userId },
       ];
-      if (userRecord?.departmentId) {
+      if (roleContext.departmentId) {
         orClauses.push({
           grantedTo: "department",
-          departmentId: userRecord.departmentId,
+          departmentId: roleContext.departmentId,
         });
       }
 
@@ -303,37 +384,24 @@ router.post(
       });
 
       const result: Record<string, Record<string, boolean>> = {};
+      const baseCaps = normalizeCapabilities(roleContext.capabilities);
       for (const folderId of folderIds) {
         const perm = folderPerms.find((p) => p.resourceId === folderId);
         const caps = (perm as any)?.capabilities as
           | Record<string, boolean>
           | null
           | undefined;
-        if (caps && typeof caps === "object" && Object.keys(caps).length > 0) {
-          result[folderId] = ALL_FOLDER_CAPS.reduce(
-            (acc, k) => ({ ...acc, [k]: caps[k] === true }),
-            {} as Record<string, boolean>,
-          );
-          continue;
-        }
-
-        const action = perm?.action ?? "read";
-        const coarseWrite = ["write", "delete", "admin"].includes(action);
-        const coarseDelete = ["delete", "admin"].includes(action);
-        result[folderId] = {
-          create_folders: coarseWrite,
-          see_folders: !!perm,
-          download_folders: coarseWrite,
-          edit_folders: coarseWrite,
-          move_folders: coarseWrite,
-          delete_folders: coarseDelete,
-          duplicate_folders: coarseWrite,
-          share_folders: action === "admin",
-          share_public_link_folder: action === "admin",
-          see_audit_trails: action === "admin",
-          view_metadata: coarseWrite,
-          edit_metadata: coarseWrite,
-        };
+        const sharedCaps =
+          caps && typeof caps === "object" && Object.keys(caps).length > 0
+            ? normalizeCapabilities(caps)
+            : perm
+              ? actionToFolderCapabilities(perm.action)
+              : normalizeCapabilities({});
+        const seededCaps =
+          roleContext.baseRole === "VIEWER" && !perm
+            ? normalizeCapabilities({})
+            : baseCaps;
+        result[folderId] = mergeCapabilities(seededCaps, sharedCaps);
       }
 
       res.json({ capabilities: result });
@@ -515,10 +583,50 @@ router.post(
 
       const file = await prisma.file.findFirst({
         where: { id: fileId, tenantId: req.user!.tenantId, isDeleted: false },
+        select: {
+          id: true,
+          name: true,
+          uploadedById: true,
+          folderId: true,
+        },
       });
 
       if (!file) {
         res.status(404).json({ error: "File not found" });
+        return;
+      }
+
+      const canAccess = await userCanAccessFile(
+        file.id,
+        req.user!.userId,
+        req.user!.tenantId,
+        req.user!.role,
+        file.uploadedById,
+        file.folderId,
+      );
+      if (!canAccess) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
+      const canShareLink =
+        (await userHasFilePermission(
+          fileId,
+          req.user!.userId,
+          file.uploadedById,
+          req.user!.role,
+          "admin",
+        )) ||
+        (await userHasCapability(
+          req.user!.userId,
+          req.user!.tenantId,
+          req.user!.role,
+          "file",
+          fileId,
+          "share_public_link_file",
+        ));
+      if (!canShareLink) {
+        res.status(403).json({ error: "Forbidden" });
         return;
       }
 
@@ -557,15 +665,44 @@ router.post(
 );
 
 // ─── GET /api/permissions/:resourceType/:resourceId ───────────────────────────
+// Tenant-scoped + same roles as grant — prevents cross-tenant enumeration of grants.
 router.get(
   "/:resourceType/:resourceId",
   verifyAuth,
+  requireRole("ORG_ADMIN", "MANAGER", "SUPERADMIN"),
   async (req: AuthRequest, res: Response) => {
     try {
       const { resourceType, resourceId } = req.params;
 
       if (!isValidUUID(resourceId)) {
         res.status(400).json({ error: "Invalid resource ID" });
+        return;
+      }
+
+      if (resourceType === "file") {
+        const file = await prisma.file.findFirst({
+          where: {
+            id: resourceId,
+            tenantId: req.user!.tenantId,
+            isDeleted: false,
+          },
+          select: { id: true },
+        });
+        if (!file) {
+          res.status(404).json({ error: "Not found" });
+          return;
+        }
+      } else if (resourceType === "folder") {
+        const folder = await prisma.folder.findFirst({
+          where: { id: resourceId, tenantId: req.user!.tenantId },
+          select: { id: true },
+        });
+        if (!folder) {
+          res.status(404).json({ error: "Not found" });
+          return;
+        }
+      } else {
+        res.status(400).json({ error: "Invalid resource type" });
         return;
       }
 

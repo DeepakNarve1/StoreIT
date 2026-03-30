@@ -23,6 +23,8 @@ import {
   Hash,
   AlertTriangle,
   GripVertical,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { useState } from "react";
 import { useAuthStore } from "../../store/authStore";
@@ -42,7 +44,7 @@ interface FileItem {
   approvedAt?: string | null;
   approvedBy?: { name: string } | null;
   isLocked?: boolean;
-  lockedById?: string;
+  lockedById?: string | null;
   categoryId?: string | null;
   /** Missing required default folder metadata indicator (FolderIT-style) */
   metaRequiredMissingCount?: number;
@@ -83,6 +85,7 @@ interface FileListProps {
     version: boolean;
     approval: boolean;
     retention: boolean;
+    lock: boolean;
     metaNotFound: boolean;
   };
   onRetentionClick?: (file: FileItem) => void;
@@ -208,6 +211,7 @@ export default function FileList({
     version: false,
     approval: false,
     retention: false,
+    lock: true,
     metaNotFound: true,
   },
   onRetentionClick,
@@ -216,24 +220,16 @@ export default function FileList({
 }: FileListProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const { user } = useAuthStore();
-  const isPrivileged = [
-    "ORG_ADMIN",
-    "SUPERADMIN",
-    "MANAGER",
-    "EDITOR",
-  ].includes(user?.role ?? "");
   const isLockPrivileged = ["ORG_ADMIN", "SUPERADMIN", "MANAGER"].includes(
     user?.role ?? "",
   );
 
   /**
    * Per-file capability resolver.
-   * - Privileged roles: always true.
-   * - VIEWERs with capabilitiesMap: read from the map.
-   * - VIEWERs without map (legacy): fall back to canDownload for download, deny others.
+   * - Uses the resolved capability map when available.
+   * - Falls back to legacy behaviour only for download.
    */
   const fileCan = (fileId: string, cap: string): boolean => {
-    if (isPrivileged) return true;
     if (capabilitiesMap) return capabilitiesMap[fileId]?.[cap] === true;
     // Legacy fallback
     if (cap === "download_files")
@@ -290,6 +286,7 @@ export default function FileList({
   const versionEnabled = !!visibleColumns.version;
   const approvalEnabled = !!visibleColumns.approval;
   const retentionEnabled = !!visibleColumns.retention;
+  const lockEnabled = !!visibleColumns.lock;
   const metaNotFoundEnabled = !!visibleColumns.metaNotFound;
   type DataKey = "type" | "size" | "modified";
   const visibleKeys: DataKey[] = [];
@@ -312,6 +309,7 @@ export default function FileList({
     (versionEnabled ? 2 : 0) +
     (approvalEnabled ? 2 : 0) +
     (retentionEnabled ? 2 : 0) +
+    (lockEnabled ? 2 : 0) +
     (metaNotFoundEnabled ? 2 : 0);
   const totalCols = 12 + optionalColUnits;
   const gridTemplateStyle = {
@@ -504,6 +502,11 @@ export default function FileList({
             Retention
           </div>
         )}
+        {lockEnabled && (
+          <div className="col-span-2 text-xs font-medium text-gray-500 text-center whitespace-nowrap">
+            Lock
+          </div>
+        )}
         {metaNotFoundEnabled && (
           <div className="col-span-2 text-xs font-medium text-gray-500 text-center whitespace-nowrap">
             Meta not found
@@ -590,7 +593,7 @@ export default function FileList({
               </div>
 
               <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
-                {file.isLocked && (
+                {!lockEnabled && file.isLocked && (
                   <span className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
                     🔒 Locked
                   </span>
@@ -655,7 +658,7 @@ export default function FileList({
 
             {approvalEnabled && (
               <div className="col-span-2 flex items-center justify-center">
-                {file.approvalStatus ? (
+                {file.approvalStatus && file.approvalStatus !== "draft" ? (
                   <ApprovalTooltip
                     note={file.approvalNote}
                     reviewerName={file.approvedBy?.name}
@@ -702,6 +705,30 @@ export default function FileList({
                 >
                   {formatRetention(retentionByFileId.get(file.id)) ?? "—"}
                 </button>
+              </div>
+            )}
+
+            {lockEnabled && (
+              <div className="col-span-2 flex items-center justify-center">
+                {file.isLocked ? (
+                  <span
+                    className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap
+                               bg-amber-50 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200 border border-amber-200/80 dark:border-amber-800/60"
+                    title="File is locked for editing"
+                  >
+                    <Lock size={11} className="shrink-0" />
+                    Locked
+                  </span>
+                ) : (
+                  <span
+                    className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap
+                               bg-gray-50 text-gray-600 dark:bg-gray-800/80 dark:text-gray-400 border border-gray-200 dark:border-gray-700"
+                    title="File is not locked"
+                  >
+                    <Unlock size={11} className="shrink-0" />
+                    Unlocked
+                  </span>
+                )}
               </div>
             )}
 
@@ -838,8 +865,7 @@ export default function FileList({
                       )}
                       {fileCan(file.id, "edit_file_attrs") &&
                         onSubmitApproval &&
-                        (!file.approvalStatus ||
-                          file.approvalStatus === "rejected") && (
+                        file.approvalStatus !== "in_review" && (
                           <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
                             <button
                               onClick={() => {
@@ -848,7 +874,7 @@ export default function FileList({
                               }}
                               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                             >
-                              <CheckCircle size={14} /> Submit for approval
+                              <CheckCircle size={14} /> Start workflow
                             </button>
                           </div>
                         )}

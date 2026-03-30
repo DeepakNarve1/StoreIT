@@ -16,6 +16,18 @@ import AppShell from "../components/layout/AppShell";
 import FilePreviewModal from "../components/files/FilePreviewModal";
 import api from "../api/axios";
 import { useAuthStore } from "../store/authStore";
+import type { BrowserFileItem } from "../types/file-browser";
+
+type TagListItem = {
+  id: string;
+  name: string;
+  color: string;
+  _count?: { files: number };
+};
+
+type TagFileRow = BrowserFileItem & {
+  folder?: { name: string } | null;
+};
 
 const TAG_COLORS = [
   "#3B8BD4",
@@ -48,8 +60,8 @@ export default function TagsPage() {
   const canMutate = ["ORG_ADMIN", "SUPERADMIN", "MANAGER", "EDITOR"].includes(
     user?.role ?? "",
   );
-  const [selectedTag, setSelectedTag] = useState<any>(null);
-  const [previewFile, setPreviewFile] = useState<any>(null);
+  const [selectedTag, setSelectedTag] = useState<TagListItem | null>(null);
+  const [previewFile, setPreviewFile] = useState<TagFileRow | null>(null);
   const [newTagName, setNewTagName] = useState("");
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0]);
   const [showCreate, setShowCreate] = useState(false);
@@ -58,15 +70,16 @@ export default function TagsPage() {
     queryKey: ["tags"],
     queryFn: async () => {
       const res = await api.get("/tags");
-      return res.data as { tags: any[] };
+      return res.data as { tags: TagListItem[] };
     },
   });
 
   const { data: tagFilesData } = useQuery({
     queryKey: ["tag-files", selectedTag?.id],
     queryFn: async () => {
-      const res = await api.get(`/tags/${selectedTag.id}/files`);
-      return res.data as { files: any[] };
+      const tagId = selectedTag!.id;
+      const res = await api.get(`/tags/${tagId}/files`);
+      return res.data as { files: TagFileRow[] };
     },
     enabled: !!selectedTag?.id,
   });

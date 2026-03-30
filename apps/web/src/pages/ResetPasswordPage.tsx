@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import api from "../api/axios";
+import { apiErrorMessage } from "../utils/apiError";
 
 export default function ResetPasswordPage() {
   const { token } = useParams<{ token: string }>();
@@ -22,9 +23,12 @@ export default function ResetPasswordPage() {
       await api.post("/auth/reset-password", { token, password });
       setDone(true);
       setTimeout(() => navigate("/login"), 3000);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setError(
-        err.response?.data?.error ?? "This link is invalid or has expired.",
+        apiErrorMessage(
+          err,
+          "This link is invalid or has expired.",
+        ),
       );
     } finally {
       setLoading(false);

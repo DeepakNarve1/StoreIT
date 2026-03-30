@@ -23,6 +23,8 @@ import billingRoutes from "./routes/billing.routes";
 import guestRoutes from "./routes/guest.routes";
 import templatesRoutes from "./routes/templates.routes";
 import preferencesRoutes from "./routes/preferences.routes";
+import workflowRoutes from "./routes/workflow.routes";
+import roleRoutes from "./routes/roles.routes";
 import { globalErrorHandler } from "./middleware/errorHandler";
 import { prisma, pool } from "./utils/prisma";
 
@@ -51,6 +53,7 @@ app.use(
 
 // ─── PERFORMANCE MIDDLEWARE ──────────────────────────────────────────────────
 app.use(compression() as any);
+app.use("/api/billing/webhook", express.raw({ type: "application/json" }));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser() as any);
@@ -105,6 +108,8 @@ app.use("/api/billing", billingRoutes);
 app.use("/api/guest", guestRoutes);
 app.use("/api/templates", templatesRoutes);
 app.use("/api/preferences", preferencesRoutes);
+app.use("/api/workflow", workflowRoutes);
+app.use("/api/roles", roleRoutes);
 
 // ─── 404 HANDLER ─────────────────────────────────────────────────────────────
 app.use("*", (_req: Request, res: Response) => {

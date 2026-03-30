@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import axios from "axios";
 import {
   X,
   Loader,
@@ -13,7 +14,11 @@ import {
   Send,
 } from "lucide-react";
 import api from "../../api/axios";
-import { useToast } from "../ui/Toast";
+import { useToast } from "../ui/toastStore";
+import {
+  FILE_PERMISSION_OPTIONS,
+  FOLDER_PERMISSION_OPTIONS,
+} from "../../constants/roleCapabilities";
 
 interface PermissionsPanelProps {
   resourceId: string;
@@ -22,38 +27,8 @@ interface PermissionsPanelProps {
   onClose: () => void;
 }
 
-const FOLDER_PERMS = [
-  { key: "create_folders", label: "Create folders" },
-  { key: "see_folders", label: "See folders" },
-  { key: "download_folders", label: "Download folders" },
-  { key: "edit_folders", label: "Edit folders" },
-  { key: "move_folders", label: "Move folders" },
-  { key: "delete_folders", label: "Delete folders" },
-  { key: "duplicate_folders", label: "Duplicate folders" },
-  { key: "view_metadata", label: "View metadata" },
-  { key: "edit_metadata", label: "Edit metadata" },
-  { key: "share_folders", label: "Share folders" },
-  { key: "share_public_link_folder", label: "Share with public link" },
-  { key: "see_audit_trails", label: "See audit trails" },
-];
-
-const FILE_PERMS = [
-  { key: "add_files", label: "Add/create files" },
-  { key: "see_files", label: "See list of files" },
-  { key: "preview_files", label: "Preview files" },
-  { key: "download_files", label: "Download files" },
-  { key: "edit_file_attrs", label: "Edit file attributes" },
-  { key: "view_metadata", label: "View metadata" },
-  { key: "edit_metadata", label: "Edit metadata" },
-  { key: "update_versions", label: "Update file versions" },
-  { key: "edit_online", label: "Edit files online" },
-  { key: "move_files", label: "Move files" },
-  { key: "delete_files", label: "Delete files" },
-  { key: "duplicate_files", label: "Duplicate files" },
-  { key: "share_files", label: "Share files" },
-  { key: "share_public_link_file", label: "Share with public link" },
-  { key: "see_audit_trails_file", label: "See audit trails" },
-];
+const FOLDER_PERMS = FOLDER_PERMISSION_OPTIONS;
+const FILE_PERMS = FILE_PERMISSION_OPTIONS;
 
 const ACTION_LABELS: Record<string, string> = {
   read: "View only",
@@ -67,6 +42,32 @@ const ACTION_COLORS: Record<string, string> = {
   write: "bg-green-50 text-green-700",
   delete: "bg-red-50 text-red-700",
   admin: "bg-purple-50 text-purple-700",
+};
+
+function mutationErrorMessage(err: unknown, fallback: string): string {
+  if (!axios.isAxiosError(err)) return fallback;
+  const d = err.response?.data;
+  if (d && typeof d === "object" && d !== null && "error" in d) {
+    const msg = (d as { error?: unknown }).error;
+    if (typeof msg === "string" && msg.trim()) return msg;
+  }
+  return fallback;
+}
+
+type PermissionGrantRow = {
+  id: string;
+  grantedTo: "all" | "user" | "department";
+  action: string;
+  expiresAt?: string | null;
+  capabilities?: Record<string, boolean> | null;
+  user?: { name?: string | null; email?: string | null } | null;
+  department?: { name?: string | null } | null;
+};
+
+type OrgUserOption = {
+  id: string;
+  name: string;
+  email: string;
 };
 
 // All checkbox keys that count as "something selected"
@@ -143,7 +144,7 @@ export default function PermissionsPanel({
     queryKey: ["permissions", resourceType, resourceId],
     queryFn: async () => {
       const res = await api.get(`/permissions/${resourceType}/${resourceId}`);
-      return res.data as { permissions: any[] };
+      return res.data as { permissions: PermissionGrantRow[] };
     },
   });
 
@@ -155,7 +156,7 @@ export default function PermissionsPanel({
     queryKey: ["users"],
     queryFn: async () => {
       const res = await api.get("/users");
-      return res.data as { users: any[] };
+      return res.data as { users: OrgUserOption[] };
     },
     retry: false,
   });
@@ -201,9 +202,8 @@ export default function PermissionsPanel({
         preview_files: true,
       });
     },
-    onError: (err: any) => {
-      const msg = err.response?.data?.error || "Failed to grant permission";
-      add(msg, "error");
+    onError: (err: unknown) => {
+      add(mutationErrorMessage(err, "Failed to grant permission"), "error");
     },
   });
 
@@ -217,9 +217,8 @@ export default function PermissionsPanel({
       });
       add("Permission revoked", "success");
     },
-    onError: (err: any) => {
-      const msg = err.response?.data?.error || "Failed to revoke permission";
-      add(msg, "error");
+    onError: (err: unknown) => {
+      add(mutationErrorMessage(err, "Failed to revoke permission"), "error");
     },
   });
 
@@ -232,9 +231,8 @@ export default function PermissionsPanel({
       return res.data as { link: string };
     },
     onSuccess: (data) => setGeneratedLink(data.link),
-    onError: (err: any) => {
-      const msg = err.response?.data?.error || "Failed to generate link";
-      add(msg, "error");
+    onError: (err: unknown) => {
+      add(mutationErrorMessage(err, "Failed to generate link"), "error");
     },
   });
 
@@ -260,9 +258,8 @@ export default function PermissionsPanel({
       });
       setTab("access"); // return to access panel
     },
-    onError: (err: any) => {
-      const msg = err.response?.data?.error || "Failed to create guest share";
-      add(msg, "error");
+    onError: (err: unknown) => {
+      add(mutationErrorMessage(err, "Failed to create guest share"), "error");
     },
   });
 
@@ -362,9 +359,9 @@ export default function PermissionsPanel({
                           </p>
                           <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                             <span
-                              className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${ACTION_COLORS[perm.action]}`}
+                              className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${ACTION_COLORS[perm.action] ?? "bg-gray-100 text-gray-700"}`}
                             >
-                              {ACTION_LABELS[perm.action]}
+                              {ACTION_LABELS[perm.action] ?? perm.action}
                             </span>
                             {/* Show up to 3 individual capability tags if stored */}
                             {perm.capabilities &&
@@ -621,9 +618,9 @@ export default function PermissionsPanel({
                       Permission level
                     </span>
                     <span
-                      className={`text-xs font-semibold px-2 py-0.5 rounded-full ${ACTION_COLORS[deriveAction()]}`}
+                      className={`text-xs font-semibold px-2 py-0.5 rounded-full ${ACTION_COLORS[deriveAction()] ?? "bg-gray-100 text-gray-700"}`}
                     >
-                      {ACTION_LABELS[deriveAction()]}
+                      {ACTION_LABELS[deriveAction()] ?? deriveAction()}
                     </span>
                   </div>
                 )}

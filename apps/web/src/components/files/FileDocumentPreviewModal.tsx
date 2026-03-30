@@ -31,36 +31,34 @@ const getFileType = (mimeType: string) => {
 const getOfficeViewerUrl = (fileUrl: string) =>
   `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(fileUrl)}`;
 
-export default function FileDocumentPreviewModal({ file, onClose }: Props) {
-  const [viewUrl, setViewUrl] = useState<string | null>(file?.viewUrl || null);
-  const [loadingUrl, setLoadingUrl] = useState(false);
+function FileDocumentPreviewModalInner({
+  file,
+  onClose,
+}: {
+  file: FileItem;
+  onClose: () => void;
+}) {
+  const [viewUrl, setViewUrl] = useState<string | null>(file.viewUrl ?? null);
+  const [loadingUrl, setLoadingUrl] = useState(true);
 
   useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
-
-  useEffect(() => {
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!file?.id) return;
-    setLoadingUrl(true);
+    let cancelled = false;
     api
       .get(`/files/${file.id}`)
-      .then((res) => setViewUrl(res.data.file.viewUrl))
-      .catch(() => setViewUrl(null))
-      .finally(() => setLoadingUrl(false));
-  }, [file?.id]);
+      .then((res) => {
+        if (!cancelled) setViewUrl(res.data.file.viewUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setViewUrl(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingUrl(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [file.id]);
 
-  if (!file) return null;
   const fileType = getFileType(file.mimeType);
 
   const renderPreview = () => {
@@ -143,3 +141,25 @@ export default function FileDocumentPreviewModal({ file, onClose }: Props) {
   );
 }
 
+export default function FileDocumentPreviewModal({ file, onClose }: Props) {
+  useEffect(() => {
+    if (!file) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [onClose, file]);
+
+  useEffect(() => {
+    if (!file) return;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [file]);
+
+  if (!file) return null;
+
+  return <FileDocumentPreviewModalInner key={file.id} file={file} onClose={onClose} />;
+}

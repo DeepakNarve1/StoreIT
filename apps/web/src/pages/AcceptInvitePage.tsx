@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { CheckCircle, Loader, AlertCircle, Mail } from "lucide-react";
 import api from "../api/axios";
+import { apiErrorMessage } from "../utils/apiError";
 
 export default function AcceptInvitePage() {
   const { token } = useParams();
@@ -25,6 +26,7 @@ export default function AcceptInvitePage() {
       return res.data as {
         email: string;
         role: string;
+        roleProfile?: { id: string; name: string; baseRole: string } | null;
         tenantName: string;
       };
     },
@@ -46,8 +48,8 @@ export default function AcceptInvitePage() {
       setSuccess(true);
       setTimeout(() => navigate("/login"), 3000);
     },
-    onError: (err: any) => {
-      setError(err.response?.data?.error || "Failed to create account");
+    onError: (err: unknown) => {
+      setError(apiErrorMessage(err, "Failed to create account"));
     },
   });
 
@@ -171,7 +173,7 @@ export default function AcceptInvitePage() {
               Organization Invite
             </p>
             <span className="text-[10px] font-bold bg-primary-100 dark:bg-primary-800 text-primary-700 dark:text-primary-200 px-2 py-0.5 rounded-full">
-              {inviteData.role.replace("_", " ")}
+              {(inviteData.roleProfile?.name || inviteData.role).replace("_", " ")}
             </span>
           </div>
           <p className="text-lg font-bold text-white-900 dark:text-primary-400 leading-tight">

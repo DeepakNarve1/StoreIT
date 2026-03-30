@@ -1,22 +1,58 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
 import {
   CheckCircle,
   AlertTriangle,
-  ExternalLink,
   Users,
   HardDrive,
   Minus,
   Plus,
   CreditCard,
   CalendarDays,
+  RefreshCw,
+  XCircle,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import axios from "axios";
 import AppShell from "../../components/layout/AppShell";
-import { useToast } from "../../components/ui/Toast";
+import { useToast } from "../../components/ui/toastStore";
 import api from "../../api/axios";
 
-const PLANS = [
+function axiosErrorMessage(err: unknown, fallback: string): string {
+  if (!axios.isAxiosError(err)) return fallback;
+  const d = err.response?.data;
+  if (d && typeof d === "object" && d !== null && "error" in d) {
+    const e = (d as { error?: unknown }).error;
+    if (typeof e === "string" && e.trim()) return e;
+  }
+  return fallback;
+}
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: Record<string, unknown>) => {
+      open: () => void;
+    };
+  }
+}
+
+interface PlanFeature {
+  label: string;
+  included: boolean;
+  sub?: string;
+}
+
+interface BillingPlan {
+  id: "starter" | "pro" | "enterprise";
+  name: string;
+  price: number | null;
+  priceLabel: string | null;
+  storage: string;
+  users: number;
+  customizable?: boolean;
+  features: PlanFeature[];
+}
+
+const PLANS: BillingPlan[] = [
   {
     id: "starter",
     name: "MINI",
@@ -97,60 +133,49 @@ function formatBytes(bytes: number) {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
+function loadRazorpayCheckoutScript() {
+  return new Promise<boolean>((resolve) => {
+    if (window.Razorpay) {
+      resolve(true);
+      return;
+    }
+
+    const existing = document.querySelector<HTMLScriptElement>(
+      'script[src="https://checkout.razorpay.com/v1/checkout.js"]',
+    );
+    if (existing) {
+      existing.addEventListener("load", () => resolve(true), { once: true });
+      existing.addEventListener("error", () => resolve(false), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+}
+
 export default function BillingPage() {
-  const [searchParams] = useSearchParams();
-  const success = searchParams.get("success");
-  const canceled = searchParams.get("canceled");
-  const sessionId = searchParams.get("session_id");
   const [tbValue, setTbValue] = useState(0.5);
   const [usersValue, setUsersValue] = useState(20);
   const [pendingPlan, setPendingPlan] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
-  // When Stripe redirects back with ?success=true&session_id=...,
-  // immediately call /billing/verify to apply the plan update in the DB.
-  // This works even without webhooks (important for local dev).
-  const [verifyDone, setVerifyDone] = useState(false);
-  const [pollCount, setPollCount] = useState(0);
-
-  useEffect(() => {
-    if (success && sessionId && !verifyDone) {
-      api
-        .post("/billing/verify", { sessionId })
-        .then(() => {
-          setVerifyDone(true);
-          queryClient.invalidateQueries({ queryKey: ["billing-status"] });
-        })
-        .catch(() => {
-          // If verify fails (e.g. already applied), still refresh
-          queryClient.invalidateQueries({ queryKey: ["billing-status"] });
-        });
-    } else if (success && !sessionId) {
-      // Legacy: no session_id, just force a refresh
-      queryClient.invalidateQueries({ queryKey: ["billing-status"] });
-      setPollCount(0);
-    }
-  }, [success, sessionId, verifyDone, queryClient]);
-
   const { data, isLoading } = useQuery({
     queryKey: ["billing-status"],
     staleTime: 0,
-    // Poll every 3s only if verify hasn't completed yet (fallback for slow webhooks)
-    refetchInterval: (query) => {
-      if (!success || verifyDone) return false;
-      const planData = query.state.data as any;
-      if (pollCount >= 10) return false;
-      if (planData?.plan && planData.plan !== "free") return false;
-      return 3000;
-    },
     queryFn: async () => {
-      if (success && !verifyDone) setPollCount((c) => c + 1);
       const res = await api.get("/billing/status");
       return res.data as {
         plan: string;
         limits: { storageBytes: number | null; maxUsers: number | null };
         usage: { storageBytes: number; users: number };
-        stripe: {
+        billing: {
+          provider: string;
+          subscriptionId: string | null;
           subscriptionStatus: string | null;
           currentPeriodEnd: string | null;
         };
@@ -158,32 +183,115 @@ export default function BillingPage() {
     },
   });
 
-  const checkout = useMutation({
-    mutationFn: async (plan: string) => {
-      const res = await api.post("/billing/checkout", { plan });
-      return res.data as { url: string };
+  const verifyCheckout = useMutation({
+    mutationFn: async ({
+      plan,
+      razorpay_payment_id,
+      razorpay_subscription_id,
+      razorpay_signature,
+    }: {
+      plan: string;
+      razorpay_payment_id: string;
+      razorpay_subscription_id: string;
+      razorpay_signature: string;
+    }) => {
+      const res = await api.post("/billing/verify", {
+        plan,
+        razorpayPaymentId: razorpay_payment_id,
+        razorpaySubscriptionId: razorpay_subscription_id,
+        razorpaySignature: razorpay_signature,
+      });
+      return res.data;
     },
-    onMutate: (plan) => setPendingPlan(plan),
-    onSuccess: (data) => {
-      window.location.href = data.url;
-    },
-    onError: (err: any) => {
+    onSuccess: () => {
       setPendingPlan(null);
-      const msg = err?.response?.data?.error ?? "Failed to start checkout";
-      useToast.getState().add(msg, "error");
+      queryClient.invalidateQueries({ queryKey: ["billing-status"] });
+      useToast.getState().add("Subscription updated successfully.", "success");
+    },
+    onError: (err: unknown) => {
+      setPendingPlan(null);
+      useToast
+        .getState()
+        .add(
+          axiosErrorMessage(err, "Failed to verify the Razorpay payment."),
+          "error",
+        );
     },
   });
 
-  const portal = useMutation({
+  const checkout = useMutation({
+    mutationFn: async (plan: string) => {
+      const res = await api.post("/billing/checkout", { plan });
+      return res.data as {
+        subscriptionId: string;
+        key: string;
+        name: string;
+        description: string;
+        prefill?: { name?: string; email?: string };
+        notes?: Record<string, string>;
+        theme?: { color?: string };
+      };
+    },
+    onMutate: (plan) => setPendingPlan(plan),
+    onSuccess: async (checkoutData, plan) => {
+      const scriptLoaded = await loadRazorpayCheckoutScript();
+      if (!scriptLoaded || !window.Razorpay) {
+        setPendingPlan(null);
+        useToast
+          .getState()
+          .add("Failed to load Razorpay Checkout.", "error");
+        return;
+      }
+
+      const razorpay = new window.Razorpay({
+        key: checkoutData.key,
+        subscription_id: checkoutData.subscriptionId,
+        name: checkoutData.name,
+        description: checkoutData.description,
+        prefill: checkoutData.prefill,
+        notes: checkoutData.notes,
+        theme: checkoutData.theme,
+        handler: (response: {
+          razorpay_payment_id: string;
+          razorpay_subscription_id: string;
+          razorpay_signature: string;
+        }) => {
+          verifyCheckout.mutate({ plan, ...response });
+        },
+        modal: {
+          ondismiss: () => {
+            setPendingPlan(null);
+          },
+        },
+      });
+
+      razorpay.open();
+    },
+    onError: (err: unknown) => {
+      setPendingPlan(null);
+      useToast
+        .getState()
+        .add(
+          axiosErrorMessage(err, "Failed to start Razorpay checkout."),
+          "error",
+        );
+    },
+  });
+
+  const cancelSubscription = useMutation({
     mutationFn: async () => {
-      const res = await api.post("/billing/portal");
-      return res.data as { url: string };
+      const res = await api.post("/billing/cancel");
+      return res.data;
     },
-    onSuccess: (data) => {
-      window.location.href = data.url;
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["billing-status"] });
+      useToast.getState().add("Subscription cancelled.", "success");
     },
-    onError: () =>
-      useToast.getState().add("Failed to open billing portal", "error"),
+    onError: (err: unknown) => {
+      useToast
+        .getState()
+        .add(axiosErrorMessage(err, "Failed to cancel subscription."), "error");
+    },
   });
 
   const currentPlan = data?.plan ?? "free";
@@ -197,20 +305,24 @@ export default function BillingPage() {
   const usersPct = usersLimit
     ? Math.min(100, Math.round((usersUsed / usersLimit) * 100))
     : 0;
+  const hasActiveSubscription =
+    !!data?.billing.subscriptionId &&
+    !["cancelled", "completed", "expired"].includes(
+      data?.billing.subscriptionStatus ?? "",
+    );
 
   return (
     <AppShell>
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-0">
-        {/* Page heading */}
         <div className="mb-6">
           <h1 className="text-xl font-bold text-gray-900 dark:text-white">
             Billing &amp; Plans
           </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-            Manage your subscription and usage
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
+            Manage your subscription and usage with Razorpay.
           </p>
         </div>
-        {/* Current plan hero */}
+
         {!isLoading &&
           data &&
           (() => {
@@ -221,8 +333,8 @@ export default function BillingPage() {
               enterprise: "TAILOR",
             };
             const planLabel = PLAN_DISPLAY[currentPlan] ?? currentPlan;
-            const renewalDate = data.stripe.currentPeriodEnd
-              ? new Date(data.stripe.currentPeriodEnd).toLocaleDateString(
+            const renewalDate = data.billing.currentPeriodEnd
+              ? new Date(data.billing.currentPeriodEnd).toLocaleDateString(
                   "en-IN",
                   {
                     day: "numeric",
@@ -231,74 +343,76 @@ export default function BillingPage() {
                   },
                 )
               : null;
+
             return (
               <div
-                className="rounded-2xl p-5 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+                className="mb-6 flex flex-col gap-4 rounded-2xl p-5 sm:flex-row sm:items-center sm:justify-between"
                 style={{
                   background:
                     "linear-gradient(135deg, #ff8a80 0%, #f06292 100%)",
                 }}
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/20">
                     <CreditCard size={20} className="text-white" />
                   </div>
                   <div>
-                    <p className="text-xs font-semibold text-white/70 uppercase tracking-widest">
+                    <p className="text-xs font-semibold uppercase tracking-widest text-white/70">
                       Your current plan
                     </p>
-                    <p className="text-2xl font-black text-white leading-tight">
+                    <p className="text-2xl font-black leading-tight text-white">
                       {planLabel}
                     </p>
+                    {data.billing.subscriptionStatus && (
+                      <p className="mt-1 text-xs uppercase tracking-wide text-white/80">
+                        Status: {data.billing.subscriptionStatus}
+                      </p>
+                    )}
                   </div>
                 </div>
-                <div className="flex flex-col sm:items-end gap-2">
+
+                <div className="flex flex-col gap-2 sm:items-end">
                   {renewalDate && (
                     <span className="flex items-center gap-1.5 text-xs text-white/80">
                       <CalendarDays size={12} />
                       Renews {renewalDate}
                     </span>
                   )}
-                  {data.stripe.subscriptionStatus && (
+                  {hasActiveSubscription && (
                     <button
-                      onClick={() => portal.mutate()}
-                      disabled={portal.isPending}
-                      className="flex items-center gap-1.5 text-xs bg-white/20 hover:bg-white/30 text-white font-semibold px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
+                      onClick={() => cancelSubscription.mutate()}
+                      disabled={cancelSubscription.isPending}
+                      className="flex items-center gap-1.5 rounded-lg bg-white/20 px-3 py-1.5 text-xs font-semibold text-white transition-all hover:bg-white/30 disabled:opacity-50"
                     >
-                      <ExternalLink size={12} />
-                      {portal.isPending ? "Opening…" : "Manage billing"}
+                      <XCircle size={12} />
+                      {cancelSubscription.isPending
+                        ? "Cancelling..."
+                        : "Cancel subscription"}
                     </button>
                   )}
                 </div>
               </div>
             );
           })()}
-        {success && (
-          <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-xl mb-6">
-            <CheckCircle size={18} className="text-green-600 shrink-0" />
-            <p className="text-sm text-green-700 font-medium">
-              Subscription activated successfully!
+
+        {hasActiveSubscription && (
+          <div className="mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <RefreshCw size={18} className="mt-0.5 shrink-0 text-amber-600" />
+            <p className="text-sm text-amber-800">
+              Changing plans will start a new Razorpay subscription and replace
+              the current one after payment confirmation.
             </p>
           </div>
         )}
-        {canceled && (
-          <div className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-xl mb-6">
-            <AlertTriangle size={18} className="text-red-500 shrink-0" />
-            <p className="text-sm text-red-600">
-              Checkout was canceled. Your plan was not changed.
-            </p>
-          </div>
-        )}
-        {/* Usage */}
+
         {!isLoading && data && (
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5 mb-8">
-            <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">
+          <div className="mb-8 rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900">
+            <p className="mb-4 text-sm font-semibold text-gray-700 dark:text-gray-300">
               Current usage
             </p>
-            {/* Usage bars — stacked on mobile, side-by-side on sm+ */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
               <div>
-                <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
+                <div className="mb-1.5 flex items-center justify-between text-xs text-gray-500">
                   <span className="flex items-center gap-1">
                     <HardDrive size={12} /> Storage
                   </span>
@@ -307,7 +421,7 @@ export default function BillingPage() {
                     {storageLimit ? formatBytes(storageLimit) : "∞"}
                   </span>
                 </div>
-                <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                <div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
                   <div
                     className={`h-full rounded-full transition-all ${storagePct >= 90 ? "bg-red-500" : "bg-primary-500"}`}
                     style={{ width: `${storagePct}%` }}
@@ -315,7 +429,7 @@ export default function BillingPage() {
                 </div>
               </div>
               <div>
-                <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
+                <div className="mb-1.5 flex items-center justify-between text-xs text-gray-500">
                   <span className="flex items-center gap-1">
                     <Users size={12} /> Users
                   </span>
@@ -323,7 +437,7 @@ export default function BillingPage() {
                     {usersUsed} / {usersLimit ?? "∞"}
                   </span>
                 </div>
-                <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                <div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
                   <div
                     className={`h-full rounded-full transition-all ${usersPct >= 90 ? "bg-red-500" : "bg-primary-500"}`}
                     style={{ width: `${usersPct}%` }}
@@ -333,95 +447,97 @@ export default function BillingPage() {
             </div>
           </div>
         )}
-        {/* Plan cards — 1 col on mobile, 3 col on md+ */}
+
         {isLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
             {[1, 2, 3].map((i) => (
               <div
                 key={i}
-                className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden animate-pulse"
+                className="overflow-hidden rounded-2xl border-2 border-gray-200 animate-pulse dark:border-gray-700"
               >
                 <div className="h-36 bg-gray-100 dark:bg-gray-800" />
-                <div className="p-6 space-y-3">
+                <div className="space-y-3 p-6">
                   {[...Array(5)].map((_, j) => (
                     <div
                       key={j}
-                      className="h-4 bg-gray-100 dark:bg-gray-800 rounded w-full"
+                      className="h-4 w-full rounded bg-gray-100 dark:bg-gray-800"
                     />
                   ))}
                 </div>
                 <div className="px-6 pb-6">
-                  <div className="h-11 bg-gray-100 dark:bg-gray-800 rounded-xl" />
+                  <div className="h-11 rounded-xl bg-gray-100 dark:bg-gray-800" />
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
             {PLANS.map((plan) => {
               const isCurrent = currentPlan === plan.id;
-              const isFreePlan = currentPlan === "free";
-              // If the user already has an active subscription, all plan changes
-              // must go through the Stripe billing portal (not a new checkout).
-              const hasActiveSub = !!data?.stripe.subscriptionStatus && !isFreePlan;
+              const isBusy =
+                pendingPlan === plan.id ||
+                checkout.isPending ||
+                verifyCheckout.isPending;
+
               return (
                 <div
                   key={plan.id}
-                  className={`rounded-2xl border-2 flex flex-col overflow-hidden transition-all ${isCurrent ? "border-primary-500" : "border-gray-200 dark:border-gray-700"}`}
+                  className={`flex flex-col overflow-hidden rounded-2xl border-2 transition-all ${
+                    isCurrent
+                      ? "border-primary-500"
+                      : "border-gray-200 dark:border-gray-700"
+                  }`}
                 >
-                  {/* Price header */}
-                  <div className="bg-linear-to-br from-primary-50 to-primary-100 dark:from-gray-800 dark:to-gray-800 px-6 py-5 text-center border-b-2 border-gray-200 dark:border-gray-700">
-                    <p className="text-sm font-bold text-gray-600 dark:text-gray-400 tracking-widest mb-2">
+                  <div className="border-b-2 border-gray-200 bg-linear-to-br from-primary-50 to-primary-100 px-6 py-5 text-center dark:border-gray-700 dark:from-gray-800 dark:to-gray-800">
+                    <p className="mb-2 text-sm font-bold tracking-widest text-gray-600 dark:text-gray-400">
                       {plan.name}
                     </p>
                     {plan.priceLabel ? (
-                      <p className="text-2xl font-black text-gray-900 dark:text-white leading-none py-3">
+                      <p className="py-3 text-2xl font-black leading-none text-gray-900 dark:text-white">
                         {plan.priceLabel}
                       </p>
                     ) : plan.price !== null ? (
                       <div className="flex items-end justify-center gap-1">
-                        <span className="text-primary-500 font-bold text-xl mb-1">
+                        <span className="mb-1 text-xl font-bold text-primary-500">
                           Rs
                         </span>
-                        <span className="text-5xl font-black text-gray-900 dark:text-white leading-none">
+                        <span className="text-5xl font-black leading-none text-gray-900 dark:text-white">
                           {plan.price.toLocaleString()}
                         </span>
                       </div>
                     ) : null}
                     {plan.price !== null && !plan.priceLabel && (
-                      <p className="text-xs text-gray-500 mt-2">
+                      <p className="mt-2 text-xs text-gray-500">
                         + taxes
                         <br />
                         Monthly
                       </p>
                     )}
                     {isCurrent && (
-                      <span className="inline-block mt-2 text-xs px-3 py-1 bg-linear-to-r from-primary-400 to-primary-500 text-white rounded-full font-semibold">
+                      <span className="mt-2 inline-block rounded-full bg-linear-to-r from-primary-400 to-primary-500 px-3 py-1 text-xs font-semibold text-white">
                         Current Plan
                       </span>
                     )}
                   </div>
 
-                  {/* Features */}
-                  <div className="bg-white dark:bg-gray-900 flex-1 px-6 py-5 space-y-3">
-                    {/* Customizable storage/users for TAILOR */}
+                  <div className="flex-1 space-y-3 bg-white px-6 py-5 dark:bg-gray-900">
                     {plan.customizable && (
                       <>
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="mb-1 flex items-center gap-2">
                           <button
                             onClick={() =>
                               setTbValue(Math.max(0.5, tbValue - 0.5))
                             }
-                            className="w-6 h-6 flex items-center justify-center border border-gray-300 rounded text-gray-500 hover:bg-gray-100"
+                            className="flex h-6 w-6 items-center justify-center rounded border border-gray-300 text-gray-500 hover:bg-gray-100"
                           >
                             <Minus size={10} />
                           </button>
-                          <span className="text-sm font-semibold text-gray-700 dark:text-gray-300 w-8 text-center">
+                          <span className="w-8 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">
                             {tbValue}
                           </span>
                           <button
                             onClick={() => setTbValue(tbValue + 0.5)}
-                            className="w-6 h-6 flex items-center justify-center border border-gray-300 rounded text-gray-500 hover:bg-gray-100"
+                            className="flex h-6 w-6 items-center justify-center rounded border border-gray-300 text-gray-500 hover:bg-gray-100"
                           >
                             <Plus size={10} />
                           </button>
@@ -429,21 +545,21 @@ export default function BillingPage() {
                             + <strong>TB</strong> storage
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 mb-2">
+                        <div className="mb-2 flex items-center gap-2">
                           <button
                             onClick={() =>
                               setUsersValue(Math.max(1, usersValue - 1))
                             }
-                            className="w-6 h-6 flex items-center justify-center border border-gray-300 rounded text-gray-500 hover:bg-gray-100"
+                            className="flex h-6 w-6 items-center justify-center rounded border border-gray-300 text-gray-500 hover:bg-gray-100"
                           >
                             <Minus size={10} />
                           </button>
-                          <span className="text-sm font-semibold text-gray-700 dark:text-gray-300 w-8 text-center">
+                          <span className="w-8 text-center text-sm font-semibold text-gray-700 dark:text-gray-300">
                             {usersValue}
                           </span>
                           <button
                             onClick={() => setUsersValue(usersValue + 1)}
-                            className="w-6 h-6 flex items-center justify-center border border-gray-300 rounded text-gray-500 hover:bg-gray-100"
+                            className="flex h-6 w-6 items-center justify-center rounded border border-gray-300 text-gray-500 hover:bg-gray-100"
                           >
                             <Plus size={10} />
                           </button>
@@ -454,24 +570,28 @@ export default function BillingPage() {
                       </>
                     )}
 
-                    {plan.features.map((f, i) => (
+                    {plan.features.map((feature, i) => (
                       <div key={i} className="flex items-start gap-2">
-                        {f.included ? (
-                          <div className="w-5 h-5 rounded-full bg-linear-to-r from-primary-400 to-primary-500 flex items-center justify-center shrink-0 mt-0.5">
+                        {feature.included ? (
+                          <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-linear-to-r from-primary-400 to-primary-500">
                             <CheckCircle size={11} className="text-white" />
                           </div>
                         ) : (
-                          <div className="w-5 h-5 shrink-0 mt-0.5" />
+                          <div className="mt-0.5 h-5 w-5 shrink-0" />
                         )}
                         <div>
                           <p
-                            className={`text-sm ${f.included ? "font-semibold text-gray-800 dark:text-gray-200" : "text-gray-400 dark:text-gray-500"}`}
+                            className={`text-sm ${
+                              feature.included
+                                ? "font-semibold text-gray-800 dark:text-gray-200"
+                                : "text-gray-400 dark:text-gray-500"
+                            }`}
                           >
-                            {f.label}
+                            {feature.label}
                           </p>
-                          {f.included && (f as any).sub && (
-                            <p className="text-xs text-gray-400 mt-0.5 whitespace-pre-line">
-                              {(f as any).sub}
+                          {feature.included && feature.sub && (
+                            <p className="mt-0.5 whitespace-pre-line text-xs text-gray-400">
+                              {feature.sub}
                             </p>
                           )}
                         </div>
@@ -479,11 +599,10 @@ export default function BillingPage() {
                     ))}
                   </div>
 
-                  {/* CTA */}
-                  <div className="bg-white dark:bg-gray-900 px-6 pb-6">
+                  <div className="bg-white px-6 pb-6 dark:bg-gray-900">
                     {isCurrent ? (
                       <div
-                        className="w-full py-3 text-white font-bold text-sm rounded-xl flex items-center justify-center gap-2 cursor-default select-none opacity-90"
+                        className="flex w-full cursor-default select-none items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white opacity-90"
                         style={{
                           background:
                             "linear-gradient(135deg, #ff8a80 0%, #f06292 100%)",
@@ -495,7 +614,7 @@ export default function BillingPage() {
                     ) : plan.id === "enterprise" ? (
                       <a
                         href="mailto:sales@storeit.app?subject=Enterprise Plan Inquiry"
-                        className="w-full py-3 text-white font-bold text-sm rounded-xl transition-all hover:opacity-90 flex items-center justify-center"
+                        className="flex w-full items-center justify-center rounded-xl py-3 text-sm font-bold text-white transition-all hover:opacity-90"
                         style={{
                           background:
                             "linear-gradient(135deg, #ff8a80 0%, #f06292 100%)",
@@ -503,25 +622,29 @@ export default function BillingPage() {
                       >
                         CONTACT SALES
                       </a>
-                    ) : hasActiveSub ? (
-                      <button
-                        onClick={() => portal.mutate()}
-                        disabled={portal.isPending}
-                        className="w-full py-3 font-bold text-sm rounded-xl border-2 border-primary-400 text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-500/10 transition-all disabled:opacity-50"
-                      >
-                        {portal.isPending ? "Opening…" : "SWITCH PLAN"}
-                      </button>
                     ) : (
                       <button
                         onClick={() => checkout.mutate(plan.id)}
-                        disabled={checkout.isPending}
-                        className="w-full py-3 text-white font-bold text-sm rounded-xl transition-all hover:opacity-90 disabled:opacity-50"
-                        style={{
-                          background:
-                            "linear-gradient(135deg, #ff8a80 0%, #f06292 100%)",
-                        }}
+                        disabled={isBusy}
+                        className={`w-full rounded-xl py-3 text-sm font-bold transition-all disabled:opacity-50 ${
+                          hasActiveSubscription
+                            ? "border-2 border-primary-400 text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-500/10"
+                            : "text-white hover:opacity-90"
+                        }`}
+                        style={
+                          hasActiveSubscription
+                            ? undefined
+                            : {
+                                background:
+                                  "linear-gradient(135deg, #ff8a80 0%, #f06292 100%)",
+                              }
+                        }
                       >
-                        {pendingPlan === plan.id ? "Loading…" : "SUBSCRIBE"}
+                        {isBusy
+                          ? "Opening..."
+                          : hasActiveSubscription
+                            ? "CHANGE PLAN"
+                            : "SUBSCRIBE"}
                       </button>
                     )}
                   </div>
@@ -529,8 +652,17 @@ export default function BillingPage() {
               );
             })}
           </div>
-        )}{" "}
-        {/* end isLoading ternary */}
+        )}
+
+        {!hasActiveSubscription && currentPlan === "free" && (
+          <div className="mt-6 flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-blue-600" />
+            <p className="text-sm text-blue-800">
+              Paid plans now open inside Razorpay Checkout. Once payment is
+              confirmed, your plan updates immediately in StoreIT.
+            </p>
+          </div>
+        )}
       </div>
     </AppShell>
   );

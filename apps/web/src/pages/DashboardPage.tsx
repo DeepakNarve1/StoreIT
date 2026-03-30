@@ -9,8 +9,18 @@ import {
   File,
   Upload,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import api from "../api/axios";
+
+/** Recent file row from GET /dashboard/stats */
+type DashboardRecentFile = {
+  id: string;
+  name: string;
+  mimeType: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
 
 const formatBytes = (bytes: number) => {
   if (bytes === 0) return "0 B";
@@ -44,43 +54,45 @@ const formatDate = (dateStr: string) => {
   return `${h}:${mins}${ampm}, ${day} ${months[d.getMonth()]}`;
 };
 
-const getFileIcon = (mimeType: string) => {
-  if (mimeType.startsWith("image/"))
-    return {
-      icon: Image,
-      bg: "bg-pink-100 dark:bg-pink-900/40",
-      color: "text-pink-500",
-    };
-  if (mimeType.startsWith("video/"))
-    return {
-      icon: Film,
-      bg: "bg-green-100 dark:bg-green-900/40",
-      color: "text-green-500",
-    };
-  if (mimeType.startsWith("audio/"))
-    return {
-      icon: Music,
-      bg: "bg-green-100 dark:bg-green-900/40",
-      color: "text-green-500",
-    };
-  if (mimeType.includes("pdf"))
-    return {
-      icon: FileText,
-      bg: "bg-red-100 dark:bg-red-900/40",
-      color: "text-red-500",
-    };
-  if (mimeType.includes("zip"))
-    return {
-      icon: Archive,
-      bg: "bg-yellow-100 dark:bg-yellow-900/40",
-      color: "text-yellow-500",
-    };
-  return {
-    icon: File,
-    bg: "bg-gray-100 dark:bg-gray-800",
-    color: "text-gray-500",
-  };
-};
+function RecentFileGlyph({
+  mimeType,
+  size,
+}: {
+  mimeType: string;
+  size: number;
+}) {
+  let Icon: LucideIcon = File;
+  let bg = "bg-gray-100 dark:bg-gray-800";
+  let color = "text-gray-500";
+  if (mimeType.startsWith("image/")) {
+    Icon = Image;
+    bg = "bg-pink-100 dark:bg-pink-900/40";
+    color = "text-pink-500";
+  } else if (mimeType.startsWith("video/")) {
+    Icon = Film;
+    bg = "bg-green-100 dark:bg-green-900/40";
+    color = "text-green-500";
+  } else if (mimeType.startsWith("audio/")) {
+    Icon = Music;
+    bg = "bg-green-100 dark:bg-green-900/40";
+    color = "text-green-500";
+  } else if (mimeType.includes("pdf")) {
+    Icon = FileText;
+    bg = "bg-red-100 dark:bg-red-900/40";
+    color = "text-red-500";
+  } else if (mimeType.includes("zip")) {
+    Icon = Archive;
+    bg = "bg-yellow-100 dark:bg-yellow-900/40";
+    color = "text-yellow-500";
+  }
+  return (
+    <div
+      className={`w-9 h-9 ${bg} rounded-xl flex items-center justify-center shrink-0`}
+    >
+      <Icon size={size} className={color} />
+    </div>
+  );
+}
 
 function StorageRing({
   usedBytes,
@@ -154,7 +166,7 @@ export default function DashboardPage() {
           media: { count: number; sizeBytes: number; lastUpdate: string | null };
           others: { count: number; sizeBytes: number; lastUpdate: string | null };
         };
-        recentFiles: any[];
+        recentFiles: DashboardRecentFile[];
       };
     },
     refetchInterval: 30000,
@@ -379,8 +391,8 @@ export default function DashboardPage() {
                   </button>
                 </div>
               ) : (
-                recentFiles.map((file: any) => {
-                  const { icon: Icon, bg, color } = getFileIcon(file.mimeType);
+                recentFiles.map((file) => {
+                  const ts = file.createdAt ?? file.updatedAt;
                   return (
                     <div
                       key={file.id}
@@ -388,17 +400,13 @@ export default function DashboardPage() {
                       className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50
                                  dark:hover:bg-gray-800/50 cursor-pointer transition-colors"
                     >
-                      <div
-                        className={`w-9 h-9 ${bg} rounded-xl flex items-center justify-center shrink-0`}
-                      >
-                        <Icon size={16} className={color} />
-                      </div>
+                      <RecentFileGlyph mimeType={file.mimeType} size={16} />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
                           {file.name}
                         </p>
                         <p className="text-xs text-gray-400 mt-0.5">
-                          {formatDate(file.createdAt ?? file.updatedAt)}
+                          {ts ? formatDate(ts) : "—"}
                         </p>
                       </div>
                     </div>

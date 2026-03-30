@@ -25,6 +25,7 @@ interface FileItem {
   version?: number;
   isLocked?: boolean;
   viewUrl?: string | null;
+  approvalStatus?: string | null;
 }
 
 interface Props {
@@ -42,9 +43,11 @@ interface Props {
   onToggleLock?: (file: FileItem) => void;
   onUploadNewVersion?: (file: FileItem) => void;
   onOpenVersionHistory?: (file: FileItem) => void;
+  onOpenWorkflow?: (file: FileItem) => void;
   canViewMetadata?: boolean;
   isLocking?: boolean;
   isUploadingVersion?: boolean;
+  workflowButtonLabel?: string;
 }
 
 const formatBytes = (bytes: number) => {
@@ -55,13 +58,32 @@ const formatBytes = (bytes: number) => {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 };
 
-const iconFor = (mimeType: string) => {
-  if (mimeType.startsWith("image/")) return Image;
-  if (mimeType.startsWith("video/")) return Film;
-  if (mimeType.startsWith("audio/")) return Music;
-  if (mimeType.includes("pdf")) return FileText;
-  return File;
+type AuditLogEntry = {
+  id: string;
+  action: string;
+  createdAt: string;
+  user?: { name?: string | null } | null;
 };
+
+function FileTypeGlyph({
+  mimeType,
+  size,
+  className,
+}: {
+  mimeType: string;
+  size: number;
+  className?: string;
+}) {
+  if (mimeType.startsWith("image/"))
+    return <Image size={size} className={className} />;
+  if (mimeType.startsWith("video/"))
+    return <Film size={size} className={className} />;
+  if (mimeType.startsWith("audio/"))
+    return <Music size={size} className={className} />;
+  if (mimeType.includes("pdf"))
+    return <FileText size={size} className={className} />;
+  return <File size={size} className={className} />;
+}
 
 export default function FileDetailsView({
   file,
@@ -74,9 +96,11 @@ export default function FileDetailsView({
   onToggleLock,
   onUploadNewVersion,
   onOpenVersionHistory,
+  onOpenWorkflow,
   canViewMetadata = true,
   isLocking = false,
   isUploadingVersion = false,
+  workflowButtonLabel = "Start approval workflow",
 }: Props) {
   const { data: metadataData, isLoading: metadataLoading } = useQuery({
     queryKey: ["file-metadata-preview-inline", file?.id],
@@ -94,7 +118,7 @@ export default function FileDetailsView({
     enabled: !!file?.id,
     queryFn: async () => {
       const res = await api.get(`/audit/file/${file!.id}`);
-      return res.data as { logs: any[] };
+      return res.data as { logs: AuditLogEntry[] };
     },
   });
 
@@ -116,7 +140,6 @@ export default function FileDetailsView({
   });
 
   if (!file) return null;
-  const Icon = iconFor(file.mimeType);
   const metadataRows = metadataData?.metadata ?? [];
   const auditLogs = auditData?.logs ?? [];
   const topMeta = metadataRows.slice(0, 8);
@@ -176,7 +199,11 @@ export default function FileDetailsView({
                 className="w-14 h-16 rounded-lg border border-gray-200 dark:border-gray-600 flex items-center justify-center bg-gray-50 dark:bg-gray-800/80 hover:border-primary-400 dark:hover:border-primary-500 transition-colors shrink-0"
                 title="Open document preview"
               >
-                <Icon size={24} className="text-primary-500" />
+                <FileTypeGlyph
+                  mimeType={file.mimeType}
+                  size={24}
+                  className="text-primary-500"
+                />
               </button>
               <div className="min-w-0">
                 <p className="text-2xl font-semibold text-primary-600 dark:text-gray-100 truncate">
@@ -332,7 +359,7 @@ export default function FileDetailsView({
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  {auditLogs.map((log: any) => (
+                  {auditLogs.map((log) => (
                     <div
                       key={log.id}
                       className="flex items-start justify-between gap-3 rounded-md bg-gray-50 dark:bg-gray-800 px-2.5 py-1.5 min-h-[34px]"
@@ -409,8 +436,11 @@ export default function FileDetailsView({
               <Upload size={13} />{" "}
               {isUploadingVersion ? "Uploading..." : "Upload new version"}
             </button>
-            <button className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded bg-primary-600 text-white hover:bg-primary-500 dark:bg-primary-600 dark:hover:bg-primary-400">
-              <Workflow size={13} /> Start approval workflow
+            <button
+              onClick={() => onOpenWorkflow?.(file)}
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded bg-primary-600 text-white hover:bg-primary-500 dark:bg-primary-600 dark:hover:bg-primary-400"
+            >
+              <Workflow size={13} /> {workflowButtonLabel}
             </button>
           </div>
         </div>

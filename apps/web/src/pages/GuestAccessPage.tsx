@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Download, AlertCircle, Loader, File as FileIcon, Eye } from "lucide-react";
 import api from "../api/axios";
+import { apiErrorMessage } from "../utils/apiError";
 
 interface GuestData {
   guest: {
@@ -43,8 +44,9 @@ export default function GuestAccessPage() {
   }
 
   if (isError || !data?.file) {
-    const msg =
-      (error as any)?.response?.data?.error || "This link is invalid or has expired.";
+    const msg = error
+      ? apiErrorMessage(error, "This link is invalid or has expired.")
+      : "This link is invalid or has expired.";
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 text-center border border-gray-100">

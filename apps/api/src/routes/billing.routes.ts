@@ -1,19 +1,113 @@
+import crypto from "crypto";
 import { Router, Response, Request } from "express";
-import Stripe from "stripe";
 import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
-import { getPlanLimits, STRIPE_PRICE_IDS } from "../utils/plans";
+import { getPlanLimits, RAZORPAY_PLAN_IDS } from "../utils/plans";
 
 const router = Router();
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2024-04-10",
-});
+const APP_URL =
+  process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:5173";
+const RAZORPAY_API_BASE = "https://api.razorpay.com/v1";
 
-const APP_URL = process.env.APP_URL || "http://localhost:5173";
+type SupportedPlan = "starter" | "pro" | "enterprise";
 
-// ─── GET /api/billing/status ──────────────────────────────────────────────────
-// Returns current plan, usage, and Stripe subscription status
+interface RazorpaySubscription {
+  id: string;
+  status: string;
+  customer_id?: string | null;
+  plan_id?: string | null;
+  charge_at?: number | null;
+  current_end?: number | null;
+  notes?: Record<string, string>;
+}
+
+function ensureRazorpayConfig() {
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+  if (!keyId || !keySecret) {
+    throw new Error("Razorpay is not configured");
+  }
+
+  return { keyId, keySecret };
+}
+
+async function razorpayRequest<T>(
+  path: string,
+  init: { method?: string; body?: string } = {},
+): Promise<T> {
+  const { keyId, keySecret } = ensureRazorpayConfig();
+  const response = await fetch(`${RAZORPAY_API_BASE}${path}`, {
+    method: init.method ?? "GET",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString("base64")}`,
+      "Content-Type": "application/json",
+    },
+    body: init.body,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Razorpay request failed: ${response.status}`);
+  }
+
+  return (await response.json()) as T;
+}
+
+function normalizePlan(plan: unknown): SupportedPlan | null {
+  if (plan === "starter" || plan === "pro" || plan === "enterprise") {
+    return plan;
+  }
+  return null;
+}
+
+function derivePlanFromSubscription(
+  subscription: Pick<RazorpaySubscription, "notes" | "plan_id">,
+): SupportedPlan | null {
+  const notePlan = normalizePlan(subscription.notes?.plan);
+  if (notePlan) return notePlan;
+
+  const matched = Object.entries(RAZORPAY_PLAN_IDS).find(
+    ([, planId]) => planId && planId === subscription.plan_id,
+  );
+  return normalizePlan(matched?.[0]);
+}
+
+function getSubscriptionEndDate(subscription: RazorpaySubscription | null) {
+  const unixTime =
+    subscription?.current_end ?? subscription?.charge_at ?? null;
+  return unixTime ? new Date(unixTime * 1000) : null;
+}
+
+function verifySignature(payload: string, signature: string, secret: string) {
+  const expected = crypto
+    .createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex");
+
+  if (expected.length !== signature.length) return false;
+
+  return crypto.timingSafeEqual(
+    Buffer.from(expected, "utf8"),
+    Buffer.from(signature, "utf8"),
+  );
+}
+
+async function fetchSubscription(subscriptionId: string) {
+  return razorpayRequest<RazorpaySubscription>(`/subscriptions/${subscriptionId}`);
+}
+
+async function cancelSubscriptionNow(subscriptionId: string) {
+  return razorpayRequest<RazorpaySubscription>(
+    `/subscriptions/${subscriptionId}/cancel`,
+    {
+      method: "POST",
+      body: JSON.stringify({ cancel_at_cycle_end: 0 }),
+    },
+  );
+}
+
 router.get(
   "/status",
   verifyAuth,
@@ -26,8 +120,9 @@ router.get(
           id: true,
           name: true,
           plan: true,
-          stripeCustomerId: true,
-          stripeSubscriptionId: true,
+          razorpayCustomerId: true,
+          razorpaySubscriptionId: true,
+          razorpayPlanId: true,
         },
       });
 
@@ -46,23 +141,17 @@ router.get(
         }),
       ]);
 
-      const limits = getPlanLimits(tenant.plan);
-      const storageBytes = storageResult._sum.size ?? 0;
-
-      // Fetch subscription status from Stripe if available
-      let subscriptionStatus = null;
-      let currentPeriodEnd = null;
-      if (tenant.stripeSubscriptionId) {
+      let subscription: RazorpaySubscription | null = null;
+      if (tenant.razorpaySubscriptionId) {
         try {
-          const sub = await stripe.subscriptions.retrieve(
-            tenant.stripeSubscriptionId,
-          );
-          subscriptionStatus = sub.status;
-          currentPeriodEnd = new Date(sub.current_period_end * 1000);
+          subscription = await fetchSubscription(tenant.razorpaySubscriptionId);
         } catch {
-          // subscription may have been deleted in Stripe
+          subscription = null;
         }
       }
+
+      const limits = getPlanLimits(tenant.plan);
+      const storageBytes = storageResult._sum.size ?? 0;
 
       res.json({
         plan: tenant.plan,
@@ -72,11 +161,13 @@ router.get(
           maxUsers: limits.maxUsers === Infinity ? null : limits.maxUsers,
         },
         usage: { storageBytes, users: userCount },
-        stripe: {
-          customerId: tenant.stripeCustomerId,
-          subscriptionId: tenant.stripeSubscriptionId,
-          subscriptionStatus,
-          currentPeriodEnd,
+        billing: {
+          provider: "razorpay",
+          customerId: tenant.razorpayCustomerId,
+          subscriptionId: tenant.razorpaySubscriptionId,
+          planId: tenant.razorpayPlanId,
+          subscriptionStatus: subscription?.status ?? null,
+          currentPeriodEnd: getSubscriptionEndDate(subscription),
         },
       });
     } catch (err) {
@@ -86,313 +177,353 @@ router.get(
   },
 );
 
-// ─── POST /api/billing/checkout ───────────────────────────────────────────────
-// Creates a Stripe checkout session for upgrading to a plan
 router.post(
   "/checkout",
   verifyAuth,
   requireRole("ORG_ADMIN", "SUPERADMIN"),
   async (req: AuthRequest, res: Response) => {
     try {
-      const { plan } = req.body;
-
-      if (!["starter", "pro", "enterprise"].includes(plan)) {
+      const plan = normalizePlan(req.body?.plan);
+      if (!plan) {
         res.status(400).json({ error: "Invalid plan" });
         return;
       }
 
-      const priceId = STRIPE_PRICE_IDS[plan];
-      if (!priceId) {
-        res
-          .status(400)
-          .json({ error: `Stripe price ID not configured for ${plan} plan. Please contact support.` });
+      const planId = RAZORPAY_PLAN_IDS[plan];
+      if (!planId) {
+        res.status(400).json({
+          error: `Razorpay plan ID is not configured for the ${plan} plan.`,
+        });
         return;
       }
 
-      // ── DOWNGRADE GUARD ────────────────────────────────────────────────────
-      const planRank: Record<string, number> = { free: 0, starter: 1, pro: 2, enterprise: 3 };
       const tenant = await prisma.tenant.findUnique({
         where: { id: req.user!.tenantId },
-        select: { id: true, name: true, plan: true, stripeCustomerId: true, stripeSubscriptionId: true },
+        select: {
+          id: true,
+          name: true,
+          plan: true,
+          razorpaySubscriptionId: true,
+        },
       });
+
       if (!tenant) {
         res.status(404).json({ error: "Tenant not found" });
         return;
       }
-      if ((planRank[plan] ?? 0) < (planRank[tenant.plan] ?? 0)) {
-        res.status(400).json({
-          error: "Downgrading is not supported via checkout. Please use the billing portal to manage your subscription.",
-        });
-        return;
-      }
-      // If already on this plan, just redirect to portal
-      if (tenant.plan === plan) {
-        res.status(400).json({ error: "You are already on this plan." });
-        return;
+
+      if (tenant.plan === plan && tenant.razorpaySubscriptionId) {
+        try {
+          const currentSubscription = await fetchSubscription(
+            tenant.razorpaySubscriptionId,
+          );
+          if (
+            !["cancelled", "completed", "expired"].includes(
+              currentSubscription.status,
+            )
+          ) {
+            res.status(400).json({ error: "You are already on this plan." });
+            return;
+          }
+        } catch {
+          // If the old subscription no longer exists, allow a fresh checkout.
+        }
       }
 
-      // Reuse existing Stripe customer or create new one
-      let customerId = tenant.stripeCustomerId;
-      if (!customerId) {
-        const customer = await stripe.customers.create({
+      const subscription = await razorpayRequest<RazorpaySubscription>(
+        "/subscriptions",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            plan_id: planId,
+            total_count: 1200,
+            quantity: 1,
+            customer_notify: 1,
+            notes: {
+              tenantId: tenant.id,
+              plan,
+              replacedSubscriptionId: tenant.razorpaySubscriptionId ?? "",
+            },
+          }),
+        },
+      );
+
+      const { keyId } = ensureRazorpayConfig();
+
+      res.json({
+        subscriptionId: subscription.id,
+        key: keyId,
+        name: "StoreIT",
+        description: `${plan.toUpperCase()} plan subscription`,
+        callbackUrl: `${APP_URL}/billing`,
+        prefill: {
           name: tenant.name,
           email: req.user!.email,
-          metadata: { tenantId: tenant.id },
-        });
-        customerId = customer.id;
-        await prisma.tenant.update({
-          where: { id: tenant.id },
-          data: { stripeCustomerId: customerId },
-        });
-      }
-
-      const session = await stripe.checkout.sessions.create({
-        customer: customerId,
-        mode: "subscription",
-        payment_method_types: ["card"],
-        line_items: [{ price: priceId, quantity: 1 }],
-        success_url: `${APP_URL}/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${APP_URL}/billing?canceled=true`,
-        metadata: { tenantId: tenant.id, plan },
-        // Cancel any existing subscription and replace with new one
-        ...(tenant.stripeSubscriptionId ? {
-          subscription_data: {
-            metadata: { tenantId: tenant.id, plan },
-            // Stripe handles proration automatically
-          },
-        } : {
-          subscription_data: {
-            metadata: { tenantId: tenant.id, plan },
-          },
-        }),
+        },
+        notes: {
+          tenantId: tenant.id,
+          plan,
+        },
+        theme: {
+          color: "#ec4899",
+        },
       });
-
-      res.json({ url: session.url });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: "Failed to create checkout session" });
+      res.status(500).json({ error: "Failed to start Razorpay checkout" });
     }
   },
 );
 
-// ─── POST /api/billing/verify ─────────────────────────────────────────────────
-// Called by the frontend when redirected back from Stripe checkout.
-// Retrieves the session directly from Stripe and immediately applies the plan,
-// so the update is instant regardless of whether the webhook has fired yet.
 router.post(
   "/verify",
   verifyAuth,
   requireRole("ORG_ADMIN", "SUPERADMIN"),
   async (req: AuthRequest, res: Response) => {
     try {
-      const { sessionId } = req.body;
-      if (!sessionId || typeof sessionId !== "string") {
-        res.status(400).json({ error: "sessionId is required" });
+      const razorpayPaymentId = req.body?.razorpayPaymentId;
+      const razorpaySubscriptionId = req.body?.razorpaySubscriptionId;
+      const razorpaySignature = req.body?.razorpaySignature;
+      const requestedPlan = normalizePlan(req.body?.plan);
+
+      if (
+        !razorpayPaymentId ||
+        !razorpaySubscriptionId ||
+        !razorpaySignature ||
+        !requestedPlan
+      ) {
+        res.status(400).json({ error: "Missing checkout verification details" });
         return;
       }
 
-      // Retrieve the session directly from Stripe — no webhook needed
-      const session = await stripe.checkout.sessions.retrieve(sessionId, {
-        expand: ["subscription"],
-      });
+      const { keySecret } = ensureRazorpayConfig();
+      const signatureOk = verifySignature(
+        `${razorpayPaymentId}|${razorpaySubscriptionId}`,
+        razorpaySignature,
+        keySecret,
+      );
 
-      if (session.payment_status !== "paid") {
-        res.status(402).json({ error: "Payment not completed" });
+      if (!signatureOk) {
+        res.status(400).json({ error: "Invalid Razorpay signature" });
         return;
       }
 
-      const tenantId = session.metadata?.tenantId;
-      const plan = session.metadata?.plan;
+      const subscription = await fetchSubscription(razorpaySubscriptionId);
+      const tenantId = subscription.notes?.tenantId;
+      const subscriptionPlan =
+        requestedPlan ?? derivePlanFromSubscription(subscription);
 
-      if (!tenantId || !plan) {
-        res.status(400).json({ error: "Missing session metadata" });
+      if (!tenantId || !subscriptionPlan) {
+        res.status(400).json({ error: "Subscription metadata is incomplete" });
         return;
       }
 
-      // Security: ensure this session belongs to the requesting tenant
       if (tenantId !== req.user!.tenantId) {
-        res.status(403).json({ error: "Session does not belong to your organisation" });
+        res
+          .status(403)
+          .json({ error: "This checkout does not belong to your organisation" });
         return;
       }
 
-      const subscriptionId =
-        typeof session.subscription === "string"
-          ? session.subscription
-          : (session.subscription as any)?.id ?? null;
-
-      // Idempotent update — safe to call multiple times
-      await prisma.tenant.update({
+      const tenant = await prisma.tenant.findUnique({
         where: { id: tenantId },
-        data: {
-          plan,
-          ...(subscriptionId && { stripeSubscriptionId: subscriptionId }),
+        select: {
+          id: true,
+          razorpaySubscriptionId: true,
         },
       });
 
-      console.log(`✅ Plan verified & applied: tenant=${tenantId} plan=${plan}`);
+      const previousSubscriptionId =
+        subscription.notes?.replacedSubscriptionId ||
+        tenant?.razorpaySubscriptionId ||
+        null;
 
-      res.json({ plan, subscriptionId });
-    } catch (err: any) {
+      await prisma.tenant.update({
+        where: { id: tenantId },
+        data: {
+          plan: subscriptionPlan,
+          razorpayCustomerId: subscription.customer_id ?? null,
+          razorpaySubscriptionId,
+          razorpayPlanId:
+            subscription.plan_id ?? RAZORPAY_PLAN_IDS[subscriptionPlan] ?? null,
+          stripeCustomerId: null,
+          stripeSubscriptionId: null,
+        },
+      });
+
+      if (
+        previousSubscriptionId &&
+        previousSubscriptionId !== razorpaySubscriptionId
+      ) {
+        try {
+          await cancelSubscriptionNow(previousSubscriptionId);
+        } catch (cancelErr) {
+          console.error(
+            `Failed to cancel previous Razorpay subscription ${previousSubscriptionId}:`,
+            cancelErr,
+          );
+        }
+      }
+
+      res.json({
+        plan: subscriptionPlan,
+        subscriptionId: razorpaySubscriptionId,
+        subscriptionStatus: subscription.status,
+      });
+    } catch (err) {
       console.error("Verify error:", err);
-      res.status(500).json({ error: "Failed to verify session" });
+      res.status(500).json({ error: "Failed to verify Razorpay checkout" });
     }
   },
 );
 
-// ─── POST /api/billing/portal ─────────────────────────────────────────────────
-// Creates a Stripe billing portal session (manage/cancel/invoices)
 router.post(
-  "/portal",
+  "/cancel",
   verifyAuth,
   requireRole("ORG_ADMIN", "SUPERADMIN"),
   async (req: AuthRequest, res: Response) => {
     try {
       const tenant = await prisma.tenant.findUnique({
         where: { id: req.user!.tenantId },
-        select: { stripeCustomerId: true },
+        select: {
+          id: true,
+          razorpaySubscriptionId: true,
+        },
       });
 
-      if (!tenant?.stripeCustomerId) {
-        res
-          .status(400)
-          .json({ error: "No billing account found. Please subscribe first." });
+      if (!tenant?.razorpaySubscriptionId) {
+        res.status(400).json({ error: "No active subscription found." });
         return;
       }
 
-      const session = await stripe.billingPortal.sessions.create({
-        customer: tenant.stripeCustomerId,
-        return_url: `${APP_URL}/billing`,
+      const subscription = await cancelSubscriptionNow(
+        tenant.razorpaySubscriptionId,
+      );
+
+      await prisma.tenant.update({
+        where: { id: tenant.id },
+        data: {
+          plan: "free",
+          razorpayCustomerId: null,
+          razorpaySubscriptionId: null,
+          razorpayPlanId: null,
+        },
       });
 
-      res.json({ url: session.url });
+      res.json({
+        cancelled: true,
+        subscriptionId: subscription.id,
+      });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: "Failed to open billing portal" });
+      res.status(500).json({ error: "Failed to cancel subscription" });
     }
   },
 );
 
-// ─── POST /api/billing/webhook ────────────────────────────────────────────────
-// Stripe sends events here — updates plan in DB automatically
 router.post(
-  "/webhook",
-  // Raw body needed for Stripe signature verification
-  (req: Request, res: Response, next) => {
-    let data = "";
-    req.setEncoding("utf8");
-    req.on("data", (chunk) => (data += chunk));
-    req.on("end", () => {
-      (req as any).rawBody = data;
-      next();
+  "/portal",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "SUPERADMIN"),
+  async (_req: AuthRequest, res: Response) => {
+    res.status(400).json({
+      error:
+        "Razorpay does not use the old billing portal flow here. Use the billing page to change or cancel the subscription.",
     });
   },
-  async (req: Request, res: Response) => {
-    const sig = req.headers["stripe-signature"];
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-    if (!sig || !webhookSecret) {
-      res.status(400).json({ error: "Missing signature or webhook secret" });
-      return;
-    }
-
-    let event: Stripe.Event;
-    try {
-      event = stripe.webhooks.constructEvent(
-        (req as any).rawBody,
-        sig,
-        webhookSecret,
-      );
-    } catch (err: any) {
-      console.error("Webhook signature error:", err.message);
-      res.status(400).json({ error: "Invalid signature" });
-      return;
-    }
-
-    try {
-      switch (event.type) {
-        case "checkout.session.completed": {
-          const session = event.data.object as Stripe.Checkout.Session;
-          const tenantId = session.metadata?.tenantId;
-          const plan = session.metadata?.plan;
-
-          if (tenantId && plan) {
-            await prisma.tenant.update({
-              where: { id: tenantId },
-              data: {
-                plan,
-                stripeSubscriptionId: session.subscription as string,
-              },
-            });
-            console.log(`✅ Tenant ${tenantId} upgraded to ${plan}`);
-          }
-          break;
-        }
-
-        case "customer.subscription.updated": {
-          const sub = event.data.object as Stripe.Subscription;
-          const tenantId = sub.metadata?.tenantId;
-          // Plan is stored in subscription metadata — but if user changed via
-          // billing portal, metadata may not change. Derive plan from price ID instead.
-          let plan = sub.metadata?.plan;
-          if (!plan) {
-            const priceId = sub.items?.data?.[0]?.price?.id;
-            if (priceId) {
-              const matched = Object.entries(STRIPE_PRICE_IDS).find(
-                ([, id]) => id === priceId,
-              );
-              if (matched) plan = matched[0];
-            }
-          }
-          if (tenantId && plan) {
-            await prisma.tenant.update({
-              where: { id: tenantId },
-              data: { plan },
-            });
-            console.log(`📋 Tenant ${tenantId} plan updated to ${plan}`);
-          }
-          break;
-        }
-
-        case "customer.subscription.deleted": {
-          const sub = event.data.object as Stripe.Subscription;
-          const tenantId = sub.metadata?.tenantId;
-
-          if (tenantId) {
-            await prisma.tenant.update({
-              where: { id: tenantId },
-              data: { plan: "free", stripeSubscriptionId: null },
-            });
-            console.log(
-              `⚠️  Tenant ${tenantId} downgraded to free (subscription cancelled)`,
-            );
-          }
-          break;
-        }
-
-        case "invoice.payment_failed": {
-          const invoice = event.data.object as Stripe.Invoice;
-          const customerId = invoice.customer as string;
-          console.error(`❌ Payment failed for customer ${customerId}`);
-          // Find tenant by stripeCustomerId and mark subscription as past_due
-          const failedTenant = await prisma.tenant.findFirst({
-            where: { stripeCustomerId: customerId },
-            select: { id: true },
-          });
-          if (failedTenant) {
-            // Don't downgrade immediately — give Stripe time to retry.
-            // Log it so admins can act (connect to email/Slack in production).
-            console.error(`❌ Payment failed for tenant ${failedTenant.id}. Stripe will auto-retry.`);
-          }
-          break;
-        }
-      }
-
-      res.json({ received: true });
-    } catch (err) {
-      console.error("Webhook handler error:", err);
-      res.status(500).json({ error: "Webhook handler failed" });
-    }
-  },
 );
+
+router.post("/webhook", async (req: Request, res: Response) => {
+  try {
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    const signature = req.headers["x-razorpay-signature"];
+
+    if (!webhookSecret || typeof signature !== "string") {
+      res.status(400).json({ error: "Missing webhook signature or secret" });
+      return;
+    }
+
+    const rawBody = Buffer.isBuffer(req.body)
+      ? req.body
+      : Buffer.from(JSON.stringify(req.body ?? {}), "utf8");
+
+    if (!verifySignature(rawBody.toString("utf8"), signature, webhookSecret)) {
+      res.status(400).json({ error: "Invalid webhook signature" });
+      return;
+    }
+
+    const event = JSON.parse(rawBody.toString("utf8")) as {
+      event?: string;
+      payload?: {
+        subscription?: {
+          entity?: RazorpaySubscription;
+        };
+      };
+    };
+
+    const subscription = event.payload?.subscription?.entity;
+    if (!subscription) {
+      res.json({ received: true });
+      return;
+    }
+
+    const tenantId = subscription.notes?.tenantId;
+    const plan = derivePlanFromSubscription(subscription);
+
+    if (!tenantId) {
+      res.json({ received: true });
+      return;
+    }
+
+    if (
+      [
+        "subscription.authenticated",
+        "subscription.activated",
+        "subscription.charged",
+      ].includes(event.event ?? "") &&
+      plan
+    ) {
+      await prisma.tenant.update({
+        where: { id: tenantId },
+        data: {
+          plan,
+          razorpayCustomerId: subscription.customer_id ?? null,
+          razorpaySubscriptionId: subscription.id,
+          razorpayPlanId:
+            subscription.plan_id ?? RAZORPAY_PLAN_IDS[plan] ?? null,
+          stripeCustomerId: null,
+          stripeSubscriptionId: null,
+        },
+      });
+    }
+
+    if (
+      [
+        "subscription.cancelled",
+        "subscription.completed",
+        "subscription.halted",
+        "subscription.expired",
+      ].includes(event.event ?? "")
+    ) {
+      await prisma.tenant.updateMany({
+        where: {
+          id: tenantId,
+          razorpaySubscriptionId: subscription.id,
+        },
+        data: {
+          plan: "free",
+          razorpayCustomerId: null,
+          razorpaySubscriptionId: null,
+          razorpayPlanId: null,
+        },
+      });
+    }
+
+    res.json({ received: true });
+  } catch (err) {
+    console.error("Webhook handler error:", err);
+    res.status(500).json({ error: "Webhook handler failed" });
+  }
+});
 
 export default router;

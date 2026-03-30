@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { prisma } from "../utils/prisma";
+import { serializeRoleProfile } from "./role-profiles.service";
 
 // ─── TOKEN GENERATION ─────────────────────────────────────────────────────────
 export const generateTokens = (payload: {
@@ -27,7 +28,17 @@ export const loginUser = async (email: string, password: string) => {
   // 1. Find user by email
   const user = await prisma.user.findUnique({
     where: { email },
-    include: { tenant: true },
+    include: {
+      tenant: true,
+      roleProfile: {
+        select: {
+          id: true,
+          name: true,
+          baseRole: true,
+          capabilities: true,
+        },
+      },
+    },
   });
 
   if (!user) {
@@ -66,6 +77,40 @@ export const loginUser = async (email: string, password: string) => {
       role: user.role,
       tenantId: user.tenantId,
       tenantName: user.tenant.name,
+      roleProfile: serializeRoleProfile(
+        user.roleProfile
+          ? {
+              id: user.roleProfile.id,
+              name: user.roleProfile.name,
+              baseRole: user.roleProfile.baseRole as any,
+              capabilities: user.roleProfile.capabilities,
+            }
+          : user.role === "SUPERADMIN"
+            ? {
+                name: "Superadmin",
+                baseRole: "SUPERADMIN",
+              }
+            : null,
+      ),
+      roleCapabilities:
+        serializeRoleProfile(
+          user.roleProfile
+            ? {
+                id: user.roleProfile.id,
+                name: user.roleProfile.name,
+                baseRole: user.roleProfile.baseRole as any,
+                capabilities: user.roleProfile.capabilities,
+              }
+            : user.role === "SUPERADMIN"
+              ? {
+                  name: "Superadmin",
+                  baseRole: "SUPERADMIN",
+                }
+              : {
+                  name: user.role,
+                  baseRole: user.role as any,
+                },
+        )?.capabilities ?? {},
     },
     ...tokens,
   };
@@ -110,7 +155,16 @@ export const hashPassword = async (password: string) => {
 export const validateInviteToken = async (token: string) => {
   const invite = await prisma.inviteToken.findUnique({
     where: { token },
-    include: { tenant: true },
+    include: {
+      tenant: true,
+      roleProfile: {
+        select: {
+          id: true,
+          name: true,
+          baseRole: true,
+        },
+      },
+    },
   });
 
   if (!invite) throw new Error("INVALID_TOKEN");

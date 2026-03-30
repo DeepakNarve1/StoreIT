@@ -10,6 +10,7 @@ import {
   File,
   ExternalLink,
 } from "lucide-react";
+import type { AxiosError } from "axios";
 import api from "../../api/axios";
 
 interface FileItem {
@@ -42,6 +43,17 @@ type FileMetadataRow = {
   key: string;
   value: string;
 };
+
+type AuditLogEntry = {
+  id: string;
+  action: string;
+  createdAt: string;
+  user?: { name?: string; email?: string } | null;
+};
+
+function getAxiosStatus(err: unknown): number | undefined {
+  return (err as AxiosError | undefined)?.response?.status;
+}
 
 const formatBytes = (bytes: number) => {
   if (bytes === 0) return "0 B";
@@ -117,33 +129,16 @@ const getFileIcon = (mimeType: string) => {
   }
 };
 
-export default function FilePreviewModal({
+function FilePreviewModalInner({
   file,
   onClose,
-}: FilePreviewModalProps) {
-  // Close on Escape key
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
-
-  // Prevent body scroll when modal is open
-  useEffect(() => {
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, []);
-
-  if (!file) return null;
-
+}: {
+  file: FileItem;
+  onClose: () => void;
+}) {
   const fileType = getFileType(file.mimeType);
   const { icon: Icon, color, bg } = getFileIcon(file.mimeType);
-  const [viewUrl, setViewUrl] = useState<string | null>(file?.viewUrl || null);
-  const [, setLoadingUrl] = useState(false);
+  const [viewUrl, setViewUrl] = useState<string | null>(file.viewUrl ?? null);
   const [showInlinePreview, setShowInlinePreview] = useState(false);
 
   const {
@@ -152,10 +147,9 @@ export default function FilePreviewModal({
     error: auditError,
   } = useQuery({
     queryKey: ["audit-file", file.id],
-    enabled: !!file?.id,
     queryFn: async () => {
       const res = await api.get(`/audit/file/${file.id}`);
-      return res.data as { logs: any[] };
+      return res.data as { logs: AuditLogEntry[] };
     },
   });
 
@@ -167,7 +161,6 @@ export default function FilePreviewModal({
     error: metadataError,
   } = useQuery({
     queryKey: ["file-metadata-preview", file.id],
-    enabled: !!file?.id,
     queryFn: async () => {
       const res = await api.get(`/files/${file.id}/metadata`);
       return res.data as { metadata: FileMetadataRow[] };
@@ -175,9 +168,9 @@ export default function FilePreviewModal({
   });
 
   const metadataRows = metadataData?.metadata ?? [];
+  const metadataStatus = getAxiosStatus(metadataError);
   const metadataDenied =
-    (metadataError as any)?.response?.status === 403 ||
-    (metadataError as any)?.response?.status === 401;
+    metadataStatus === 403 || metadataStatus === 401;
 
   const formatDetailedDateTime = (dateStr: string) =>
     new Date(dateStr).toLocaleString("en-US", {
@@ -191,21 +184,17 @@ export default function FilePreviewModal({
     });
 
   useEffect(() => {
-    if (!file?.id) return;
-    // Fetch fresh signed URL from API
-    setLoadingUrl(true);
+    let cancelled = false;
     api
       .get(`/files/${file.id}`)
       .then((res) => {
-        setViewUrl(res.data.file.viewUrl);
+        if (!cancelled) setViewUrl(res.data.file.viewUrl);
       })
-      .catch(console.error)
-      .finally(() => setLoadingUrl(false));
-  }, [file?.id]);
-
-  useEffect(() => {
-    setShowInlinePreview(false);
-  }, [file?.id]);
+      .catch(console.error);
+    return () => {
+      cancelled = true;
+    };
+  }, [file.id]);
 
   const renderPreview = () => {
     // No URL yet (S3 not connected) — show placeholder
@@ -592,7 +581,7 @@ export default function FilePreviewModal({
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {auditLogs.map((log: any) => (
+                    {auditLogs.map((log) => (
                       <div
                         key={log.id}
                         className="flex items-start justify-between gap-4 rounded-lg bg-gray-50 dark:bg-gray-800/60 px-3 py-2"
@@ -626,4 +615,30 @@ export default function FilePreviewModal({
       </div>
     </>
   );
+}
+
+export default function FilePreviewModal({
+  file,
+  onClose,
+}: FilePreviewModalProps) {
+  useEffect(() => {
+    if (!file) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [onClose, file]);
+
+  useEffect(() => {
+    if (!file) return;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [file]);
+
+  if (!file) return null;
+
+  return <FilePreviewModalInner key={file.id} file={file} onClose={onClose} />;
 }

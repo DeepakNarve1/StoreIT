@@ -1,7 +1,7 @@
 import { X, Clock3, Pencil, Trash2 } from "lucide-react";
 import { useMemo } from "react";
 import type { RetentionAction } from "./RetentionModal";
-import { useToast } from "../ui/Toast";
+import { useToast } from "../ui/toastStore";
 
 type RetentionJobForDetails = {
   id: string;

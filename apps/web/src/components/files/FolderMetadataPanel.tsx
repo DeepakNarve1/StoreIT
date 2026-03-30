@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -8,7 +8,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import api from "../../api/axios";
-import { useToast } from "../ui/Toast";
+import { useToast } from "../ui/toastStore";
 
 type FieldType =
   | "text"
@@ -95,11 +95,9 @@ export default function FolderMetadataPanel({
     return map;
   }, [templatesData]);
 
-  const [fields, setFields] = useState<FolderField[]>([]);
-
-  useEffect(() => {
-    if (data?.fields) setFields(data.fields ?? []);
-  }, [data]);
+  const baselineFields = useMemo(() => data?.fields ?? [], [data]);
+  const [fieldsPatch, setFieldsPatch] = useState<FolderField[] | null>(null);
+  const fields = fieldsPatch ?? baselineFields;
 
   const [showExistingPicker, setShowExistingPicker] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -110,8 +108,8 @@ export default function FolderMetadataPanel({
     if (fields.some((f) => f.key.trim().toLowerCase() === kLower)) return;
     const fromTemplate = templateFieldsByKey.get(kLower);
     if (!fromTemplate) return;
-    setFields([
-      ...fields,
+    setFieldsPatch((prev) => [
+      ...(prev ?? baselineFields),
       {
         key,
         type: fromTemplate.type,
@@ -126,14 +124,17 @@ export default function FolderMetadataPanel({
     const kLower = key.trim().toLowerCase();
     if (!kLower) return;
     if (fields.some((f) => f.key.trim().toLowerCase() === kLower)) return;
-    setFields([
-      ...fields,
+    setFieldsPatch((prev) => [
+      ...(prev ?? baselineFields),
       {
         key,
         type,
         required: false,
         recursive: false,
-        options: type === "list" ? newFieldOptions.map((x) => x.trim()).filter(Boolean) : [],
+        options:
+          type === "list"
+            ? newFieldOptions.map((x) => x.trim()).filter(Boolean)
+            : [],
       },
     ]);
   };
@@ -172,8 +173,8 @@ export default function FolderMetadataPanel({
       add("Default metadata saved", "success");
       onClose();
     },
-    onError: (err: any) => {
-      if (err?.message === "LIST_OPTIONS_REQUIRED") {
+    onError: (err: unknown) => {
+      if (err instanceof Error && err.message === "LIST_OPTIONS_REQUIRED") {
         add("List fields must include options", "error");
         return;
       }
@@ -302,15 +303,17 @@ export default function FolderMetadataPanel({
                         <input
                           value={(f.options ?? []).join(", ")}
                           onChange={(e) => {
-                            const next = [...fields];
-                            next[idx] = {
-                              ...next[idx],
-                              options: e.target.value
-                                .split(",")
-                                .map((x) => x.trim())
-                                .filter(Boolean),
-                            };
-                            setFields(next);
+                            setFieldsPatch((prev) => {
+                              const base = [...(prev ?? baselineFields)];
+                              base[idx] = {
+                                ...base[idx],
+                                options: e.target.value
+                                  .split(",")
+                                  .map((x) => x.trim())
+                                  .filter(Boolean),
+                              };
+                              return base;
+                            });
                           }}
                           placeholder="Options: High, Medium, Low"
                           className="mt-1 w-full border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 dark:focus:ring-purple-500 focus:border-transparent"
@@ -323,12 +326,14 @@ export default function FolderMetadataPanel({
                         type="checkbox"
                         checked={f.required}
                         onChange={(e) => {
-                          const next = [...fields];
-                          next[idx] = {
-                            ...next[idx],
-                            required: e.target.checked,
-                          };
-                          setFields(next);
+                          setFieldsPatch((prev) => {
+                            const base = [...(prev ?? baselineFields)];
+                            base[idx] = {
+                              ...base[idx],
+                              required: e.target.checked,
+                            };
+                            return base;
+                          });
                         }}
                         className="w-3.5 h-3.5"
                       />
@@ -339,12 +344,14 @@ export default function FolderMetadataPanel({
                         type="checkbox"
                         checked={f.recursive}
                         onChange={(e) => {
-                          const next = [...fields];
-                          next[idx] = {
-                            ...next[idx],
-                            recursive: e.target.checked,
-                          };
-                          setFields(next);
+                          setFieldsPatch((prev) => {
+                            const base = [...(prev ?? baselineFields)];
+                            base[idx] = {
+                              ...base[idx],
+                              recursive: e.target.checked,
+                            };
+                            return base;
+                          });
                         }}
                         className="w-3.5 h-3.5"
                       />
@@ -354,8 +361,9 @@ export default function FolderMetadataPanel({
                     <div className="col-span-2 flex justify-end pt-1">
                       <button
                         onClick={() => {
-                          const next = fields.filter((_, i) => i !== idx);
-                          setFields(next);
+                          setFieldsPatch((prev) =>
+                            (prev ?? baselineFields).filter((_, i) => i !== idx),
+                          );
                         }}
                         className="inline-flex items-center gap-1 text-xs text-red-500 hover:text-red-600 px-2 py-1 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                       >

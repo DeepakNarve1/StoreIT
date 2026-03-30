@@ -1,0 +1,50 @@
+export const FOLDER_PERMISSION_OPTIONS = [
+  { key: "create_folders", label: "Create folders" },
+  { key: "see_folders", label: "See folders" },
+  { key: "download_folders", label: "Download folders" },
+  { key: "edit_folders", label: "Edit folders" },
+  { key: "move_folders", label: "Move folders" },
+  { key: "delete_folders", label: "Delete folders" },
+  { key: "duplicate_folders", label: "Duplicate folders" },
+  { key: "view_metadata", label: "View metadata" },
+  { key: "edit_metadata", label: "Edit metadata" },
+  { key: "share_folders", label: "Share folders" },
+  { key: "share_public_link_folder", label: "Share with public link" },
+  { key: "see_audit_trails", label: "See audit trails" },
+] as const;
+
+export const FILE_PERMISSION_OPTIONS = [
+  { key: "add_files", label: "Add/create files" },
+  { key: "see_files", label: "See list of files" },
+  { key: "preview_files", label: "Preview files" },
+  { key: "download_files", label: "Download files" },
+  { key: "edit_file_attrs", label: "Edit file attributes" },
+  { key: "view_metadata", label: "View metadata" },
+  { key: "edit_metadata", label: "Edit metadata" },
+  { key: "update_versions", label: "Update file versions" },
+  { key: "edit_online", label: "Edit files online" },
+  { key: "move_files", label: "Move files" },
+  { key: "delete_files", label: "Delete files" },
+  { key: "duplicate_files", label: "Duplicate files" },
+  { key: "share_files", label: "Share files" },
+  { key: "share_public_link_file", label: "Share with public link" },
+  { key: "see_audit_trails_file", label: "See audit trails" },
+] as const;
+
+export const ALL_ROLE_PERMISSION_KEYS = [
+  ...new Set(
+    [...FOLDER_PERMISSION_OPTIONS, ...FILE_PERMISSION_OPTIONS].map(
+      (option) => option.key,
+    ),
+  ),
+];
+
+export function emptyRoleCapabilities(): Record<string, boolean> {
+  return ALL_ROLE_PERMISSION_KEYS.reduce(
+    (acc, key) => {
+      acc[key] = false;
+      return acc;
+    },
+    {} as Record<string, boolean>,
+  );
+}

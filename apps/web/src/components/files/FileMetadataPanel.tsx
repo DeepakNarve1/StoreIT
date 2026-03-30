@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Save, X, Tag, Loader2 } from "lucide-react";
 import api from "../../api/axios";
-import { useToast } from "../ui/Toast";
+import { useToast } from "../ui/toastStore";
 
 interface Props {
   fileId: string;
@@ -84,10 +84,8 @@ export default function FileMetadataPanel({
     staleTime: 10_000,
   });
 
-  const [fields, setFields] = useState<MetaField[]>([]);
-
-  useEffect(() => {
-    if (!data || !schemaData) return;
+  const baselineFields = useMemo((): MetaField[] | null => {
+    if (!data || !schemaData) return null;
 
     const valueByKey = new Map(
       (data.metadata ?? []).map((m) => [m.key.toLowerCase(), m.value]),
@@ -118,7 +116,7 @@ export default function FileMetadataPanel({
       }));
 
     if (defaultFields.length === 0 && customFields.length === 0) {
-      setFields([
+      return [
         {
           key: "",
           value: "",
@@ -126,12 +124,14 @@ export default function FileMetadataPanel({
           required: false,
           isDefault: false,
         },
-      ]);
-      return;
+      ];
     }
 
-    setFields([...defaultFields, ...customFields]);
+    return [...defaultFields, ...customFields];
   }, [data, schemaData]);
+
+  const [fieldsPatch, setFieldsPatch] = useState<MetaField[] | null>(null);
+  const fields = fieldsPatch ?? baselineFields ?? [];
 
   const save = useMutation({
     mutationFn: async () => {
@@ -217,8 +217,8 @@ export default function FileMetadataPanel({
   });
 
   const addRow = () =>
-    setFields([
-      ...fields,
+    setFieldsPatch((prev) => [
+      ...(prev ?? baselineFields ?? []),
       {
         key: "",
         value: "",
@@ -228,11 +228,15 @@ export default function FileMetadataPanel({
       },
     ]);
   const removeRow = (i: number) =>
-    setFields(fields.filter((_, idx) => idx !== i));
+    setFieldsPatch((prev) =>
+      (prev ?? baselineFields ?? []).filter((_, idx) => idx !== i),
+    );
   const updateRow = (i: number, field: "key" | "value", val: string) => {
-    const next = [...fields];
-    next[i] = { ...next[i], [field]: val };
-    setFields(next);
+    setFieldsPatch((prev) => {
+      const base = [...(prev ?? baselineFields ?? [])];
+      base[i] = { ...base[i], [field]: val };
+      return base;
+    });
   };
 
   type FolderFieldDef = {
@@ -256,27 +260,33 @@ export default function FileMetadataPanel({
     },
   });
 
-  const [folderFields, setFolderFields] = useState<FolderFieldDef[]>([]);
-
-  useEffect(() => {
-    if (!folderFieldsData) return;
-    setFolderFields(folderFieldsData.fields ?? []);
-  }, [folderFieldsData]);
+  const baselineFolderFields = useMemo(
+    () => folderFieldsData?.fields ?? [],
+    [folderFieldsData],
+  );
+  const [folderFieldsPatch, setFolderFieldsPatch] = useState<
+    FolderFieldDef[] | null
+  >(null);
+  const folderFields = folderFieldsPatch ?? baselineFolderFields;
 
   const addFolderField = () =>
-    setFolderFields([
-      ...folderFields,
+    setFolderFieldsPatch((prev) => [
+      ...(prev ?? baselineFolderFields),
       { key: "", type: "text", required: false, recursive: false },
     ]);
 
   const updateFolderField = (i: number, patch: Partial<FolderFieldDef>) => {
-    const next = [...folderFields];
-    next[i] = { ...next[i], ...patch };
-    setFolderFields(next);
+    setFolderFieldsPatch((prev) => {
+      const base = [...(prev ?? baselineFolderFields)];
+      base[i] = { ...base[i], ...patch };
+      return base;
+    });
   };
 
   const removeFolderField = (i: number) =>
-    setFolderFields(folderFields.filter((_, idx) => idx !== i));
+    setFolderFieldsPatch((prev) =>
+      (prev ?? baselineFolderFields).filter((_, idx) => idx !== i),
+    );
 
   const saveFolderFields = useMutation({
     mutationFn: async () => {
@@ -293,6 +303,7 @@ export default function FileMetadataPanel({
         queryKey: ["file-metadata-schema", fileId],
       });
       add("Metadata fields saved", "success");
+      setFolderFieldsPatch(null);
       setShowFolderFieldsEditor(false);
     },
     onError: () => add("Failed to save metadata fields", "error"),
@@ -343,7 +354,10 @@ export default function FileMetadataPanel({
       {!schemaLoading && !!folderIdForSchema && (
         <div className="px-4 pt-3 pb-2 shrink-0 border-b border-gray-100 dark:border-gray-800">
           <button
-            onClick={() => setShowFolderFieldsEditor(true)}
+            onClick={() => {
+              setFolderFieldsPatch(null);
+              setShowFolderFieldsEditor(true);
+            }}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs text-gray-600 dark:text-gray-300 hover:border-purple-300 dark:hover:border-purple-600 transition-colors"
           >
             Manage all metadata fields
@@ -354,7 +368,10 @@ export default function FileMetadataPanel({
       {showFolderFieldsEditor && folderIdForSchema && (
         <div
           className="fixed inset-0 z-40 bg-black/40 flex items-center justify-center p-4"
-          onClick={() => setShowFolderFieldsEditor(false)}
+          onClick={() => {
+            setFolderFieldsPatch(null);
+            setShowFolderFieldsEditor(false);
+          }}
         >
           <div
             className="w-full max-w-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl shadow-xl p-4 max-h-[75vh] overflow-y-auto"
@@ -365,7 +382,10 @@ export default function FileMetadataPanel({
                 Default metadata fields
               </p>
               <button
-                onClick={() => setShowFolderFieldsEditor(false)}
+                onClick={() => {
+                  setFolderFieldsPatch(null);
+                  setShowFolderFieldsEditor(false);
+                }}
                 className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors"
               >
                 <X size={15} />

@@ -21,6 +21,7 @@ import {
 import AppShell from "../../components/layout/AppShell";
 import { useAuthStore } from "../../store/authStore";
 import api from "../../api/axios";
+import { apiErrorMessage } from "../../utils/apiError";
 import clsx from "clsx";
 
 interface OrgCount {
@@ -165,9 +166,9 @@ export default function OrgsPage() {
   const handlePlanChange = (org: Org, newPlan: string) => {
     if (newPlan === org.plan) return;
     const label = PLAN_LABELS[newPlan as Plan] ?? newPlan;
-    const confirmed = window.confirm(
+  const confirmed = window.confirm(
       `Manually set plan to "${label}" for "${org.name}"?\n\n` +
-      `⚠️ This will clear any active Stripe subscription link. ` +
+      `⚠️ This will clear any active billing subscription link. ` +
       `Use the Billing page to manage live subscriptions.`
     );
     if (confirmed) changePlan.mutate({ id: org.id, plan: newPlan });
@@ -250,7 +251,7 @@ export default function OrgsPage() {
         {orgsError && (
           <div className="mb-5 rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-300">
             Failed to load organisations.{" "}
-            {(orgsErrorObj as any)?.response?.data?.error ?? "Please retry."}
+            {apiErrorMessage(orgsErrorObj, "Please retry.")}
           </div>
         )}
 
@@ -368,7 +369,7 @@ export default function OrgsPage() {
                             value={org.plan}
                             onClick={(e) => e.stopPropagation()}
                             onChange={(e) => handlePlanChange(org, e.target.value)}
-                            title="Manual override — clears Stripe subscription link"
+                            title="Manual override — clears the live billing subscription link"
                             className={`text-xs font-medium px-3 py-1 rounded-full
                                        border-0 cursor-pointer outline-none
                                        focus:ring-2 focus:ring-blue-500/50 transition-all
@@ -511,15 +512,16 @@ export default function OrgsPage() {
                     </div>
                   )}
 
-                  {/* Stripe info */}
-                  {(statsData?.tenant?.stripeCustomerId || statsData?.tenant?.stripeSubscriptionId) && (
+                  {/* Billing info */}
+                  {(statsData?.tenant?.razorpayCustomerId ||
+                    statsData?.tenant?.razorpaySubscriptionId) && (
                     <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3">
                       <p className="text-xs font-medium text-blue-600 dark:text-blue-400 flex items-center gap-1.5 mb-2">
-                        <CreditCard size={11} /> Stripe
+                        <CreditCard size={11} /> Razorpay
                       </p>
-                      {statsData.tenant.stripeSubscriptionId ? (
+                      {statsData.tenant.razorpaySubscriptionId ? (
                         <p className="text-xs text-gray-600 dark:text-gray-400 font-mono truncate">
-                          {statsData.tenant.stripeSubscriptionId}
+                          {statsData.tenant.razorpaySubscriptionId}
                         </p>
                       ) : (
                         <p className="text-xs text-gray-400">No active subscription</p>
@@ -531,7 +533,7 @@ export default function OrgsPage() {
                   <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3">
                     <AlertTriangle size={12} className="text-amber-500 shrink-0 mt-0.5" />
                     <p className="text-xs text-amber-700 dark:text-amber-300">
-                      Changing the plan here is a manual DB override. Use the org's Billing page to manage live Stripe subscriptions.
+                      Changing the plan here is a manual DB override. Use the org's Billing page to manage live Razorpay subscriptions.
                     </p>
                   </div>
 

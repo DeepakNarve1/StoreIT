@@ -18,6 +18,9 @@ import { useState } from "react";
 import { useAuthStore } from "../store/authStore";
 import DeleteModal from "../components/common/DeleteModal";
 
+type TrashFolderRow = { id: string; name: string; updatedAt: string };
+type TrashFileRow = { id: string; name: string; mimeType: string; updatedAt: string };
+
 const getFileIcon = (mimeType: string) => {
   if (mimeType.startsWith("image/"))
     return { icon: Image, color: "text-green-500" };
@@ -55,7 +58,7 @@ export default function TrashPage() {
     queryKey: ["trash"],
     queryFn: async () => {
       const res = await api.get("/files/trash");
-      return res.data as { files: any[]; folders: any[] };
+      return res.data as { files: TrashFileRow[]; folders: TrashFolderRow[] };
     },
   });
 
