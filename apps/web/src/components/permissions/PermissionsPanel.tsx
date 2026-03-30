@@ -9,6 +9,7 @@ import {
   Check,
   Clock,
   Trash2,
+  Pencil,
   AlertCircle,
   Mail,
   Send,
@@ -57,6 +58,8 @@ function mutationErrorMessage(err: unknown, fallback: string): string {
 type PermissionGrantRow = {
   id: string;
   grantedTo: "all" | "user" | "department";
+  userId?: string | null;
+  departmentId?: string | null;
   action: string;
   expiresAt?: string | null;
   capabilities?: Record<string, boolean> | null;
@@ -91,6 +94,9 @@ export default function PermissionsPanel({
   const [userId, setUserId] = useState("");
   const [departmentId, setDepartmentId] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
+  const [editingPermissionId, setEditingPermissionId] = useState<string | null>(
+    null,
+  );
   const [copiedLink, setCopiedLink] = useState(false);
   const [generatedLink, setGeneratedLink] = useState("");
   const [expiresInHours, setExpiresInHours] = useState(24);
@@ -193,9 +199,15 @@ export default function PermissionsPanel({
       queryClient.invalidateQueries({
         queryKey: ["permissions", resourceType, resourceId],
       });
-      add("Permission granted successfully", "success");
+      add(
+        editingPermissionId
+          ? "Permission updated successfully"
+          : "Permission granted successfully",
+        "success",
+      );
       // Keep grantedTo and userId so admins can easily grant to multiple users
       setExpiresAt("");
+      setEditingPermissionId(null);
       setCheckedPerms({
         see_folders: true,
         see_files: true,
@@ -286,6 +298,37 @@ export default function PermissionsPanel({
     !hasAnyPermChecked ||
     (grantedTo === "user" && !userId) ||
     (grantedTo === "department" && !departmentId);
+
+  const startEditPermission = (perm: PermissionGrantRow) => {
+    setEditingPermissionId(perm.id);
+    setGrantedTo(perm.grantedTo);
+    setUserId(perm.grantedTo === "user" ? perm.userId ?? "" : "");
+    setDepartmentId(
+      perm.grantedTo === "department" ? perm.departmentId ?? "" : "",
+    );
+    setCheckedPerms(
+      perm.capabilities && typeof perm.capabilities === "object"
+        ? { ...(perm.capabilities as Record<string, boolean>) }
+        : {
+            see_folders: true,
+            see_files: true,
+            preview_files: true,
+          },
+    );
+    setExpiresAt(
+      perm.expiresAt ? new Date(perm.expiresAt).toISOString().slice(0, 16) : "",
+    );
+  };
+
+  const cancelEdit = () => {
+    setEditingPermissionId(null);
+    setExpiresAt("");
+    setCheckedPerms({
+      see_folders: true,
+      see_files: true,
+      preview_files: true,
+    });
+  };
 
   return (
     <>
@@ -398,13 +441,23 @@ export default function PermissionsPanel({
                             )}
                           </div>
                         </div>
-                        <button
-                          onClick={() => revokePermission.mutate(perm.id)}
-                          disabled={revokePermission.isPending}
-                          className="text-gray-400 hover:text-red-500 p-1 disabled:opacity-50"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => startEditPermission(perm)}
+                            disabled={grantPermission.isPending}
+                            className="text-gray-400 hover:text-primary-600 p-1 disabled:opacity-50"
+                            title="Edit permission"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            onClick={() => revokePermission.mutate(perm.id)}
+                            disabled={revokePermission.isPending}
+                            className="text-gray-400 hover:text-red-500 p-1 disabled:opacity-50"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -625,13 +678,30 @@ export default function PermissionsPanel({
                   </div>
                 )}
 
-                <button
-                  onClick={() => grantPermission.mutate()}
-                  disabled={shareDisabled}
-                  className="w-full py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold text-sm rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {grantPermission.isPending ? "Sharing..." : "SHARE"}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => grantPermission.mutate()}
+                    disabled={shareDisabled}
+                    className="flex-1 py-3 bg-primary-600 hover:bg-primary-700 text-white font-bold text-sm rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {grantPermission.isPending
+                      ? editingPermissionId
+                        ? "Updating..."
+                        : "Sharing..."
+                      : editingPermissionId
+                        ? "UPDATE PERMISSION"
+                        : "SHARE"}
+                  </button>
+                  {editingPermissionId && (
+                    <button
+                      onClick={cancelEdit}
+                      disabled={grantPermission.isPending}
+                      className="py-3 px-4 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 text-sm font-semibold rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}

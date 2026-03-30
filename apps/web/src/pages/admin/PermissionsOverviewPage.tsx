@@ -20,6 +20,7 @@ import {
 import AppShell from "../../components/layout/AppShell";
 import api from "../../api/axios";
 import { useToast } from "../../components/ui/toastStore";
+import PermissionsPanel from "../../components/permissions/PermissionsPanel";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Permission {
@@ -100,12 +101,14 @@ function PermRow({
   isExpanded,
   onToggle,
   onRevoke,
+  onEdit,
   isRevoking,
 }: {
   perm: Permission;
   isExpanded: boolean;
   onToggle: () => void;
   onRevoke: () => void;
+  onEdit: () => void;
   isRevoking: boolean;
 }) {
   const resourceName = perm.file?.name ?? perm.folder?.name ?? "Unknown";
@@ -230,6 +233,18 @@ function PermRow({
             <button
               onClick={(e) => {
                 e.stopPropagation();
+                onEdit();
+              }}
+              className="p-1.5 text-gray-400 hover:text-indigo-500 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950 rounded-lg transition-colors"
+              title="Edit permission"
+            >
+              <Edit3 size={13} />
+            </button>
+          )}
+          {!perm.isImplicit && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
                 if (confirm(`Revoke access to "${resourceName}"?`)) onRevoke();
               }}
               disabled={isRevoking}
@@ -316,6 +331,11 @@ export default function PermissionsOverviewPage() {
   const [filterGranted, setFilterGranted] = useState<"all" | "user" | "everyone" | "department" | "owner">("all");
   const [filterAction, setFilterAction] = useState<"all" | "read" | "write" | "delete" | "admin">("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [panelResource, setPanelResource] = useState<{
+    resourceId: string;
+    resourceType: "file" | "folder";
+    resourceName: string;
+  } | null>(null);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["permissions-all"],
@@ -335,6 +355,12 @@ export default function PermissionsOverviewPage() {
     },
     onError: () => add("Failed to revoke permission", "error"),
   });
+  const openEdit = (perm: Permission) =>
+    setPanelResource({
+      resourceId: perm.resourceId,
+      resourceType: perm.resourceType,
+      resourceName: perm.file?.name ?? perm.folder?.name ?? "Resource",
+    });
 
   // Merge explicit permissions with implicit owner grants, deduplicating by file ID
   const explicitPerms = data?.permissions ?? [];
@@ -526,6 +552,7 @@ export default function PermissionsOverviewPage() {
                   isExpanded={expandedId === perm.id}
                   onToggle={() => setExpandedId(expandedId === perm.id ? null : perm.id)}
                   onRevoke={() => revoke.mutate(perm.id)}
+                  onEdit={() => openEdit(perm)}
                   isRevoking={revoke.isPending}
                 />
               ))}
@@ -539,6 +566,17 @@ export default function PermissionsOverviewPage() {
           </p>
         )}
       </div>
+      {panelResource && (
+        <PermissionsPanel
+          resourceId={panelResource.resourceId}
+          resourceType={panelResource.resourceType}
+          resourceName={panelResource.resourceName}
+          onClose={() => {
+            setPanelResource(null);
+            queryClient.invalidateQueries({ queryKey: ["permissions-all"] });
+          }}
+        />
+      )}
     </AppShell>
   );
 }

@@ -169,10 +169,10 @@ export default function FileDetailsView({
                 onClick={() => item.clickable && onBreadcrumbClick?.(item)}
                 className={
                   idx === breadcrumbItems.length - 1
-                    ? "truncate max-w-[260px] text-gray-700 dark:text-gray-200"
+                    ? "truncate max-w-65 text-gray-700 dark:text-gray-200"
                     : item.clickable
-                      ? "truncate max-w-[180px] hover:underline text-primary-600 dark:text-primary-400"
-                      : "truncate max-w-[180px]"
+                      ? "truncate max-w-65 hover:underline text-primary-600 dark:text-primary-400"
+                      : "truncate max-w-65"
                 }
                 disabled={!item.clickable}
               >
@@ -326,7 +326,9 @@ export default function FileDetailsView({
                               day: "numeric",
                               year: "numeric",
                             })}
-                            {v.uploadedBy?.name ? ` · ${v.uploadedBy.name}` : ""}
+                            {v.uploadedBy?.name
+                              ? ` · ${v.uploadedBy.name}`
+                              : ""}
                           </p>
                           <button
                             onClick={() => onOpenVersionHistory?.(file)}
@@ -363,7 +365,7 @@ export default function FileDetailsView({
                   {auditLogs.map((log) => (
                     <div
                       key={log.id}
-                      className="flex items-start justify-between gap-3 rounded-md bg-gray-50 dark:bg-gray-800 px-2.5 py-1.5 min-h-[34px]"
+                      className="flex items-start justify-between gap-3 rounded-md bg-gray-50 dark:bg-gray-800 px-2.5 py-1.5 min-h-8.5"
                     >
                       <div className="min-w-0">
                         <p className="text-[11px] font-medium text-gray-900 dark:text-white truncate leading-tight">
@@ -373,7 +375,7 @@ export default function FileDetailsView({
                           {new Date(log.createdAt).toLocaleString()}
                         </p>
                       </div>
-                      <div className="text-right min-w-[100px]">
+                      <div className="text-right min-w-25">
                         <p className="text-[11px] text-gray-900 dark:text-white leading-tight">
                           {log.user?.name ?? "System"}
                         </p>
