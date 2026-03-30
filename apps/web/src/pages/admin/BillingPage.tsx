@@ -223,6 +223,8 @@ export default function BillingPage() {
     mutationFn: async (plan: string) => {
       const res = await api.post("/billing/checkout", { plan });
       return res.data as {
+        mock?: boolean;
+        provider?: string;
         subscriptionId: string;
         key: string;
         name: string;
@@ -234,6 +236,15 @@ export default function BillingPage() {
     },
     onMutate: (plan) => setPendingPlan(plan),
     onSuccess: async (checkoutData, plan) => {
+      if (checkoutData.mock) {
+        setPendingPlan(null);
+        queryClient.invalidateQueries({ queryKey: ["billing-status"] });
+        useToast
+          .getState()
+          .add("Mock subscription updated successfully.", "success");
+        return;
+      }
+
       const scriptLoaded = await loadRazorpayCheckoutScript();
       if (!scriptLoaded || !window.Razorpay) {
         setPendingPlan(null);
@@ -651,6 +662,19 @@ export default function BillingPage() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {data?.billing.provider === "mock" && (
+          <div className="mt-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <AlertTriangle
+              size={18}
+              className="mt-0.5 shrink-0 text-amber-600"
+            />
+            <p className="text-sm text-amber-800">
+              Billing mock mode is enabled. Plan changes here update StoreIT
+              locally without opening Razorpay Checkout.
+            </p>
           </div>
         )}
 

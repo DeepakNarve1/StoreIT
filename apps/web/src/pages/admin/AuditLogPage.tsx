@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import AppShell from "../../components/layout/AppShell";
 import api from "../../api/axios";
+import { getAuditActionLabel } from "../../utils/auditAction";
 
 const ACTION_CONFIG: Record<
   string,
@@ -123,7 +124,7 @@ const ACTION_CONFIG: Record<
 
 const getActionConfig = (action: string) =>
   ACTION_CONFIG[action] ?? {
-    label: action,
+    label: getAuditActionLabel(action),
     icon: Activity,
     color: "text-gray-600 dark:text-gray-400",
     bg: "bg-gray-50 dark:bg-white/5",
@@ -338,7 +339,7 @@ export default function AuditLogPage() {
             <option value="">All actions</option>
             {ACTIONS.map((a) => (
               <option key={a} value={a}>
-                {ACTION_CONFIG[a]?.label ?? a}
+                {getAuditActionLabel(a)}
               </option>
             ))}
           </select>

@@ -53,13 +53,16 @@ export default function MoveFileModal({
   const moveFiles = useMutation({
     mutationFn: async () => {
       const folderId = selectedFolderId === "root" ? null : selectedFolderId;
-      await Promise.all(
-        files.map((file) => api.patch(`/files/${file.id}/move`, { folderId })),
-      );
+      await api.post("/files/bulk-move", {
+        ids: files.map((file) => file.id),
+        folderId,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["files"] });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
+      queryClient.invalidateQueries({ queryKey: ["recent-files"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       onSuccess();
       onClose();
     },

@@ -15,6 +15,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import api from "../../api/axios";
+import { getAuditActionLabel } from "../../utils/auditAction";
 
 interface FileItem {
   id: string;
@@ -366,7 +367,7 @@ export default function FileDetailsView({
                     >
                       <div className="min-w-0">
                         <p className="text-[11px] font-medium text-gray-900 dark:text-white truncate leading-tight">
-                          {log.action}
+                          {getAuditActionLabel(log.action)}
                         </p>
                         <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 leading-tight">
                           {new Date(log.createdAt).toLocaleString()}

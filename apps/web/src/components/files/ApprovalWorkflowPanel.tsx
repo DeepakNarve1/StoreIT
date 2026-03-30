@@ -20,6 +20,7 @@ import type {
   WorkflowWithFile,
 } from "../../types/workflow";
 import api from "../../api/axios";
+import { getAuditActionLabel } from "../../utils/auditAction";
 import { useToast } from "../ui/toastStore";
 
 interface ApprovalWorkflowPanelProps {
@@ -376,7 +377,7 @@ export default function ApprovalWorkflowPanel({
                               </div>
                               <div className="min-w-0 flex-1">
                                 <p className="text-sm font-medium text-gray-900 dark:text-white">
-                                  {log.action.replaceAll("_", " ")}
+                                  {getAuditActionLabel(log.action)}
                                 </p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                   {log.user?.name ?? "System"} -{" "}

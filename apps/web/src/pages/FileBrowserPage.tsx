@@ -156,10 +156,11 @@ export default function FileBrowserPage() {
     "name" | "size" | "createdAt" | "mimeType"
   >("createdAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [draggedFileId, setDraggedFileId] = useState<string | null>(null);
+  const [draggedFileIds, setDraggedFileIds] = useState<string[]>([]);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [folderMenuId, setFolderMenuId] = useState<string | null>(null);
   const folderMenuCloseTimerRef = useRef<number | null>(null);
+  const uploadRefreshTimerRef = useRef<number | null>(null);
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [manualOrder, setManualOrder] = useState<{
     files: string[];
@@ -388,6 +389,9 @@ export default function FileBrowserPage() {
     return () => {
       if (folderMenuCloseTimerRef.current) {
         window.clearTimeout(folderMenuCloseTimerRef.current);
+      }
+      if (uploadRefreshTimerRef.current) {
+        window.clearTimeout(uploadRefreshTimerRef.current);
       }
     };
   }, []);
@@ -766,20 +770,36 @@ export default function FileBrowserPage() {
     }
   };
 
-  // FIX: renamed inner param to targetFolderId to avoid shadowing useParams folderId
+  const invalidateBrowserQueries = () => {
+    queryClient.invalidateQueries({ queryKey: ["files"] });
+    queryClient.invalidateQueries({ queryKey: ["folders"] });
+    queryClient.invalidateQueries({ queryKey: ["recent-files"] });
+    queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+  };
+
   const dragMove = useMutation({
     mutationFn: async ({
-      fileId,
+      fileIds,
       targetFolderId,
     }: {
-      fileId: string;
+      fileIds: string[];
       targetFolderId: string;
-    }) => api.patch(`/files/${fileId}/move`, { folderId: targetFolderId }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["files", folderId ?? "root"],
+    }) => {
+      if (fileIds.length === 1) {
+        return api.patch(`/files/${fileIds[0]}/move`, { folderId: targetFolderId });
+      }
+
+      return api.post("/files/bulk-move", {
+        ids: fileIds,
+        folderId: targetFolderId,
       });
-      useToast.getState().add("File moved");
+    },
+    onSuccess: (_, vars) => {
+      invalidateBrowserQueries();
+      setSelectedFiles((prev) => prev.filter((id) => !vars.fileIds.includes(id)));
+      useToast
+        .getState()
+        .add(vars.fileIds.length > 1 ? `${vars.fileIds.length} files moved` : "File moved");
     },
     onError: () => useToast.getState().add("Failed to move file", "error"),
   });
@@ -938,7 +958,21 @@ export default function FileBrowserPage() {
   const isEmpty = allFiles.length === 0 && folders.length === 0;
 
   const handleUploadComplete = () => {
-    queryClient.invalidateQueries({ queryKey: ["files", folderId ?? "root"] });
+    if (uploadRefreshTimerRef.current) {
+      window.clearTimeout(uploadRefreshTimerRef.current);
+    }
+    uploadRefreshTimerRef.current = window.setTimeout(() => {
+      invalidateBrowserQueries();
+      uploadRefreshTimerRef.current = null;
+    }, 150);
+  };
+
+  const handleFileDragStart = (file: BrowserFileItem) => {
+    const ids =
+      selectedFiles.length > 1 && selectedFiles.includes(file.id)
+        ? selectedFiles
+        : [file.id];
+    setDraggedFileIds(ids);
   };
 
   const handleFileClick = (file: BrowserFileItem) => {
@@ -2871,12 +2905,12 @@ export default function FileBrowserPage() {
                               onDrop={(e) => {
                                 e.preventDefault();
                                 setDragOverFolderId(null);
-                                if (draggedFileId) {
+                                if (draggedFileIds.length > 0) {
                                   dragMove.mutate({
-                                    fileId: draggedFileId,
+                                    fileIds: draggedFileIds,
                                     targetFolderId: folder.id,
                                   });
-                                  setDraggedFileId(null);
+                                  setDraggedFileIds([]);
                                 }
                               }}
                               className={clsx(
@@ -3012,12 +3046,12 @@ export default function FileBrowserPage() {
                               onDrop={(e) => {
                                 e.preventDefault();
                                 setDragOverFolderId(null);
-                                if (draggedFileId) {
+                                if (draggedFileIds.length > 0) {
                                   dragMove.mutate({
-                                    fileId: draggedFileId,
+                                    fileIds: draggedFileIds,
                                     targetFolderId: folder.id,
                                   });
-                                  setDraggedFileId(null);
+                                  setDraggedFileIds([]);
                                 }
                               }}
                               className={clsx(
@@ -3268,6 +3302,8 @@ export default function FileBrowserPage() {
                       files={files}
                       onFileClick={handleFileClick}
                       onStar={(file) => starMutation.mutate(file)}
+                      onDragStart={handleFileDragStart}
+                      onDragEnd={() => setDraggedFileIds([])}
                       onReorder={reorderFileItems}
                     />
                   ) : (
@@ -3288,8 +3324,8 @@ export default function FileBrowserPage() {
                       sortBy={sortBy}
                       sortDir={sortDir}
                       onSort={handleSort}
-                      onDragStart={(file) => setDraggedFileId(file.id)}
-                      onDragEnd={() => setDraggedFileId(null)}
+                      onDragStart={handleFileDragStart}
+                      onDragEnd={() => setDraggedFileIds([])}
                       onMetadata={(file) => openFileMetadataPage(file)}
                       onComments={(file) => setCommentsFile(file)}
                       onSubmitApproval={(file) => openWorkflowComposer(file)}
@@ -3448,9 +3484,7 @@ export default function FileBrowserPage() {
           files={moveFiles}
           onClose={() => setMoveFiles([])}
           onSuccess={() => {
-            queryClient.invalidateQueries({
-              queryKey: ["files", folderId ?? "root"],
-            });
+            invalidateBrowserQueries();
             setSelectedFiles([]);
           }}
         />

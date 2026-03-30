@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { AxiosError } from "axios";
 import api from "../../api/axios";
+import { getAuditActionLabel } from "../../utils/auditAction";
 
 interface FileItem {
   id: string;
@@ -588,7 +589,7 @@ function FilePreviewModalInner({
                       >
                         <div className="min-w-0">
                           <p className="text-xs font-medium text-gray-900 dark:text-white truncate">
-                            {log.action}
+                            {getAuditActionLabel(log.action)}
                           </p>
                           <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
                             {formatDetailedDateTime(log.createdAt)}

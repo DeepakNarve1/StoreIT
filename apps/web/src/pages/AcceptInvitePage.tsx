@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { CheckCircle, Loader, AlertCircle, Mail } from "lucide-react";
+import axios from "axios";
 import api from "../api/axios";
 import { apiErrorMessage } from "../utils/apiError";
 
@@ -13,6 +14,7 @@ export default function AcceptInvitePage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [isLimitError, setIsLimitError] = useState(false);
 
   // Validate token on load
   const {
@@ -45,10 +47,29 @@ export default function AcceptInvitePage() {
       return res.data;
     },
     onSuccess: () => {
+      setIsLimitError(false);
       setSuccess(true);
       setTimeout(() => navigate("/login"), 3000);
     },
     onError: (err: unknown) => {
+      if (axios.isAxiosError(err)) {
+        const code =
+          typeof err.response?.data === "object" && err.response?.data !== null
+            ? (err.response.data as { code?: string }).code
+            : undefined;
+        if (err.response?.status === 402 || code === "USER_LIMIT_REACHED") {
+          setIsLimitError(true);
+          setError(
+            apiErrorMessage(
+              err,
+              "This organisation has reached its user limit. Please contact your admin.",
+            ),
+          );
+          return;
+        }
+      }
+
+      setIsLimitError(false);
       setError(apiErrorMessage(err, "Failed to create account"));
     },
   });
@@ -56,6 +77,7 @@ export default function AcceptInvitePage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setIsLimitError(false);
     if (password !== confirmPassword) {
       setError("Passwords do not match");
       return;
@@ -199,11 +221,22 @@ export default function AcceptInvitePage() {
 
         {error && (
           <div
-            className="bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 
-                          text-red-700 dark:text-red-400 text-sm px-4 py-3 rounded-xl mb-6 flex items-start gap-2 animate-in fade-in slide-in-from-top-1"
+            className={`text-sm px-4 py-3 rounded-xl mb-6 flex items-start gap-2 animate-in fade-in slide-in-from-top-1 ${
+              isLimitError
+                ? "bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-900/30 text-amber-800 dark:text-amber-300"
+                : "bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 text-red-700 dark:text-red-400"
+            }`}
           >
             <AlertCircle size={16} className="shrink-0 mt-0.5" />
-            <span>{error}</span>
+            <div>
+              <span>{error}</span>
+              {isLimitError && (
+                <p className="mt-1 text-xs opacity-90">
+                  Your invite is valid, but the organisation needs an upgrade or
+                  an open seat before your account can be created.
+                </p>
+              )}
+            </div>
           </div>
         )}
 

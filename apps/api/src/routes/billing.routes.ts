@@ -9,6 +9,7 @@ const router = Router();
 const APP_URL =
   process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:5173";
 const RAZORPAY_API_BASE = "https://api.razorpay.com/v1";
+const BILLING_MOCK_MODE = process.env.BILLING_MOCK_MODE === "true";
 
 type SupportedPlan = "starter" | "pro" | "enterprise";
 
@@ -20,6 +21,10 @@ interface RazorpaySubscription {
   charge_at?: number | null;
   current_end?: number | null;
   notes?: Record<string, string>;
+}
+
+function getMockSubscriptionId(tenantId: string, plan: string) {
+  return `mock_sub_${tenantId}_${plan}`;
 }
 
 function ensureRazorpayConfig() {
@@ -142,7 +147,7 @@ router.get(
       ]);
 
       let subscription: RazorpaySubscription | null = null;
-      if (tenant.razorpaySubscriptionId) {
+      if (!BILLING_MOCK_MODE && tenant.razorpaySubscriptionId) {
         try {
           subscription = await fetchSubscription(tenant.razorpaySubscriptionId);
         } catch {
@@ -162,12 +167,21 @@ router.get(
         },
         usage: { storageBytes, users: userCount },
         billing: {
-          provider: "razorpay",
-          customerId: tenant.razorpayCustomerId,
-          subscriptionId: tenant.razorpaySubscriptionId,
-          planId: tenant.razorpayPlanId,
-          subscriptionStatus: subscription?.status ?? null,
-          currentPeriodEnd: getSubscriptionEndDate(subscription),
+          provider: BILLING_MOCK_MODE ? "mock" : "razorpay",
+          customerId: BILLING_MOCK_MODE ? null : tenant.razorpayCustomerId,
+          subscriptionId:
+            BILLING_MOCK_MODE && tenant.plan !== "free"
+              ? getMockSubscriptionId(tenant.id, tenant.plan)
+              : tenant.razorpaySubscriptionId,
+          planId: BILLING_MOCK_MODE ? null : tenant.razorpayPlanId,
+          subscriptionStatus: BILLING_MOCK_MODE
+            ? tenant.plan === "free"
+              ? null
+              : "active"
+            : subscription?.status ?? null,
+          currentPeriodEnd: BILLING_MOCK_MODE
+            ? null
+            : getSubscriptionEndDate(subscription),
         },
       });
     } catch (err) {
@@ -189,14 +203,6 @@ router.post(
         return;
       }
 
-      const planId = RAZORPAY_PLAN_IDS[plan];
-      if (!planId) {
-        res.status(400).json({
-          error: `Razorpay plan ID is not configured for the ${plan} plan.`,
-        });
-        return;
-      }
-
       const tenant = await prisma.tenant.findUnique({
         where: { id: req.user!.tenantId },
         select: {
@@ -209,6 +215,38 @@ router.post(
 
       if (!tenant) {
         res.status(404).json({ error: "Tenant not found" });
+        return;
+      }
+
+      if (BILLING_MOCK_MODE) {
+        await prisma.tenant.update({
+          where: { id: tenant.id },
+          data: {
+            plan,
+            razorpayCustomerId: null,
+            razorpaySubscriptionId: null,
+            razorpayPlanId: null,
+            stripeCustomerId: null,
+            stripeSubscriptionId: null,
+          },
+        });
+
+        res.json({
+          mock: true,
+          provider: "mock",
+          subscriptionId: getMockSubscriptionId(tenant.id, plan),
+          key: "mock",
+          name: "StoreIT",
+          description: `${plan.toUpperCase()} plan subscription`,
+        });
+        return;
+      }
+
+      const planId = RAZORPAY_PLAN_IDS[plan];
+      if (!planId) {
+        res.status(400).json({
+          error: `Razorpay plan ID is not configured for the ${plan} plan.`,
+        });
         return;
       }
 
@@ -287,11 +325,35 @@ router.post(
       const requestedPlan = normalizePlan(req.body?.plan);
 
       if (
-        !razorpayPaymentId ||
-        !razorpaySubscriptionId ||
-        !razorpaySignature ||
         !requestedPlan
       ) {
+        res.status(400).json({ error: "Missing checkout verification details" });
+        return;
+      }
+
+      if (BILLING_MOCK_MODE) {
+        await prisma.tenant.update({
+          where: { id: req.user!.tenantId },
+          data: {
+            plan: requestedPlan,
+            razorpayCustomerId: null,
+            razorpaySubscriptionId: null,
+            razorpayPlanId: null,
+            stripeCustomerId: null,
+            stripeSubscriptionId: null,
+          },
+        });
+
+        res.json({
+          mock: true,
+          plan: requestedPlan,
+          subscriptionId: getMockSubscriptionId(req.user!.tenantId, requestedPlan),
+          subscriptionStatus: "active",
+        });
+        return;
+      }
+
+      if (!razorpayPaymentId || !razorpaySubscriptionId || !razorpaySignature) {
         res.status(400).json({ error: "Missing checkout verification details" });
         return;
       }
@@ -387,11 +449,42 @@ router.post(
         where: { id: req.user!.tenantId },
         select: {
           id: true,
+          plan: true,
           razorpaySubscriptionId: true,
         },
       });
 
-      if (!tenant?.razorpaySubscriptionId) {
+      if (!tenant) {
+        res.status(404).json({ error: "Tenant not found" });
+        return;
+      }
+
+      if (BILLING_MOCK_MODE) {
+        if (tenant.plan === "free") {
+          res.status(400).json({ error: "No active subscription found." });
+          return;
+        }
+
+        await prisma.tenant.update({
+          where: { id: tenant.id },
+          data: {
+            plan: "free",
+            razorpayCustomerId: null,
+            razorpaySubscriptionId: null,
+            razorpayPlanId: null,
+            stripeCustomerId: null,
+            stripeSubscriptionId: null,
+          },
+        });
+
+        res.json({
+          cancelled: true,
+          subscriptionId: getMockSubscriptionId(tenant.id, "free"),
+        });
+        return;
+      }
+
+      if (!tenant.razorpaySubscriptionId) {
         res.status(400).json({ error: "No active subscription found." });
         return;
       }

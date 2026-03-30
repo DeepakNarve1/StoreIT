@@ -23,6 +23,8 @@ interface FileGridProps {
   files: FileItem[];
   onFileClick: (file: FileItem) => void;
   onStar?: (file: FileItem) => void;
+  onDragStart?: (file: FileItem) => void;
+  onDragEnd?: () => void;
   onReorder?: (fromId: string, toId: string) => void;
 }
 
@@ -84,6 +86,8 @@ export default function FileGrid({
   files,
   onFileClick,
   onStar,
+  onDragStart,
+  onDragEnd,
   onReorder,
 }: FileGridProps) {
   if (files.length === 0) return null;
@@ -97,6 +101,9 @@ export default function FileGrid({
           <div
             key={file.id}
             className="relative group"
+            draggable={!!onDragStart}
+            onDragStart={() => onDragStart?.(file)}
+            onDragEnd={() => onDragEnd?.()}
             onDragOver={(e) => {
               if (!onReorder) return;
               e.preventDefault();

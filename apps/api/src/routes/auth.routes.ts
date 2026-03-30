@@ -12,6 +12,7 @@ import { createAuditLog } from "../services/audit.service";
 import { sendPasswordResetEmail } from "../services/email.service";
 import { v4 as uuid } from "uuid";
 import { serializeRoleProfile } from "../services/role-profiles.service";
+import { getPlanLimits } from "../utils/plans";
 
 const router = Router();
 
@@ -194,6 +195,25 @@ router.post("/invite/accept", async (req: Request, res: Response) => {
     });
     if (existing) {
       res.status(400).json({ error: "User already exists" });
+      return;
+    }
+
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: invite.tenantId },
+      select: { plan: true },
+    });
+    const { maxUsers } = getPlanLimits(tenant?.plan ?? "free");
+    const currentUsers = await prisma.user.count({
+      where: { tenantId: invite.tenantId, isActive: true },
+    });
+
+    if (maxUsers !== Infinity && currentUsers >= maxUsers) {
+      res.status(402).json({
+        error: `User limit reached for your plan (${maxUsers} users). Please ask your admin to upgrade before accepting this invite.`,
+        code: "USER_LIMIT_REACHED",
+        limit: maxUsers,
+        current: currentUsers,
+      });
       return;
     }
 
