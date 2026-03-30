@@ -674,7 +674,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
                text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors font-medium"
           >
             <Shield size={14} />
-            <span>Superadmin</span>
+            <span>Organisation</span>
           </button>
         )}
         {(user?.role === "ORG_ADMIN" || user?.role === "SUPERADMIN") && (
