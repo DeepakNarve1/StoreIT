@@ -15,7 +15,7 @@ import clsx from "clsx";
 interface MoveFileModalProps {
   files: { id: string; name: string }[];
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (targetFolderId: string | null, movedFileIds: string[]) => void;
 }
 
 interface StoreITem {
@@ -63,7 +63,10 @@ export default function MoveFileModal({
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       queryClient.invalidateQueries({ queryKey: ["recent-files"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
-      onSuccess();
+      onSuccess(
+        selectedFolderId === "root" ? null : selectedFolderId,
+        files.map((file) => file.id),
+      );
       onClose();
     },
   });

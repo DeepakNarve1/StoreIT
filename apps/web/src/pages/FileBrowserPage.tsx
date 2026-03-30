@@ -777,6 +777,89 @@ export default function FileBrowserPage() {
     queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
   };
 
+  const applyImmediateMoveResult = (
+    fileIds: string[],
+    targetFolderId: string | null,
+  ) => {
+    const currentContainerId = folderId ?? null;
+    const isGlobalFilteredView = !folderId && typeFilter !== "all";
+    const movedIds = new Set(fileIds);
+
+    if (!isGlobalFilteredView && targetFolderId !== currentContainerId) {
+      queryClient.setQueryData<{ files: BrowserFileItem[] }>(
+        ["files", folderId ?? "root", typeFilter],
+        (current) =>
+          current
+            ? {
+                ...current,
+                files: current.files.filter((file) => !movedIds.has(file.id)),
+              }
+            : current,
+      );
+
+      setManualOrder((prev) => ({
+        ...prev,
+        files: prev.files.filter((id) => !movedIds.has(id)),
+      }));
+    }
+
+    queryClient.setQueryData<{ folders: StoreITem[] }>(
+      ["folders", folderId ?? "root"],
+      (current) =>
+        current
+          ? {
+              ...current,
+              folders: current.folders.map((folder) =>
+                folder.id === targetFolderId
+                  ? {
+                      ...folder,
+                      _count: {
+                        ...folder._count,
+                        files: folder._count.files + fileIds.length,
+                      },
+                    }
+                  : folder,
+              ),
+            }
+          : current,
+    );
+
+    // Also update the global folders cache used by the Sidebar (queryKey: ["folders","all"]).
+    // This keeps the folder counts in sync across the app so users don't need to refresh.
+    queryClient.setQueryData<{ folders: StoreITem[] }>(
+      ["folders", "all"],
+      (current) =>
+        current
+          ? {
+              ...current,
+              folders: current.folders.map((folder) => {
+                if (folder.id === targetFolderId) {
+                  return {
+                    ...folder,
+                    _count: {
+                      ...folder._count,
+                      files: folder._count.files + fileIds.length,
+                    },
+                  };
+                }
+
+                if (currentContainerId && folder.id === currentContainerId) {
+                  return {
+                    ...folder,
+                    _count: {
+                      ...folder._count,
+                      files: Math.max(0, folder._count.files - fileIds.length),
+                    },
+                  };
+                }
+
+                return folder;
+              }),
+            }
+          : current,
+    );
+  };
+
   const dragMove = useMutation({
     mutationFn: async ({
       fileIds,
@@ -786,7 +869,9 @@ export default function FileBrowserPage() {
       targetFolderId: string;
     }) => {
       if (fileIds.length === 1) {
-        return api.patch(`/files/${fileIds[0]}/move`, { folderId: targetFolderId });
+        return api.patch(`/files/${fileIds[0]}/move`, {
+          folderId: targetFolderId,
+        });
       }
 
       return api.post("/files/bulk-move", {
@@ -794,12 +879,19 @@ export default function FileBrowserPage() {
         folderId: targetFolderId,
       });
     },
-    onSuccess: (_, vars) => {
+    onSuccess: async (_, vars) => {
+      applyImmediateMoveResult(vars.fileIds, vars.targetFolderId);
       invalidateBrowserQueries();
-      setSelectedFiles((prev) => prev.filter((id) => !vars.fileIds.includes(id)));
+      setSelectedFiles((prev) =>
+        prev.filter((id) => !vars.fileIds.includes(id)),
+      );
       useToast
         .getState()
-        .add(vars.fileIds.length > 1 ? `${vars.fileIds.length} files moved` : "File moved");
+        .add(
+          vars.fileIds.length > 1
+            ? `${vars.fileIds.length} files moved`
+            : "File moved",
+        );
     },
     onError: () => useToast.getState().add("Failed to move file", "error"),
   });
@@ -3483,9 +3575,12 @@ export default function FileBrowserPage() {
         <MoveFileModal
           files={moveFiles}
           onClose={() => setMoveFiles([])}
-          onSuccess={() => {
+          onSuccess={(targetFolderId, movedFileIds) => {
+            applyImmediateMoveResult(movedFileIds, targetFolderId);
             invalidateBrowserQueries();
-            setSelectedFiles([]);
+            setSelectedFiles((prev) =>
+              prev.filter((id) => !movedFileIds.includes(id)),
+            );
           }}
         />
       )}
