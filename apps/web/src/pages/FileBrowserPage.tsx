@@ -55,7 +55,10 @@ import ApprovalWorkflowComposerModal from "../components/files/ApprovalWorkflowC
 import ApprovalWorkflowCenterPanel from "../components/files/ApprovalWorkflowCenterPanel";
 import axios from "axios";
 import type { BrowserFileItem, CategoryOption } from "../types/file-browser";
-import type { StartedApprovalWorkflow, WorkflowWithFile } from "../types/workflow";
+import type {
+  StartedApprovalWorkflow,
+  WorkflowWithFile,
+} from "../types/workflow";
 
 type ViewMode = "grid" | "list";
 
@@ -141,7 +144,9 @@ export default function FileBrowserPage() {
     type: "file" | "folder";
     name: string;
   } | null>(null);
-  const [versionsFile, setVersionsFile] = useState<BrowserFileItem | null>(null);
+  const [versionsFile, setVersionsFile] = useState<BrowserFileItem | null>(
+    null,
+  );
   const handleVersions = (file: BrowserFileItem) => setVersionsFile(file);
   const [moveFiles, setMoveFiles] = useState<BrowserFileItem[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
@@ -163,7 +168,9 @@ export default function FileBrowserPage() {
     files: [],
     folders: [],
   });
-  const [commentsFile, setCommentsFile] = useState<BrowserFileItem | null>(null);
+  const [commentsFile, setCommentsFile] = useState<BrowserFileItem | null>(
+    null,
+  );
   const [categoryResource, setCategoryResource] = useState<{
     id: string;
     type: "file" | "folder";
@@ -178,7 +185,9 @@ export default function FileBrowserPage() {
     id: string;
     name: string;
   } | null>(null);
-  const [approvalFile, setApprovalFile] = useState<BrowserFileItem | null>(null);
+  const [approvalFile, setApprovalFile] = useState<BrowserFileItem | null>(
+    null,
+  );
   const [renameName, setRenameName] = useState("");
   const [renameFolderName, setRenameFolderName] = useState("");
   const [approvalNote, setApprovalNote] = useState("");
@@ -200,7 +209,9 @@ export default function FileBrowserPage() {
     Array<{ key: string; value: string }>
   >([{ key: "", value: "" }]);
 
-  const [deleteTarget, setDeleteTarget] = useState<BrowserFileItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<BrowserFileItem | null>(
+    null,
+  );
   const [showBulkDelete, setShowBulkDelete] = useState(false);
   const [showBulkFolderDelete, setShowBulkFolderDelete] = useState(false);
   const [showRetentionModal, setShowRetentionModal] = useState(false);
@@ -876,41 +887,41 @@ export default function FileBrowserPage() {
     const n = String(name ?? "").toLowerCase();
     return exts.some((ext) => n.endsWith(ext));
   };
-  const filteredFiles = allFiles
-    .filter((f) => {
-      const mime = String(f.mimeType ?? "").toLowerCase();
-      if (typeFilter === "all") return true;
-      if (typeFilter === "pdf")
-        return mime.includes("pdf") || hasExt(f.name, [".pdf"]);
-      if (typeFilter === "image")
-        return (
-          mime.startsWith("image/") ||
-          hasExt(f.name, [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"])
-        );
-      if (typeFilter === "video")
-        return (
-          mime.startsWith("video/") || hasExt(f.name, [".mp4", ".mov", ".avi", ".mkv", ".webm"])
-        );
-      if (typeFilter === "word")
-        return (
-          mime.includes("msword") ||
-          mime.includes("wordprocessingml") ||
-          hasExt(f.name, [".doc", ".docx"])
-        );
-      if (typeFilter === "excel")
-        return (
-          mime.includes("excel") ||
-          mime.includes("spreadsheetml") ||
-          hasExt(f.name, [".xls", ".xlsx", ".csv"])
-        );
-      if (typeFilter === "zip")
-        return (
-          mime.includes("zip") ||
-          mime.includes("compressed") ||
-          hasExt(f.name, [".zip", ".rar", ".7z", ".tar", ".gz"])
-        );
-      return true;
-    });
+  const filteredFiles = allFiles.filter((f) => {
+    const mime = String(f.mimeType ?? "").toLowerCase();
+    if (typeFilter === "all") return true;
+    if (typeFilter === "pdf")
+      return mime.includes("pdf") || hasExt(f.name, [".pdf"]);
+    if (typeFilter === "image")
+      return (
+        mime.startsWith("image/") ||
+        hasExt(f.name, [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"])
+      );
+    if (typeFilter === "video")
+      return (
+        mime.startsWith("video/") ||
+        hasExt(f.name, [".mp4", ".mov", ".avi", ".mkv", ".webm"])
+      );
+    if (typeFilter === "word")
+      return (
+        mime.includes("msword") ||
+        mime.includes("wordprocessingml") ||
+        hasExt(f.name, [".doc", ".docx"])
+      );
+    if (typeFilter === "excel")
+      return (
+        mime.includes("excel") ||
+        mime.includes("spreadsheetml") ||
+        hasExt(f.name, [".xls", ".xlsx", ".csv"])
+      );
+    if (typeFilter === "zip")
+      return (
+        mime.includes("zip") ||
+        mime.includes("compressed") ||
+        hasExt(f.name, [".zip", ".rar", ".7z", ".tar", ".gz"])
+      );
+    return true;
+  });
   const files = applyManualOrder(filteredFiles, manualOrder.files);
   const foldersRaw = foldersData?.folders ?? [];
   const folders =
@@ -1087,8 +1098,7 @@ export default function FileBrowserPage() {
   const patchDetailWorkflowState = (
     workflow: StartedApprovalWorkflow | WorkflowWithFile,
   ) => {
-    const targetId =
-      workflow.fileId ?? (workflow as WorkflowWithFile).file?.id;
+    const targetId = workflow.fileId ?? (workflow as WorkflowWithFile).file?.id;
     if (!targetId) return;
     const wf = workflow as WorkflowWithFile;
     setDetailFile((prev) =>
@@ -1097,8 +1107,7 @@ export default function FileBrowserPage() {
             ...prev,
             approvalStatus:
               workflow.file?.approvalStatus ?? wf.status ?? prev.approvalStatus,
-            activeWorkflowId:
-              wf.status === "in_review" ? workflow.id : null,
+            activeWorkflowId: wf.status === "in_review" ? workflow.id : null,
             currentStepOrder:
               workflow.file?.currentStepOrder ??
               workflow.currentStepOrder ??
@@ -1152,10 +1161,9 @@ export default function FileBrowserPage() {
         e.response.data !== null &&
         "error" in e.response.data
       ) {
-        useToast.getState().add(
-          String((e.response.data as { error: string }).error),
-          "error",
-        );
+        useToast
+          .getState()
+          .add(String((e.response.data as { error: string }).error), "error");
       } else {
         useToast.getState().add("Failed to delete file", "error");
       }
@@ -2633,31 +2641,30 @@ export default function FileBrowserPage() {
           )}
 
           {/* Pending approvals badge */}
-          {!detailFile &&
-            workflowInboxItems.length > 0 && (
-              <div className="flex items-center gap-2 mb-4 p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-xl">
-                <span className="text-sm text-amber-700 dark:text-amber-400 font-medium">
-                  {workflowInboxItems.length} workflow item(s) waiting for your
-                  approval
-                </span>
-                <div className="flex gap-1.5 ml-auto flex-wrap">
-                  {workflowInboxItems.map((item) => (
-                      <button
-                        key={`${item.workflowId}-${item.file.id}`}
-                        onClick={() =>
-                          setWorkflowPanelFile({
-                            id: item.file.id,
-                            name: item.file.name,
-                          })
-                        }
-                        className="text-xs px-2.5 py-1 bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-800 font-medium truncate max-w-35"
-                      >
-                        Review: {item.file.name}
-                      </button>
-                    ))}
-                </div>
+          {!detailFile && workflowInboxItems.length > 0 && (
+            <div className="flex items-center gap-2 mb-4 p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-xl">
+              <span className="text-sm text-amber-700 dark:text-amber-400 font-medium">
+                {workflowInboxItems.length} workflow item(s) waiting for your
+                approval
+              </span>
+              <div className="flex gap-1.5 ml-auto flex-wrap">
+                {workflowInboxItems.map((item) => (
+                  <button
+                    key={`${item.workflowId}-${item.file.id}`}
+                    onClick={() =>
+                      setWorkflowPanelFile({
+                        id: item.file.id,
+                        name: item.file.name,
+                      })
+                    }
+                    className="text-xs px-2.5 py-1 bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-800 font-medium truncate max-w-35"
+                  >
+                    Review: {item.file.name}
+                  </button>
+                ))}
               </div>
-            )}
+            </div>
+          )}
 
           {/* Main content */}
           {detailFile ? (

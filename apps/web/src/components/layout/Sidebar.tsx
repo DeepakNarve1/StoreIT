@@ -732,49 +732,50 @@ export default function Sidebar({ isOpen }: SidebarProps) {
           </button>
         )}
         {/* Storage quota */}
-        {stats && (() => {
-          const cap = stats.storageLimit;
-          const unlimited = cap === null || cap > 1e15;
-          const pct =
-            unlimited || !cap
-              ? 5
-              : Math.min(100, Math.round((stats.storageBytes / cap) * 100));
-          const barTone =
-            unlimited
+        {stats &&
+          (() => {
+            const cap = stats.storageLimit;
+            const unlimited = cap === null || cap > 1e15;
+            const pct =
+              unlimited || !cap
+                ? 5
+                : Math.min(100, Math.round((stats.storageBytes / cap) * 100));
+            const barTone = unlimited
               ? "bg-primary-500"
               : stats.storageBytes / cap > 0.9
                 ? "bg-red-500"
                 : stats.storageBytes / cap > 0.75
                   ? "bg-amber-500"
                   : "bg-primary-500";
-          return (
-          <div className="mx-2 mb-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
-                Storage
-              </span>
-              <span className="text-xs text-gray-400 dark:text-gray-500 capitalize">
-                {stats.plan}
-              </span>
-            </div>
-            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mb-1.5">
-              <div
-                className={`h-1.5 rounded-full transition-all ${barTone}`}
-                style={{
-                  width: unlimited ? "5%" : `${pct}%`,
-                }}
-              />
-            </div>
-            <p className="text-xs text-gray-400 dark:text-gray-500">
-              {stats.storageMB < 1024
-                ? `${stats.storageMB} MB`
-                : `${(stats.storageMB / 1024).toFixed(1)} GB`}
-              {cap !== null && cap <= 1e15 &&
-                ` of ${Math.round(cap / 1024 / 1024 / 1024)} GB used`}
-            </p>
-          </div>
-          );
-        })()}
+            return (
+              <div className="mx-2 mb-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
+                    Storage
+                  </span>
+                  <span className="text-xs text-gray-400 dark:text-gray-500 capitalize">
+                    {stats.plan}
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mb-1.5">
+                  <div
+                    className={`h-1.5 rounded-full transition-all ${barTone}`}
+                    style={{
+                      width: unlimited ? "5%" : `${pct}%`,
+                    }}
+                  />
+                </div>
+                <p className="text-xs text-gray-400 dark:text-gray-500">
+                  {stats.storageMB < 1024
+                    ? `${stats.storageMB} MB`
+                    : `${(stats.storageMB / 1024).toFixed(1)} GB`}
+                  {cap !== null &&
+                    cap <= 1e15 &&
+                    ` of ${Math.round(cap / 1024 / 1024 / 1024)} GB used`}
+                </p>
+              </div>
+            );
+          })()}
       </div>
     </aside>
   );
