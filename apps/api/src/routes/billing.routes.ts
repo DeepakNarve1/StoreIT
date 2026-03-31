@@ -60,6 +60,46 @@ async function razorpayRequest<T>(
   return (await response.json()) as T;
 }
 
+function extractRazorpayError(err: unknown): {
+  message: string;
+  statusCode: number;
+} {
+  if (!(err instanceof Error)) {
+    return { message: "Failed to start Razorpay checkout", statusCode: 500 };
+  }
+
+  const fallback = err.message || "Failed to start Razorpay checkout";
+  try {
+    const parsed = JSON.parse(err.message) as {
+      error?: {
+        description?: string;
+        reason?: string;
+        field?: string;
+        code?: string;
+      };
+    };
+    const rpError = parsed?.error;
+    if (rpError && typeof rpError === "object") {
+      const parts = [
+        rpError.description,
+        rpError.reason,
+        rpError.field ? `field: ${rpError.field}` : undefined,
+        rpError.code ? `code: ${rpError.code}` : undefined,
+      ].filter(
+        (p): p is string => typeof p === "string" && p.trim().length > 0,
+      );
+
+      if (parts.length > 0) {
+        return { message: parts.join(" | "), statusCode: 400 };
+      }
+    }
+  } catch {
+    // Non-JSON error from upstream; use fallback message.
+  }
+
+  return { message: fallback, statusCode: 500 };
+}
+
 function normalizePlan(plan: unknown): SupportedPlan | null {
   if (plan === "starter" || plan === "pro" || plan === "enterprise") {
     return plan;
@@ -80,8 +120,7 @@ function derivePlanFromSubscription(
 }
 
 function getSubscriptionEndDate(subscription: RazorpaySubscription | null) {
-  const unixTime =
-    subscription?.current_end ?? subscription?.charge_at ?? null;
+  const unixTime = subscription?.current_end ?? subscription?.charge_at ?? null;
   return unixTime ? new Date(unixTime * 1000) : null;
 }
 
@@ -100,7 +139,9 @@ function verifySignature(payload: string, signature: string, secret: string) {
 }
 
 async function fetchSubscription(subscriptionId: string) {
-  return razorpayRequest<RazorpaySubscription>(`/subscriptions/${subscriptionId}`);
+  return razorpayRequest<RazorpaySubscription>(
+    `/subscriptions/${subscriptionId}`,
+  );
 }
 
 async function cancelSubscriptionNow(subscriptionId: string) {
@@ -178,7 +219,7 @@ router.get(
             ? tenant.plan === "free"
               ? null
               : "active"
-            : subscription?.status ?? null,
+            : (subscription?.status ?? null),
           currentPeriodEnd: BILLING_MOCK_MODE
             ? null
             : getSubscriptionEndDate(subscription),
@@ -274,7 +315,7 @@ router.post(
           method: "POST",
           body: JSON.stringify({
             plan_id: planId,
-            total_count: 1200,
+            total_count: 240,
             quantity: 1,
             customer_notify: 1,
             notes: {
@@ -307,8 +348,9 @@ router.post(
         },
       });
     } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: "Failed to start Razorpay checkout" });
+      console.error("billing checkout error:", err);
+      const parsed = extractRazorpayError(err);
+      res.status(parsed.statusCode).json({ error: parsed.message });
     }
   },
 );
@@ -324,10 +366,10 @@ router.post(
       const razorpaySignature = req.body?.razorpaySignature;
       const requestedPlan = normalizePlan(req.body?.plan);
 
-      if (
-        !requestedPlan
-      ) {
-        res.status(400).json({ error: "Missing checkout verification details" });
+      if (!requestedPlan) {
+        res
+          .status(400)
+          .json({ error: "Missing checkout verification details" });
         return;
       }
 
@@ -347,14 +389,19 @@ router.post(
         res.json({
           mock: true,
           plan: requestedPlan,
-          subscriptionId: getMockSubscriptionId(req.user!.tenantId, requestedPlan),
+          subscriptionId: getMockSubscriptionId(
+            req.user!.tenantId,
+            requestedPlan,
+          ),
           subscriptionStatus: "active",
         });
         return;
       }
 
       if (!razorpayPaymentId || !razorpaySubscriptionId || !razorpaySignature) {
-        res.status(400).json({ error: "Missing checkout verification details" });
+        res
+          .status(400)
+          .json({ error: "Missing checkout verification details" });
         return;
       }
 
@@ -381,9 +428,9 @@ router.post(
       }
 
       if (tenantId !== req.user!.tenantId) {
-        res
-          .status(403)
-          .json({ error: "This checkout does not belong to your organisation" });
+        res.status(403).json({
+          error: "This checkout does not belong to your organisation",
+        });
         return;
       }
 
