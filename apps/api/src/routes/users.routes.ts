@@ -175,15 +175,24 @@ router.post(
       });
 
       // Send invite email
-      await sendInviteEmail({
-        email,
-        invitedByName: inviter?.name || "Admin",
-        tenantName: tenant?.name || "Your Organisation",
-        token,
-        role: resolvedRoleName,
-      });
-
-      res.json({ message: `Invite sent to ${email}` });
+      try {
+        await sendInviteEmail({
+          email,
+          invitedByName: inviter?.name || "Admin",
+          tenantName: tenant?.name || "Your Organisation",
+          token,
+          role: resolvedRoleName,
+        });
+        res.json({ message: `Invite sent to ${email}`, emailSent: true });
+      } catch (emailErr: any) {
+        console.error("Invite email failed:", emailErr);
+        res.status(202).json({
+          message: `Invite created for ${email}, but email delivery failed`,
+          code: "INVITE_EMAIL_FAILED",
+          error: emailErr?.message || "Failed to send invite email",
+          emailSent: false,
+        });
+      }
     } catch (err: any) {
       if (err.name === "ZodError") {
         res.status(400).json({ error: "Invalid input", details: err.errors });

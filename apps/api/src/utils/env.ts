@@ -25,12 +25,9 @@ const envSchema = z.object({
   R2_SECRET_ACCESS_KEY: z.string().optional(),
   R2_BUCKET_NAME: z.string().optional(),
 
-  // Email (optional — password-reset emails won't send without it)
-  SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z.string().optional(),
-  SMTP_USER: z.string().optional(),
-  SMTP_PASS: z.string().optional(),
-  EMAIL_FROM: z.string().optional(),
+  // Email (optional — invite/reset/guest emails won't send without it)
+  SENDGRID_API_KEY: z.string().optional(),
+  FROM_EMAIL: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

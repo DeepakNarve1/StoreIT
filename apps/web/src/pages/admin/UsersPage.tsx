@@ -250,18 +250,32 @@ export default function UsersPage() {
         role: profile?.baseRole ?? inviteRole,
         roleProfileId: profileId || undefined,
       });
-      return res.data;
+      return res.data as {
+        message?: string;
+        code?: string;
+        error?: string;
+        emailSent?: boolean;
+      };
     },
-    onSuccess: () => {
-      setInviteSuccess(`Invite sent to ${inviteEmail}`);
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["invites"] });
+      queryClient.invalidateQueries({ queryKey: ["billing-status"] });
+
+      const emailSent = data?.emailSent !== false && data?.code !== "INVITE_EMAIL_FAILED";
+      if (emailSent) {
+        setInviteSuccess(`Invite sent to ${inviteEmail}`);
+        setInviteError("");
+        setIsLimitError(false);
+        setTimeout(() => setInviteSuccess(""), 4000);
+      } else {
+        setInviteSuccess("");
+        setIsLimitError(false);
+        setInviteError(data?.error || "Invite created, but email failed to send");
+      }
+
       setInviteEmail("");
       setInviteRole("VIEWER");
       setInviteRoleProfileId("");
-      setInviteError("");
-      setIsLimitError(false);
-      queryClient.invalidateQueries({ queryKey: ["invites"] });
-      queryClient.invalidateQueries({ queryKey: ["billing-status"] });
-      setTimeout(() => setInviteSuccess(""), 4000);
     },
     onError: (err: unknown) => {
       const error = err as {

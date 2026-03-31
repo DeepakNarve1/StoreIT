@@ -1,11 +1,55 @@
-import { Resend } from "resend";
+import sgMail from "@sendgrid/mail";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
-const FROM = process.env.FROM_EMAIL || "onboarding@resend.dev";
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+const FROM = process.env.FROM_EMAIL;
 const rawUrl =
   process.env.FRONTEND_URL || process.env.APP_URL || "http://localhost:5173";
 const APP_URL = rawUrl.endsWith("/") ? rawUrl.slice(0, -1) : rawUrl;
+
+function assertEmailConfigured() {
+  if (!SENDGRID_API_KEY) throw new Error("SENDGRID_API_KEY is not configured");
+  if (!FROM) throw new Error("FROM_EMAIL is not configured");
+  sgMail.setApiKey(SENDGRID_API_KEY);
+}
+
+type SendEmailResult = { messageId?: string; statusCode?: number };
+
+async function sendEmail(msg: {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+}): Promise<SendEmailResult> {
+  assertEmailConfigured();
+  try {
+    console.info(`[email] sendgrid: sending to=${msg.to} subject="${msg.subject}" from=${FROM}`);
+    const [resp] = (await sgMail.send({ ...msg, from: FROM! })) as any[];
+    const messageId =
+      resp?.headers?.["x-message-id"] ||
+      resp?.headers?.["X-Message-Id"] ||
+      resp?.headers?.["x-message-id".toLowerCase()];
+    console.info(
+      `[email] sendgrid: accepted status=${resp?.statusCode} messageId=${messageId ?? "n/a"}`,
+    );
+    return { statusCode: resp?.statusCode, messageId };
+  } catch (err) {
+    console.error("Email send error:", err);
+    const errorObj = err as any;
+    const statusCode =
+      typeof err === "object" && err !== null && "code" in err ? errorObj.code : undefined;
+    const providerMessage = errorObj?.response?.body?.errors?.[0]?.message as
+      | string
+      | undefined;
+    if (statusCode === 401) {
+      if (providerMessage) {
+        throw new Error(`SendGrid unauthorized (401): ${providerMessage}`);
+      }
+      throw new Error("SendGrid unauthorized (401). Check your SendGrid API key/account.");
+    }
+    if (providerMessage) throw new Error(`Failed to send email: ${providerMessage}`);
+    throw new Error("Failed to send email");
+  }
+}
 
 // ─── INVITE EMAIL ─────────────────────────────────────────────────────────────
 export const sendInviteEmail = async ({
@@ -23,8 +67,7 @@ export const sendInviteEmail = async ({
 }) => {
   const inviteUrl = `${APP_URL}/invite/${token}`;
 
-  const { data, error } = await resend.emails.send({
-    from: FROM,
+  return await sendEmail({
     to: email,
     subject: `You've been invited to join ${tenantName}`,
     html: `
@@ -89,13 +132,6 @@ export const sendInviteEmail = async ({
       </html>
     `,
   });
-
-  if (error) {
-    console.error("Email send error:", error);
-    throw new Error("Failed to send invite email");
-  }
-
-  return data;
 };
 
 export const sendPasswordResetEmail = async ({
@@ -109,8 +145,7 @@ export const sendPasswordResetEmail = async ({
 }) => {
   const resetUrl = `${APP_URL}/reset-password/${token}`;
 
-  const { error } = await resend.emails.send({
-    from: FROM,
+  await sendEmail({
     to: email,
     subject: "Reset your StoreIT password",
     html: `
@@ -137,8 +172,6 @@ export const sendPasswordResetEmail = async ({
         </div>
       </body>`,
   });
-
-  if (error) throw new Error("Failed to send reset email");
 };
 
 // ─── GUEST ACCESS EMAIL ────────────────────────────────────────────────────────
@@ -169,8 +202,7 @@ export const sendGuestAccessEmail = async ({
     year: "numeric",
   });
 
-  const { error } = await resend.emails.send({
-    from: FROM,
+  await sendEmail({
     to: email,
     subject: `${tenantName} shared a file with you: ${label}`,
     html: `
@@ -216,7 +248,5 @@ export const sendGuestAccessEmail = async ({
       </html>
     `,
   });
-
-  if (error) throw new Error("Failed to send guest access email");
 };
 
