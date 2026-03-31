@@ -119,6 +119,19 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
         select: fileSelect,
       });
     } else {
+      const userRow = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { departmentId: true },
+      });
+      const departmentOr = userRow?.departmentId
+        ? [
+            {
+              grantedTo: "department" as const,
+              departmentId: userRow.departmentId,
+            },
+          ]
+        : [];
+
       // Collect file IDs the user can access:
       // 1. Direct file-level permissions
       const filePerms = await prisma.permission.findMany({
@@ -128,16 +141,7 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
           OR: [
             { grantedTo: "all" },
             { grantedTo: "user", userId },
-            ...(await prisma.user
-              .findUnique({
-                where: { id: userId },
-                select: { departmentId: true },
-              })
-              .then((u) =>
-                u?.departmentId
-                  ? [{ grantedTo: "department", departmentId: u.departmentId }]
-                  : [],
-              )),
+            ...departmentOr,
           ],
           AND: [
             { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
@@ -155,16 +159,7 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
           OR: [
             { grantedTo: "all" },
             { grantedTo: "user", userId },
-            ...(await prisma.user
-              .findUnique({
-                where: { id: userId },
-                select: { departmentId: true },
-              })
-              .then((u) =>
-                u?.departmentId
-                  ? [{ grantedTo: "department", departmentId: u.departmentId }]
-                  : [],
-              )),
+            ...departmentOr,
           ],
           AND: [
             { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },

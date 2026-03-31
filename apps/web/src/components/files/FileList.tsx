@@ -26,7 +26,7 @@ import {
   Lock,
   Unlock,
 } from "lucide-react";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { useAuthStore } from "../../store/authStore";
 import type { CapabilityMap } from "../../hooks/useFileCapabilities";
 
@@ -179,7 +179,7 @@ function ApprovalTooltip({
   );
 }
 
-export default function FileList({
+function FileList({
   files,
   onFileClick,
   onDelete,
@@ -949,3 +949,5 @@ export default function FileList({
     </div>
   );
 }
+
+export default memo(FileList);

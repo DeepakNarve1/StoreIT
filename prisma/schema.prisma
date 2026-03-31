@@ -182,6 +182,8 @@ model Folder {
   @@index([tenantId])
   @@index([tenantId, parentId])
   @@index([tenantId, categoryId])
+  // List children / browse: WHERE tenantId AND isDeleted AND parentId
+  @@index([tenantId, isDeleted, parentId])
 }
 
 // ─── FILE ────────────────────────────────────────────────────────────────────
@@ -237,6 +239,9 @@ comments FileComment[]
   @@index([tenantId, folderId])
   @@index([tenantId, categoryId])
   @@index([tenantId, approvalStatus])
+  // Browse + trash filters: tenant + deleted flag + folder / uploader
+  @@index([tenantId, isDeleted, folderId])
+  @@index([tenantId, isDeleted, uploadedById])
 }
 
 // ─── FILE VERSION ─────────────────────────────────────────────────────────────
@@ -305,7 +310,7 @@ model Permission {
   fileId         String?
   file           File?     @relation(fields: [fileId], references: [id])
 
-  @@index([resourceId, resourceType])
+  @@index([resourceType, resourceId])
   @@index([userId])
   @@index([departmentId])
 }
@@ -361,6 +366,7 @@ model OneTimeLink {
   file       File      @relation(fields: [fileId], references: [id])
 
   @@index([token])
+  @@index([tenantId])
 }
 
 // ─── FILE METADATA ────────────────────────────────────────────────────────────
@@ -372,8 +378,9 @@ model FileMetadata {
   file      File     @relation(fields: [fileId], references: [id])
   createdAt DateTime @default(now())
 
-@@map("file_metadata")
+  @@map("file_metadata")
   @@index([fileId])
+  @@unique([fileId, key])
 }
 
 model FileComment {
@@ -556,5 +563,6 @@ model FolderMetadataField {
 
   @@index([tenantId, folderId])
   @@index([tenantId, key])
+  @@unique([folderId, key])
   @@map("folder_metadata_fields")
 }

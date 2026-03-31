@@ -9,6 +9,7 @@ import {
   GripVertical,
 } from "lucide-react";
 import clsx from "clsx";
+import { memo } from "react";
 
 interface FileItem {
   id: string;
@@ -82,7 +83,7 @@ const formatDate = (dateStr: string) => {
   });
 };
 
-export default function FileGrid({
+function FileGrid({
   files,
   onFileClick,
   onStar,
@@ -187,3 +188,5 @@ export default function FileGrid({
     </div>
   );
 }
+
+export default memo(FileGrid);

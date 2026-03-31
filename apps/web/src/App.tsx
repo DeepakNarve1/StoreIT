@@ -1,30 +1,33 @@
+import { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuthStore } from "./store/authStore";
 import LoginPage from "./pages/LoginPage";
-import DashboardPage from "./pages/DashboardPage";
-import FileBrowserPage from "./pages/FileBrowserPage";
-import CategoryPage from "./pages/CategoryPage";
 import AcceptInvitePage from "./pages/AcceptInvitePage";
-import UsersPage from "./pages/admin/UsersPage";
-import RecentPage from "./pages/RecentPage";
-import StarredPage from "./pages/StarredPage";
-import TagsPage from "./pages/TagsPage";
-import TrashPage from "./pages/TrashPage";
-import SettingsPage from "./pages/admin/SettingsPage";
-import OrgsPage from "./pages/superadmin/OrgsPage";
 import OneTimeViewPage from "./pages/OneTimeViewPage";
-import AuditLogPage from "./pages/admin/AuditLogPage";
-import SearchPage from "./pages/SearchPage";
 import { ToastContainer } from "./components/ui/Toast";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
-import BillingPage from "./pages/admin/BillingPage";
-import TemplatesPage from "./pages/admin/TemplatesPage";
-import SharedLinksPage from "./pages/admin/SharedLinksPage";
-import PermissionsOverviewPage from "./pages/admin/PermissionsOverviewPage";
-import GuestAccessPage from "./pages/GuestAccessPage";
-import MetadataPage from "./pages/MetadataPage";
+const DashboardPage = lazy(() => import("./pages/DashboardPage"));
+const FileBrowserPage = lazy(() => import("./pages/FileBrowserPage"));
+const CategoryPage = lazy(() => import("./pages/CategoryPage"));
+const UsersPage = lazy(() => import("./pages/admin/UsersPage"));
+const RecentPage = lazy(() => import("./pages/RecentPage"));
+const StarredPage = lazy(() => import("./pages/StarredPage"));
+const TagsPage = lazy(() => import("./pages/TagsPage"));
+const TrashPage = lazy(() => import("./pages/TrashPage"));
+const SettingsPage = lazy(() => import("./pages/admin/SettingsPage"));
+const OrgsPage = lazy(() => import("./pages/superadmin/OrgsPage"));
+const AuditLogPage = lazy(() => import("./pages/admin/AuditLogPage"));
+const SearchPage = lazy(() => import("./pages/SearchPage"));
+const BillingPage = lazy(() => import("./pages/admin/BillingPage"));
+const TemplatesPage = lazy(() => import("./pages/admin/TemplatesPage"));
+const SharedLinksPage = lazy(() => import("./pages/admin/SharedLinksPage"));
+const PermissionsOverviewPage = lazy(
+  () => import("./pages/admin/PermissionsOverviewPage"),
+);
+const GuestAccessPage = lazy(() => import("./pages/GuestAccessPage"));
+const MetadataPage = lazy(() => import("./pages/MetadataPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -75,161 +78,181 @@ function SuperadminRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function PageLoader() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
+      <div className="text-sm text-gray-500 dark:text-gray-400">Loading...</div>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/invite/:token" element={<AcceptInvitePage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route
-            path="/reset-password/:token"
-            element={<ResetPasswordPage />}
-          />
-          <Route
-            path="/"
-            element={
-              <AdminRoute>
-                <DashboardPage />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/browse/:folderId?"
-            element={
-              <ProtectedRoute>
-                <FileBrowserPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/category/:categoryId"
-            element={
-              <ProtectedRoute>
-                <CategoryPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/users"
-            element={
-              <AdminRoute>
-                <UsersPage />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/recent"
-            element={
-              <ProtectedRoute>
-                <RecentPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/starred"
-            element={
-              <ProtectedRoute>
-                <StarredPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/audit"
-            element={
-              <ProtectedRoute allowedRoles={["ORG_ADMIN", "MANAGER", "SUPERADMIN"]}>
-                <AuditLogPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/templates"
-            element={
-              <ProtectedRoute allowedRoles={["ORG_ADMIN", "MANAGER", "SUPERADMIN"]}>
-                <TemplatesPage />
-              </ProtectedRoute>
-            }
-          />
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/invite/:token" element={<AcceptInvitePage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route
+              path="/reset-password/:token"
+              element={<ResetPasswordPage />}
+            />
+            <Route
+              path="/"
+              element={
+                <AdminRoute>
+                  <DashboardPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/browse/:folderId?"
+              element={
+                <ProtectedRoute>
+                  <FileBrowserPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/category/:categoryId"
+              element={
+                <ProtectedRoute>
+                  <CategoryPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/users"
+              element={
+                <AdminRoute>
+                  <UsersPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/recent"
+              element={
+                <ProtectedRoute>
+                  <RecentPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/starred"
+              element={
+                <ProtectedRoute>
+                  <StarredPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/audit"
+              element={
+                <ProtectedRoute
+                  allowedRoles={["ORG_ADMIN", "MANAGER", "SUPERADMIN"]}
+                >
+                  <AuditLogPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/templates"
+              element={
+                <ProtectedRoute
+                  allowedRoles={["ORG_ADMIN", "MANAGER", "SUPERADMIN"]}
+                >
+                  <TemplatesPage />
+                </ProtectedRoute>
+              }
+            />
 
-          <Route
-            path="/tags"
-            element={
-              <ProtectedRoute>
-                <TagsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/trash"
-            element={
-              <ProtectedRoute>
-                <TrashPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/settings"
-            element={
-              <AdminRoute>
-                <SettingsPage />
-              </AdminRoute>
-            }
-          />
-          <Route path="/superadmin/orgs" element={<SuperadminRoute><OrgsPage /></SuperadminRoute>} />
-          <Route path="/view/:token" element={<OneTimeViewPage />} />
-          <Route path="/guest/:token" element={<GuestAccessPage />} />
-          <Route path="/admin/audit" element={<AdminRoute><AuditLogPage /></AdminRoute>} />
-          <Route
-            path="/search"
-            element={
-              <ProtectedRoute>
-                <SearchPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/metadata/file/:fileId"
-            element={
-              <ProtectedRoute>
-                <MetadataPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/metadata/folder/:folderId"
-            element={
-              <ProtectedRoute>
-                <MetadataPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/billing"
-            element={
-              <AdminRoute>
-                <BillingPage />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/admin/shared-links"
-            element={
-              <AdminRoute>
-                <SharedLinksPage />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/admin/permissions"
-            element={
-              <AdminRoute>
-                <PermissionsOverviewPage />
-              </AdminRoute>
-            }
-          />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            <Route
+              path="/tags"
+              element={
+                <ProtectedRoute>
+                  <TagsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/trash"
+              element={
+                <ProtectedRoute>
+                  <TrashPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/settings"
+              element={
+                <AdminRoute>
+                  <SettingsPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/superadmin/orgs"
+              element={
+                <SuperadminRoute>
+                  <OrgsPage />
+                </SuperadminRoute>
+              }
+            />
+            <Route path="/view/:token" element={<OneTimeViewPage />} />
+            <Route path="/guest/:token" element={<GuestAccessPage />} />
+            <Route
+              path="/search"
+              element={
+                <ProtectedRoute>
+                  <SearchPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/metadata/file/:fileId"
+              element={
+                <ProtectedRoute>
+                  <MetadataPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/metadata/folder/:folderId"
+              element={
+                <ProtectedRoute>
+                  <MetadataPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/billing"
+              element={
+                <AdminRoute>
+                  <BillingPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/shared-links"
+              element={
+                <AdminRoute>
+                  <SharedLinksPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/admin/permissions"
+              element={
+                <AdminRoute>
+                  <PermissionsOverviewPage />
+                </AdminRoute>
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
         <ToastContainer />
       </BrowserRouter>
     </QueryClientProvider>

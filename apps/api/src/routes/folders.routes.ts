@@ -47,7 +47,10 @@ async function getVisibleFolderIdSetForUser(opts: {
     where: {
       resourceType: "folder",
       OR: orClauses,
-      AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
+      AND: [
+        { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+        { folder: { tenantId, isDeleted: false } },
+      ],
     },
     select: { resourceId: true, action: true, capabilities: true },
   });

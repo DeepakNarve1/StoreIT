@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
@@ -29,30 +36,14 @@ import {
 import AppShell from "../components/layout/AppShell";
 import FileGrid from "../components/files/FileGrid";
 import FileList from "../components/files/FileList";
-import UploadZone from "../components/files/UploadZone";
-import FileDocumentPreviewModal from "../components/files/FileDocumentPreviewModal";
-import FileDetailsView from "../components/files/FileDetailsView";
-import PermissionsPanel from "../components/permissions/PermissionsPanel";
 import clsx from "clsx";
 import api from "../api/axios";
-import FileVersionsModal from "../components/files/FileVersionsModal";
-import MoveFileModal from "../components/files/MoveFileModal";
-import AssignCategoryModal from "../components/files/AssignCategoryModal";
-import AssignTagModal from "../components/files/AssignTagModal.tsx";
 import { useToast } from "../components/ui/toastStore";
-import FileCommentsPanel from "../components/files/FileCommentsPanel";
-import RetentionModal, {
-  type RetentionAction,
-} from "../components/files/RetentionModal";
-import RetentionDetailsModal from "../components/files/RetentionDetailsModal";
+import { type RetentionAction } from "../components/files/RetentionModal";
 import { useAuthStore } from "../store/authStore";
-import ApprovalDetailPanel from "../components/files/ApprovalDetailPanel";
 import { useFileCapabilities } from "../hooks/useFileCapabilities";
 import { useFolderCapabilities } from "../hooks/useFolderCapabilities";
 import DeleteModal from "../components/common/DeleteModal";
-import ApprovalWorkflowPanel from "../components/files/ApprovalWorkflowPanel";
-import ApprovalWorkflowComposerModal from "../components/files/ApprovalWorkflowComposerModal";
-import ApprovalWorkflowCenterPanel from "../components/files/ApprovalWorkflowCenterPanel";
 import axios from "axios";
 import type { BrowserFileItem, CategoryOption } from "../types/file-browser";
 import type {
@@ -61,6 +52,42 @@ import type {
 } from "../types/workflow";
 
 type ViewMode = "grid" | "list";
+
+const UploadZone = lazy(() => import("../components/files/UploadZone"));
+const FileDocumentPreviewModal = lazy(
+  () => import("../components/files/FileDocumentPreviewModal"),
+);
+const FileDetailsView = lazy(() => import("../components/files/FileDetailsView"));
+const PermissionsPanel = lazy(
+  () => import("../components/permissions/PermissionsPanel"),
+);
+const FileVersionsModal = lazy(
+  () => import("../components/files/FileVersionsModal"),
+);
+const MoveFileModal = lazy(() => import("../components/files/MoveFileModal"));
+const AssignCategoryModal = lazy(
+  () => import("../components/files/AssignCategoryModal"),
+);
+const AssignTagModal = lazy(() => import("../components/files/AssignTagModal"));
+const FileCommentsPanel = lazy(
+  () => import("../components/files/FileCommentsPanel"),
+);
+const RetentionModal = lazy(() => import("../components/files/RetentionModal"));
+const RetentionDetailsModal = lazy(
+  () => import("../components/files/RetentionDetailsModal"),
+);
+const ApprovalDetailPanel = lazy(
+  () => import("../components/files/ApprovalDetailPanel"),
+);
+const ApprovalWorkflowPanel = lazy(
+  () => import("../components/files/ApprovalWorkflowPanel"),
+);
+const ApprovalWorkflowComposerModal = lazy(
+  () => import("../components/files/ApprovalWorkflowComposerModal"),
+);
+const ApprovalWorkflowCenterPanel = lazy(
+  () => import("../components/files/ApprovalWorkflowCenterPanel"),
+);
 
 interface StoreITem {
   id: string;
@@ -1059,19 +1086,19 @@ export default function FileBrowserPage() {
     }, 150);
   };
 
-  const handleFileDragStart = (file: BrowserFileItem) => {
+  const handleFileDragStart = useCallback((file: BrowserFileItem) => {
     const ids =
       selectedFiles.length > 1 && selectedFiles.includes(file.id)
         ? selectedFiles
         : [file.id];
     setDraggedFileIds(ids);
-  };
+  }, [selectedFiles]);
 
-  const handleFileClick = (file: BrowserFileItem) => {
+  const handleFileClick = useCallback((file: BrowserFileItem) => {
     setSelectedFiles([]);
     setSelectedFolders([]);
     setDetailFile(file);
-  };
+  }, []);
   const handleOpenVersionUpload = (file: BrowserFileItem) => {
     setVersionUploadTarget(file);
     versionFileInputRef.current?.click();
@@ -1121,9 +1148,9 @@ export default function FileBrowserPage() {
     });
     setVersionUploadTarget(null);
   };
-  const handleShare = (file: BrowserFileItem) => {
+  const handleShare = useCallback((file: BrowserFileItem) => {
     setPermissionsResource({ id: file.id, type: "file", name: file.name });
-  };
+  }, []);
   const handleFolderShare = (folder: StoreITem) => {
     setPermissionsResource({
       id: folder.id,
@@ -1151,59 +1178,70 @@ export default function FileBrowserPage() {
       setZipFoldersProgress(null);
     }
   };
-  const handleSort = (col: "name" | "size" | "createdAt" | "mimeType") => {
-    if (sortBy === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else {
-      setSortBy(col);
-      setSortDir("asc");
-    }
-  };
-  const handleDelete = (file: BrowserFileItem) => setDeleteTarget(file);
+  const handleSort = useCallback(
+    (col: "name" | "size" | "createdAt" | "mimeType") => {
+      if (sortBy === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      else {
+        setSortBy(col);
+        setSortDir("asc");
+      }
+    },
+    [sortBy],
+  );
+  const handleDelete = useCallback((file: BrowserFileItem) => {
+    setDeleteTarget(file);
+  }, []);
 
   const fileCan = (fileId: string, cap: string) =>
     canWrite || capMap[fileId]?.[cap] === true;
   const folderCan = (folderId: string, cap: string) =>
     canWrite || folderCapMap[folderId]?.[cap] === true;
-  const reorderFileItems = (fromId: string, toId: string) => {
-    setManualOrder((prev) => {
-      const next = {
-        ...prev,
-        files: reorderIds(
-          files.map((f) => f.id),
-          fromId,
-          toId,
-        ),
-      };
-      if (folderId) {
-        saveFolderOrder.mutate({
-          folderId,
-          files: next.files,
-          folders: next.folders,
-        });
-      }
-      return next;
-    });
-  };
-  const reorderFolderItems = (fromId: string, toId: string) => {
-    setManualOrder((prev) => {
-      const next = {
-        ...prev,
-        folders: reorderIds(
-          folders.map((f) => f.id),
-          fromId,
-          toId,
-        ),
-      };
-      if (folderId) {
-        saveFolderOrder.mutate({
-          folderId,
-          files: next.files,
-          folders: next.folders,
-        });
-      }
-      return next;
-    });
-  };
+  const reorderFileItems = useCallback(
+    (fromId: string, toId: string) => {
+      setManualOrder((prev) => {
+        const next = {
+          ...prev,
+          files: reorderIds(
+            files.map((f) => f.id),
+            fromId,
+            toId,
+          ),
+        };
+        if (folderId) {
+          saveFolderOrder.mutate({
+            folderId,
+            files: next.files,
+            folders: next.folders,
+          });
+        }
+        return next;
+      });
+    },
+    [files, folderId, saveFolderOrder],
+  );
+  const reorderFolderItems = useCallback(
+    (fromId: string, toId: string) => {
+      setManualOrder((prev) => {
+        const next = {
+          ...prev,
+          folders: reorderIds(
+            folders.map((f) => f.id),
+            fromId,
+            toId,
+          ),
+        };
+        if (folderId) {
+          saveFolderOrder.mutate({
+            folderId,
+            files: next.files,
+            folders: next.folders,
+          });
+        }
+        return next;
+      });
+    },
+    [folders, folderId, saveFolderOrder],
+  );
 
   const selectedFileObjects = files.filter((f) => selectedFiles.includes(f.id));
   const singleSelectedFile =
@@ -1213,13 +1251,16 @@ export default function FileBrowserPage() {
   const workflowInboxItems = workflowInboxData?.items ?? [];
   const workflowToolbarFile = detailFile ?? singleSelectedFile ?? null;
 
-  const openWorkflowComposer = (
-    file: { id: string; name: string },
-    initialApproverIds: string[] = [],
-  ) => {
-    setWorkflowTemplateApproverIds(initialApproverIds);
-    setWorkflowComposerFile({ id: file.id, name: file.name });
-  };
+  const openWorkflowComposer = useCallback(
+    (
+      file: { id: string; name: string },
+      initialApproverIds: string[] = [],
+    ) => {
+      setWorkflowTemplateApproverIds(initialApproverIds);
+      setWorkflowComposerFile({ id: file.id, name: file.name });
+    },
+    [],
+  );
 
   const patchDetailWorkflowState = (
     workflow: StartedApprovalWorkflow | WorkflowWithFile,
@@ -1303,7 +1344,9 @@ export default function FileBrowserPage() {
     if (!newFolderName.trim()) return;
     createFolder.mutate(newFolderName.trim());
   };
-  const handleMove = (file: BrowserFileItem) => setMoveFiles([file]);
+  const handleMove = useCallback((file: BrowserFileItem) => {
+    setMoveFiles([file]);
+  }, []);
   const handleFolderAssignCategory = (folder: StoreITem) =>
     setCategoryResource({
       id: folder.id,
@@ -1312,14 +1355,71 @@ export default function FileBrowserPage() {
       currentCategoryId: folder.categoryId,
     });
 
-  const openFileMetadataPage = (file: { id: string; name: string }) => {
-    navigate(`/metadata/file/${file.id}`, {
-      state: {
-        fileName: file.name,
-        backPath: folderId ? `/browse/${folderId}` : "/browse",
-      },
+  const openFileMetadataPage = useCallback(
+    (file: { id: string; name: string }) => {
+      navigate(`/metadata/file/${file.id}`, {
+        state: {
+          fileName: file.name,
+          backPath: folderId ? `/browse/${folderId}` : "/browse",
+        },
+      });
+    },
+    [navigate, folderId],
+  );
+
+  const handleStarFile = useCallback(
+    (file: BrowserFileItem) => {
+      starMutation.mutate(file);
+    },
+    [starMutation],
+  );
+
+  const handleFileDragEnd = useCallback(() => {
+    setDraggedFileIds([]);
+  }, []);
+
+  const handleRenameFileOpen = useCallback((file: BrowserFileItem) => {
+    setRenameFile(file);
+    setRenameName(file.name);
+  }, []);
+
+  const handleLockFile = useCallback(
+    (file: BrowserFileItem) => {
+      lockMutation.mutate({
+        fileId: file.id,
+        isLocked: !!file.isLocked,
+      });
+    },
+    [lockMutation],
+  );
+
+  const handleAssignCategoryFile = useCallback((file: BrowserFileItem) => {
+    setCategoryResource({
+      id: file.id,
+      type: "file",
+      name: file.name,
+      currentCategoryId: file.categoryId ?? null,
     });
-  };
+  }, []);
+
+  const handleAssignTagFile = useCallback((file: BrowserFileItem) => {
+    setTagFile(file);
+  }, []);
+
+  const handleCommentsOpen = useCallback((file: BrowserFileItem) => {
+    setCommentsFile(file);
+  }, []);
+
+  const handleSubmitApprovalOpen = useCallback(
+    (file: BrowserFileItem) => {
+      openWorkflowComposer(file);
+    },
+    [openWorkflowComposer],
+  );
+
+  const handleApprovalDetailOpen = useCallback((file: BrowserFileItem) => {
+    setWorkflowPanelFile({ id: file.id, name: file.name });
+  }, []);
 
   const openFolderMetadataPage = (folder: { id: string; name: string }) => {
     if (!folderCan(folder.id, "edit_metadata")) {
@@ -1595,48 +1695,52 @@ export default function FileBrowserPage() {
     )}:${pad(d.getMinutes())}`;
   };
 
-  const getCurrentRetentionJobForFile = (
-    fileId: string,
-  ): RetentionJob | null => {
-    const jobs = loadRetentionQueue();
-    let best: RetentionJob | null = null;
+  const getCurrentRetentionJobForFile = useCallback(
+    (fileId: string): RetentionJob | null => {
+      const jobs = loadRetentionQueue();
+      let best: RetentionJob | null = null;
 
-    for (const job of jobs) {
-      if (job.scope !== "file") continue;
-      if (!(job.resourceIds ?? []).includes(fileId)) continue;
+      for (const job of jobs) {
+        if (job.scope !== "file") continue;
+        if (!(job.resourceIds ?? []).includes(fileId)) continue;
 
-      // Infinite wins over finite.
-      if (job.applyAt === null) {
-        best = job;
-        continue;
+        // Infinite wins over finite.
+        if (job.applyAt === null) {
+          best = job;
+          continue;
+        }
+
+        if (!best) {
+          best = job;
+          continue;
+        }
+
+        // If current best is Infinite, it already wins.
+        if (best.applyAt === null) continue;
+
+        if (
+          best.applyAt !== null &&
+          job.applyAt !== null &&
+          job.applyAt < best.applyAt
+        ) {
+          best = job;
+        }
       }
 
-      if (!best) {
-        best = job;
-        continue;
-      }
+      return best;
+    },
+    [],
+  );
 
-      // If current best is Infinite, it already wins.
-      if (best.applyAt === null) continue;
-
-      if (
-        best.applyAt !== null &&
-        job.applyAt !== null &&
-        job.applyAt < best.applyAt
-      ) {
-        best = job;
-      }
-    }
-
-    return best;
-  };
-
-  const openRetentionDetails = (file: BrowserFileItem) => {
-    const job = getCurrentRetentionJobForFile(file.id);
-    setRetentionDetailsFile(file);
-    setRetentionDetailsJob(job);
-    setShowRetentionDetailsModal(true);
-  };
+  const openRetentionDetails = useCallback(
+    (file: BrowserFileItem) => {
+      const job = getCurrentRetentionJobForFile(file.id);
+      setRetentionDetailsFile(file);
+      setRetentionDetailsJob(job);
+      setShowRetentionDetailsModal(true);
+    },
+    [getCurrentRetentionJobForFile],
+  );
 
   const handleEditRetention = () => {
     if (!retentionDetailsFile) return;
@@ -2590,10 +2694,18 @@ export default function FileBrowserPage() {
                   <X size={14} />
                 </button>
               </div>
-              <UploadZone
-                folderId={folderId}
-                onUploadComplete={handleUploadComplete}
-              />
+              <Suspense
+                fallback={
+                  <div className="p-6 text-sm text-gray-500">
+                    Loading uploader...
+                  </div>
+                }
+              >
+                <UploadZone
+                  folderId={folderId}
+                  onUploadComplete={handleUploadComplete}
+                />
+              </Suspense>
             </div>
           )}
 
@@ -2794,69 +2906,71 @@ export default function FileBrowserPage() {
 
           {/* Main content */}
           {detailFile ? (
-            <FileDetailsView
-              file={detailFile}
-              onBack={() => setDetailFile(null)}
-              onOpenPreview={(file) => setPreviewFile(file)}
-              breadcrumbItems={[
-                { id: "root", label: "All Files", clickable: true },
-                ...ancestors.map((a) => ({
-                  id: a.id,
-                  label: a.name,
-                  clickable: true,
-                })),
-                { id: detailFile.id, label: detailFile.name, clickable: false },
-              ]}
-              onBreadcrumbClick={(item) => {
-                if (!item.clickable) return;
-                setDetailFile(null);
-                if (item.id === "root") {
-                  navigate("/browse");
-                  return;
+            <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading details...</div>}>
+              <FileDetailsView
+                file={detailFile}
+                onBack={() => setDetailFile(null)}
+                onOpenPreview={(file) => setPreviewFile(file)}
+                breadcrumbItems={[
+                  { id: "root", label: "All Files", clickable: true },
+                  ...ancestors.map((a) => ({
+                    id: a.id,
+                    label: a.name,
+                    clickable: true,
+                  })),
+                  { id: detailFile.id, label: detailFile.name, clickable: false },
+                ]}
+                onBreadcrumbClick={(item) => {
+                  if (!item.clickable) return;
+                  setDetailFile(null);
+                  if (item.id === "root") {
+                    navigate("/browse");
+                    return;
+                  }
+                  navigate(`/browse/${item.id}`);
+                }}
+                retentionLabel={(() => {
+                  const job = getCurrentRetentionJobForFile(detailFile.id);
+                  if (!job) return "Not set";
+                  if (job.applyAt === null) return "Infinite";
+                  return new Date(job.applyAt).toLocaleString();
+                })()}
+                onOpenRetention={(file) => openRetentionDetails(file)}
+                onOpenWorkflow={(file) =>
+                  setWorkflowPanelFile({ id: file.id, name: file.name })
                 }
-                navigate(`/browse/${item.id}`);
-              }}
-              retentionLabel={(() => {
-                const job = getCurrentRetentionJobForFile(detailFile.id);
-                if (!job) return "Not set";
-                if (job.applyAt === null) return "Infinite";
-                return new Date(job.applyAt).toLocaleString();
-              })()}
-              onOpenRetention={(file) => openRetentionDetails(file)}
-              onOpenWorkflow={(file) =>
-                setWorkflowPanelFile({ id: file.id, name: file.name })
-              }
-              onToggleLock={(file) => {
-                const previous = !!file.isLocked;
-                setDetailFile((prev) =>
-                  prev && prev.id === file.id
-                    ? { ...prev, isLocked: !previous }
-                    : prev,
-                );
-                lockMutation.mutate(
-                  { fileId: file.id, isLocked: previous },
-                  {
-                    onError: () => {
-                      setDetailFile((prev) =>
-                        prev && prev.id === file.id
-                          ? { ...prev, isLocked: previous }
-                          : prev,
-                      );
+                onToggleLock={(file) => {
+                  const previous = !!file.isLocked;
+                  setDetailFile((prev) =>
+                    prev && prev.id === file.id
+                      ? { ...prev, isLocked: !previous }
+                      : prev,
+                  );
+                  lockMutation.mutate(
+                    { fileId: file.id, isLocked: previous },
+                    {
+                      onError: () => {
+                        setDetailFile((prev) =>
+                          prev && prev.id === file.id
+                            ? { ...prev, isLocked: previous }
+                            : prev,
+                        );
+                      },
                     },
-                  },
-                );
-              }}
-              onUploadNewVersion={(file) => handleOpenVersionUpload(file)}
-              onOpenVersionHistory={(file) => setVersionsFile(file)}
-              canViewMetadata={fileCan(detailFile.id, "view_metadata")}
-              isLocking={lockMutation.isPending}
-              isUploadingVersion={uploadNewVersionMutation.isPending}
-              workflowButtonLabel={
-                detailFile.approvalStatus === "in_review"
-                  ? "Open workflow"
-                  : "Approval workflow"
-              }
-            />
+                  );
+                }}
+                onUploadNewVersion={(file) => handleOpenVersionUpload(file)}
+                onOpenVersionHistory={(file) => setVersionsFile(file)}
+                canViewMetadata={fileCan(detailFile.id, "view_metadata")}
+                isLocking={lockMutation.isPending}
+                isUploadingVersion={uploadNewVersionMutation.isPending}
+                workflowButtonLabel={
+                  detailFile.approvalStatus === "in_review"
+                    ? "Open workflow"
+                    : "Approval workflow"
+                }
+              />
+            </Suspense>
           ) : isLoading ? (
             <div className="flex items-center justify-center py-20">
               <div className="w-6 h-6 border-2 border-primary-500 dark:border-pink-500 border-t-transparent rounded-full animate-spin" />
@@ -3393,9 +3507,9 @@ export default function FileBrowserPage() {
                     <FileGrid
                       files={files}
                       onFileClick={handleFileClick}
-                      onStar={(file) => starMutation.mutate(file)}
+                      onStar={handleStarFile}
                       onDragStart={handleFileDragStart}
-                      onDragEnd={() => setDraggedFileIds([])}
+                      onDragEnd={handleFileDragEnd}
                       onReorder={reorderFileItems}
                     />
                   ) : (
@@ -3406,42 +3520,25 @@ export default function FileBrowserPage() {
                       onShare={handleShare}
                       onVersions={handleVersions}
                       onMove={handleMove}
-                      onStar={(file) => starMutation.mutate(file)}
-                      onRename={(file) => {
-                        setRenameFile(file);
-                        setRenameName(file.name);
-                      }}
+                      onStar={handleStarFile}
+                      onRename={handleRenameFileOpen}
                       selectedIds={selectedFiles}
                       onSelectChange={setSelectedFiles}
                       sortBy={sortBy}
                       sortDir={sortDir}
                       onSort={handleSort}
                       onDragStart={handleFileDragStart}
-                      onDragEnd={() => setDraggedFileIds([])}
-                      onMetadata={(file) => openFileMetadataPage(file)}
-                      onComments={(file) => setCommentsFile(file)}
-                      onSubmitApproval={(file) => openWorkflowComposer(file)}
-                      onLock={(file) =>
-                        lockMutation.mutate({
-                          fileId: file.id,
-                          isLocked: !!file.isLocked,
-                        })
-                      }
-                      onAssignCategory={(file) =>
-                        setCategoryResource({
-                          id: file.id,
-                          type: "file",
-                          name: file.name,
-                          currentCategoryId: file.categoryId ?? null,
-                        })
-                      }
-                      onAssignTag={(file) => setTagFile(file)}
-                      onApprovalDetail={(file) =>
-                        setWorkflowPanelFile({ id: file.id, name: file.name })
-                      }
+                      onDragEnd={handleFileDragEnd}
+                      onMetadata={openFileMetadataPage}
+                      onComments={handleCommentsOpen}
+                      onSubmitApproval={handleSubmitApprovalOpen}
+                      onLock={handleLockFile}
+                      onAssignCategory={handleAssignCategoryFile}
+                      onAssignTag={handleAssignTagFile}
+                      onApprovalDetail={handleApprovalDetailOpen}
                       capabilitiesMap={capMap}
                       visibleColumns={visibleColumns}
-                      onRetentionClick={(file) => openRetentionDetails(file)}
+                      onRetentionClick={openRetentionDetails}
                       preserveOrder
                       onReorder={reorderFileItems}
                     />
@@ -3541,12 +3638,13 @@ export default function FileBrowserPage() {
         </div>
       </div>
 
-      {previewFile && (
-        <FileDocumentPreviewModal
-          file={previewFile}
-          onClose={() => setPreviewFile(null)}
-        />
-      )}
+      <Suspense fallback={null}>
+        {previewFile && (
+          <FileDocumentPreviewModal
+            file={previewFile}
+            onClose={() => setPreviewFile(null)}
+          />
+        )}
       <input
         ref={versionFileInputRef}
         type="file"
@@ -3557,95 +3655,95 @@ export default function FileBrowserPage() {
           e.currentTarget.value = "";
         }}
       />
-      {permissionsResource && (
-        <PermissionsPanel
-          resourceId={permissionsResource.id}
-          resourceType={permissionsResource.type}
-          resourceName={permissionsResource.name}
-          onClose={() => setPermissionsResource(null)}
-        />
-      )}
-      {versionsFile && (
-        <FileVersionsModal
-          file={versionsFile}
-          onClose={() => setVersionsFile(null)}
-        />
-      )}
-      {moveFiles.length > 0 && (
-        <MoveFileModal
-          files={moveFiles}
-          onClose={() => setMoveFiles([])}
-          onSuccess={(targetFolderId, movedFileIds) => {
-            applyImmediateMoveResult(movedFileIds, targetFolderId);
-            invalidateBrowserQueries();
-            setSelectedFiles((prev) =>
-              prev.filter((id) => !movedFileIds.includes(id)),
-            );
-          }}
-        />
-      )}
-      {categoryResource && (
-        <AssignCategoryModal
-          resourceId={categoryResource.id}
-          resourceType={categoryResource.type}
-          resourceName={categoryResource.name}
-          currentCategoryId={categoryResource.currentCategoryId}
-          onClose={() => setCategoryResource(null)}
-        />
-      )}
-      {/* ── Tag modal — opened from FileList onAssignTag ── */}
-      {tagFile && (
-        <AssignTagModal file={tagFile} onClose={() => setTagFile(null)} />
-      )}
-      {commentsFile && (
-        <FileCommentsPanel
-          fileId={commentsFile.id}
-          fileName={commentsFile.name}
-          onClose={() => setCommentsFile(null)}
-        />
-      )}
+        {permissionsResource && (
+          <PermissionsPanel
+            resourceId={permissionsResource.id}
+            resourceType={permissionsResource.type}
+            resourceName={permissionsResource.name}
+            onClose={() => setPermissionsResource(null)}
+          />
+        )}
+        {versionsFile && (
+          <FileVersionsModal
+            file={versionsFile}
+            onClose={() => setVersionsFile(null)}
+          />
+        )}
+        {moveFiles.length > 0 && (
+          <MoveFileModal
+            files={moveFiles}
+            onClose={() => setMoveFiles([])}
+            onSuccess={(targetFolderId, movedFileIds) => {
+              applyImmediateMoveResult(movedFileIds, targetFolderId);
+              invalidateBrowserQueries();
+              setSelectedFiles((prev) =>
+                prev.filter((id) => !movedFileIds.includes(id)),
+              );
+            }}
+          />
+        )}
+        {categoryResource && (
+          <AssignCategoryModal
+            resourceId={categoryResource.id}
+            resourceType={categoryResource.type}
+            resourceName={categoryResource.name}
+            currentCategoryId={categoryResource.currentCategoryId}
+            onClose={() => setCategoryResource(null)}
+          />
+        )}
+        {/* ── Tag modal — opened from FileList onAssignTag ── */}
+        {tagFile && (
+          <AssignTagModal file={tagFile} onClose={() => setTagFile(null)} />
+        )}
+        {commentsFile && (
+          <FileCommentsPanel
+            fileId={commentsFile.id}
+            fileName={commentsFile.name}
+            onClose={() => setCommentsFile(null)}
+          />
+        )}
 
-      {workflowComposerFile && (
-        <ApprovalWorkflowComposerModal
-          file={workflowComposerFile}
-          initialApproverUserIds={workflowTemplateApproverIds}
-          onClose={() => {
-            setWorkflowComposerFile(null);
-            setWorkflowTemplateApproverIds([]);
-          }}
-          onSuccess={(workflow) => {
-            patchDetailWorkflowState(workflow);
-            setWorkflowPanelFile(workflowComposerFile);
-          }}
-        />
-      )}
+        {workflowComposerFile && (
+          <ApprovalWorkflowComposerModal
+            file={workflowComposerFile}
+            initialApproverUserIds={workflowTemplateApproverIds}
+            onClose={() => {
+              setWorkflowComposerFile(null);
+              setWorkflowTemplateApproverIds([]);
+            }}
+            onSuccess={(workflow) => {
+              patchDetailWorkflowState(workflow);
+              setWorkflowPanelFile(workflowComposerFile);
+            }}
+          />
+        )}
 
-      {showWorkflowCenter && (
-        <ApprovalWorkflowCenterPanel
-          onClose={() => setShowWorkflowCenter(false)}
-          onOpenWorkflow={(file) => {
-            setShowWorkflowCenter(false);
-            setWorkflowPanelFile(file);
-          }}
-        />
-      )}
+        {showWorkflowCenter && (
+          <ApprovalWorkflowCenterPanel
+            onClose={() => setShowWorkflowCenter(false)}
+            onOpenWorkflow={(file) => {
+              setShowWorkflowCenter(false);
+              setWorkflowPanelFile(file);
+            }}
+          />
+        )}
 
-      {workflowPanelFile && (
-        <ApprovalWorkflowPanel
-          file={workflowPanelFile}
-          onClose={() => setWorkflowPanelFile(null)}
-          onStartWorkflow={(templateApproverUserIds) => {
-            setWorkflowPanelFile(null);
-            openWorkflowComposer(
-              workflowPanelFile,
-              templateApproverUserIds ?? [],
-            );
-          }}
-          onWorkflowChanged={(workflow) => {
-            patchDetailWorkflowState(workflow);
-          }}
-        />
-      )}
+        {workflowPanelFile && (
+          <ApprovalWorkflowPanel
+            file={workflowPanelFile}
+            onClose={() => setWorkflowPanelFile(null)}
+            onStartWorkflow={(templateApproverUserIds) => {
+              setWorkflowPanelFile(null);
+              openWorkflowComposer(
+                workflowPanelFile,
+                templateApproverUserIds ?? [],
+              );
+            }}
+            onWorkflowChanged={(workflow) => {
+              patchDetailWorkflowState(workflow);
+            }}
+          />
+        )}
 
       {approvalFile && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
@@ -3707,48 +3805,49 @@ export default function FileBrowserPage() {
         </div>
       )}
 
-      {approvalDetailFile && (
-        <ApprovalDetailPanel
-          file={approvalDetailFile}
-          onClose={() => setApprovalDetailFile(null)}
-          onResubmit={() =>
-            submitApprovalMutation.mutate(approvalDetailFile.id)
-          }
-        />
-      )}
+        {approvalDetailFile && (
+          <ApprovalDetailPanel
+            file={approvalDetailFile}
+            onClose={() => setApprovalDetailFile(null)}
+            onResubmit={() =>
+              submitApprovalMutation.mutate(approvalDetailFile.id)
+            }
+          />
+        )}
 
-      {showRetentionDetailsModal && (
-        <RetentionDetailsModal
-          file={
-            retentionDetailsFile
-              ? { id: retentionDetailsFile.id, name: retentionDetailsFile.name }
-              : null
-          }
-          job={retentionDetailsJob}
-          onClose={() => setShowRetentionDetailsModal(false)}
-          onEdit={handleEditRetention}
-        />
-      )}
+        {showRetentionDetailsModal && (
+          <RetentionDetailsModal
+            file={
+              retentionDetailsFile
+                ? { id: retentionDetailsFile.id, name: retentionDetailsFile.name }
+                : null
+            }
+            job={retentionDetailsJob}
+            onClose={() => setShowRetentionDetailsModal(false)}
+            onEdit={handleEditRetention}
+          />
+        )}
 
-      {showRetentionModal && (
-        <RetentionModal
-          key={retentionModalNonce}
-          scope={retentionScope}
-          count={
-            retentionScope === "file"
-              ? selectedFiles.length
-              : selectedFolders.length
-          }
-          onClose={() => {
-            setShowRetentionModal(false);
-            setRetentionEditJobId(null);
-            setRetentionModalInitialValues(null);
-          }}
-          onConfirm={applyRetention}
-          isConfirming={isApplyingRetention}
-          initialValues={retentionModalInitialValues ?? undefined}
-        />
-      )}
+        {showRetentionModal && (
+          <RetentionModal
+            key={retentionModalNonce}
+            scope={retentionScope}
+            count={
+              retentionScope === "file"
+                ? selectedFiles.length
+                : selectedFolders.length
+            }
+            onClose={() => {
+              setShowRetentionModal(false);
+              setRetentionEditJobId(null);
+              setRetentionModalInitialValues(null);
+            }}
+            onConfirm={applyRetention}
+            isConfirming={isApplyingRetention}
+            initialValues={retentionModalInitialValues ?? undefined}
+          />
+        )}
+      </Suspense>
 
       {showBulkMetadataModal && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
