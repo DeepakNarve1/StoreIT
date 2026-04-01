@@ -691,8 +691,7 @@ router.post("/", verifyAuth, async (req: AuthRequest, res: Response) => {
     const roleContext = await getEffectiveRoleProfileForUser(userId);
     const isPrivileged =
       roleContext?.baseRole === "SUPERADMIN" ||
-      (roleContext?.baseRole !== "VIEWER" &&
-        roleContext?.capabilities.create_folders);
+      roleContext?.capabilities.create_folders === true;
 
     // VIEWERs can only create folders inside a folder they have write access to
     if (!isPrivileged) {

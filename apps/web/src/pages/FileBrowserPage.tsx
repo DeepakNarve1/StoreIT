@@ -1201,7 +1201,10 @@ export default function FileBrowserPage() {
   const canCreateFolderHere =
     user?.role === "SUPERADMIN" ||
     (user?.role === "VIEWER"
-      ? !!folderId && folderCan(folderId, "create_folders")
+      ? // If the VIEWER's role profile grants tenant-wide folder creation,
+        // allow showing the button even at root.
+        resolvedCaps?.create_folders === true ||
+        (!!folderId && folderCan(folderId, "create_folders"))
       : resolvedCaps
         ? resolvedCaps.create_folders === true
         : ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(user?.role ?? ""));
