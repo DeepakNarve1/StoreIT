@@ -2187,6 +2187,17 @@ export default function FileBrowserPage() {
             <div className="relative">
               <button
                 onClick={() => {
+                  // If a file is already open in the details pane, default Modify
+                  // actions to that file (even if nothing is selected).
+                  if (
+                    selectedFiles.length === 0 &&
+                    selectedFolders.length === 0 &&
+                    detailFile
+                  ) {
+                    setSelectedFolders([]);
+                    setSelectedFiles([detailFile.id]);
+                  }
+
                   if (
                     selectedFiles.length === 0 &&
                     selectedFolders.length === 0
@@ -2482,39 +2493,49 @@ export default function FileBrowserPage() {
                 </>
               )}
             </div>
-            <button
-              onClick={() => {
-                if (selectedFiles.length === 1 && singleSelectedFile) {
-                  openFileMetadataPage(singleSelectedFile);
-                  return;
-                }
-                if (selectedFolders.length === 1 && singleSelectedFolder) {
-                  openFolderMetadataPage(singleSelectedFolder);
-                  return;
-                }
-                const canManageTemplates = ["ORG_ADMIN", "MANAGER", "SUPERADMIN"].includes(
-                  user?.role ?? "",
-                );
-                if (selectedFiles.length === 0 && selectedFolders.length === 0) {
-                  if (canManageTemplates) {
-                    navigate("/admin/templates");
-                  } else {
-                    useToast
-                      .getState()
-                      .add("Select a file or folder to view metadata", "error");
+            {!detailFile && (
+              <button
+                onClick={() => {
+                  if (selectedFiles.length === 1 && singleSelectedFile) {
+                    openFileMetadataPage(singleSelectedFile);
+                    return;
                   }
-                  return;
-                }
-                useToast
-                  .getState()
-                  .add("Select exactly 1 file or 1 folder to view metadata", "error");
-              }}
-              className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-primary-600 transition-colors"
-              title="Metadata"
-            >
-              <Info size={16} />
-              <span className="text-[10px] font-medium">Metadata</span>
-            </button>
+                  if (selectedFolders.length === 1 && singleSelectedFolder) {
+                    openFolderMetadataPage(singleSelectedFolder);
+                    return;
+                  }
+                  const canManageTemplates = [
+                    "ORG_ADMIN",
+                    "MANAGER",
+                    "SUPERADMIN",
+                  ].includes(user?.role ?? "");
+                  if (
+                    selectedFiles.length === 0 &&
+                    selectedFolders.length === 0
+                  ) {
+                    if (canManageTemplates) {
+                      navigate("/admin/templates");
+                    } else {
+                      useToast
+                        .getState()
+                        .add("Select a file or folder to view metadata", "error");
+                    }
+                    return;
+                  }
+                  useToast
+                    .getState()
+                    .add(
+                      "Select exactly 1 file or 1 folder to view metadata",
+                      "error",
+                    );
+                }}
+                className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-primary-600 transition-colors"
+                title="Metadata"
+              >
+                <Info size={16} />
+                <span className="text-[10px] font-medium">Metadata</span>
+              </button>
+            )}
             <div className="relative">
               <button
                 onClick={() => setShowColumnsMenu((v) => !v)}

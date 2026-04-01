@@ -75,6 +75,78 @@ type AuditLogEntry = {
   user?: { name?: string | null } | null;
 };
 
+const RETENTION_QUEUE_KEY = "storeit_retention_queue_v1";
+
+type RetentionJob = {
+  id: string;
+  scope: "file" | "folder";
+  action: "move_to_trash" | "permanent_delete";
+  resourceIds: string[];
+  applyAt: number | null;
+  createdAt: number;
+  retention: string;
+  reminder?: string | null;
+  reminderAt?: number | null;
+};
+
+function loadRetentionQueue(): RetentionJob[] {
+  try {
+    const raw = localStorage.getItem(RETENTION_QUEUE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed as RetentionJob[];
+  } catch {
+    return [];
+  }
+}
+
+function formatDetailedDateTime(epochMs: number) {
+  return new Date(epochMs).toLocaleString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+function getCurrentRetentionJobForFile(fileId: string): RetentionJob | null {
+  const jobs = loadRetentionQueue();
+  let best: RetentionJob | null = null;
+
+  for (const job of jobs) {
+    if (job.scope !== "file") continue;
+    if (!Array.isArray(job.resourceIds) || !job.resourceIds.includes(fileId))
+      continue;
+
+    if (!best) {
+      best = job;
+      continue;
+    }
+
+    // Prefer Infinite over scheduled.
+    if (best.applyAt === null) continue;
+    if (job.applyAt === null) {
+      best = job;
+      continue;
+    }
+
+    // Otherwise choose the nearest applyAt in the future (or nearest overall).
+    if (
+      typeof best.applyAt === "number" &&
+      typeof job.applyAt === "number" &&
+      job.applyAt < best.applyAt
+    ) {
+      best = job;
+    }
+  }
+
+  return best;
+}
+
 function FileTypeGlyph({
   mimeType,
   size,
@@ -163,6 +235,10 @@ export default function FileDetailsView({
   if (!file) return null;
   const metadataRows = metadataData?.metadata ?? [];
   const auditLogs = auditData?.logs ?? [];
+  const retentionJob = useMemo(() => {
+    if (!file?.id) return null;
+    return getCurrentRetentionJobForFile(file.id);
+  }, [file?.id]);
   const notesRow = useMemo(
     () => metadataRows.find((m) => m.key.toLowerCase() === "notes"),
     [metadataRows],
@@ -474,11 +550,49 @@ export default function FileDetailsView({
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2 inline-flex items-center gap-1">
                 <Bell size={14} /> Reminders
               </p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                No reminders
-              </p>
-              <button className="mt-2 text-xs text-gray-600 dark:text-gray-300 hover:underline">
-                + Add new reminder
+              {!retentionJob || retentionJob.applyAt === null ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  No reminders
+                </p>
+              ) : retentionJob.reminder && retentionJob.reminder !== "none" ? (
+                <div className="text-xs text-gray-700 dark:text-gray-200 space-y-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-500 dark:text-gray-400">
+                      Reminder
+                    </span>
+                    <span className="font-medium text-right">
+                      {retentionJob.reminder === "custom" && retentionJob.reminderAt
+                        ? formatDetailedDateTime(retentionJob.reminderAt)
+                        : (() => {
+                            const m = String(retentionJob.reminder).match(
+                              /^(\d+)d$/,
+                            );
+                            if (!m) return "—";
+                            const days = Number(m[1]);
+                            return formatDetailedDateTime(
+                              retentionJob.applyAt - days * 24 * 60 * 60 * 1000,
+                            );
+                          })()}
+                    </span>
+                  </div>
+                </div>
+              ) : retentionJob.retention === "7d" ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  FolderIT timeline: Day 1 / 3 / 5 notify · Day 7 apply
+                </p>
+              ) : (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  No reminder configured for the current retention.
+                </p>
+              )}
+
+              <button
+                onClick={() => onOpenRetention?.(file)}
+                className="mt-2 text-xs text-gray-600 dark:text-gray-300 hover:underline"
+              >
+                {retentionJob && retentionJob.applyAt !== null
+                  ? "Manage retention & reminders"
+                  : "+ Add new reminder"}
               </button>
             </div>
           )}
