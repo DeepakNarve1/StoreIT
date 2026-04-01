@@ -83,13 +83,21 @@ export const sendInviteEmail = async ({
 
           <!-- Header -->
           <div style="background:#db2777;padding:24px 32px;">
-            <div style="display:flex;align-items:center;gap:10px;">
-              <div style="width:32px;height:32px;background:white;border-radius:8px;
-                          display:flex;align-items:center;justify-content:center;">
-                <span style="color:#db2777;font-weight:700;font-size:16px;">S</span>
-              </div>
-              <span style="color:white;font-weight:600;font-size:16px;">StoreIT</span>
-            </div>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
+              <tr>
+                <td valign="middle" style="vertical-align:middle;">
+                  <div style="width:32px;height:32px;background:white;border-radius:8px;
+                              display:inline-block;text-align:center;line-height:32px;">
+                    <span style="color:#db2777;font-weight:700;font-size:16px;line-height:32px;display:inline-block;">S</span>
+                  </div>
+                </td>
+                <td valign="middle" style="vertical-align:middle;padding-left:10px;">
+                  <span style="color:white;font-weight:600;font-size:16px;line-height:20px;display:inline-block;">
+                    StoreIT
+                  </span>
+                </td>
+              </tr>
+            </table>
           </div>
 
           <!-- Body -->
