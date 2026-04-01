@@ -454,14 +454,6 @@ export default function FileBrowserPage() {
       ? resolvedCaps.add_files === true || resolvedCaps.create_folders === true
       : ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(user?.role ?? ""));
 
-  const canCreateFolderHere =
-    user?.role === "SUPERADMIN" ||
-    (user?.role === "VIEWER"
-      ? !!folderId && folderCan(folderId, "create_folders")
-      : resolvedCaps
-        ? resolvedCaps.create_folders === true
-        : ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(user?.role ?? ""));
-
   // ── Granular per-file capabilities for VIEWER role ───────────────────────
   const fileIds = (filesData?.files ?? []).map((f) => f.id);
   const { capMap } = useFileCapabilities(fileIds);
@@ -1205,6 +1197,14 @@ export default function FileBrowserPage() {
     canWrite || capMap[fileId]?.[cap] === true;
   const folderCan = (folderId: string, cap: string) =>
     canWrite || folderCapMap[folderId]?.[cap] === true;
+
+  const canCreateFolderHere =
+    user?.role === "SUPERADMIN" ||
+    (user?.role === "VIEWER"
+      ? !!folderId && folderCan(folderId, "create_folders")
+      : resolvedCaps
+        ? resolvedCaps.create_folders === true
+        : ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(user?.role ?? ""));
   const reorderFileItems = useCallback(
     (fromId: string, toId: string) => {
       setSortBy("manual");
