@@ -30,14 +30,16 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
       user: null,
-      token: null,
-      isAuthenticated: false,
+      token: typeof window !== "undefined" ? localStorage.getItem("access_token") : null,
+      isAuthenticated:
+        typeof window !== "undefined" && !!localStorage.getItem("access_token"),
       setAuth: (user, token) => {
         localStorage.setItem("access_token", token);
         set({ user, token, isAuthenticated: true });
       },
       logout: () => {
         localStorage.removeItem("access_token");
+        localStorage.removeItem("auth-storage");
         set({ user: null, token: null, isAuthenticated: false });
       },
       updateUser: (updates) =>
@@ -47,9 +49,15 @@ export const useAuthStore = create<AuthState>()(
       name: "auth-storage",
       partialize: (state) => ({
         user: state.user,
-        token: state.token,
-        isAuthenticated: state.isAuthenticated,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (!state || typeof window === "undefined") return;
+        const token = localStorage.getItem("access_token");
+        // Ensure the UI auth state cannot drift from the request auth state.
+        state.token = token;
+        state.isAuthenticated = !!token;
+        if (!token) state.user = null;
+      },
     },
   ),
 );

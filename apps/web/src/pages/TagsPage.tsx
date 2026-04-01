@@ -94,6 +94,7 @@ export default function TagsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tags"] });
+      queryClient.refetchQueries({ queryKey: ["tags"] });
       setNewTagName("");
       setShowCreate(false);
     },
@@ -105,6 +106,7 @@ export default function TagsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tags"] });
+      queryClient.refetchQueries({ queryKey: ["tags"] });
       if (selectedTag) setSelectedTag(null);
     },
   });

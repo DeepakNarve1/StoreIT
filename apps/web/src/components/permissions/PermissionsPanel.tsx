@@ -73,11 +73,11 @@ type OrgUserOption = {
   email: string;
 };
 
-// All checkbox keys that count as "something selected"
-const ALL_PERM_KEYS = [
-  ...FOLDER_PERMS.map((p) => p.key),
-  ...FILE_PERMS.map((p) => p.key),
-];
+// All checkbox keys that count as "something selected" — deduplicated because
+// view_metadata / edit_metadata appear in both folder and file option lists.
+const ALL_PERM_KEYS = Array.from(
+  new Set([...FOLDER_PERMS.map((p) => p.key), ...FILE_PERMS.map((p) => p.key)]),
+);
 
 export default function PermissionsPanel({
   resourceId,
@@ -199,6 +199,9 @@ export default function PermissionsPanel({
       queryClient.invalidateQueries({
         queryKey: ["permissions", resourceType, resourceId],
       });
+      queryClient.refetchQueries({
+        queryKey: ["permissions", resourceType, resourceId],
+      });
       add(
         editingPermissionId
           ? "Permission updated successfully"
@@ -225,6 +228,9 @@ export default function PermissionsPanel({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
+        queryKey: ["permissions", resourceType, resourceId],
+      });
+      queryClient.refetchQueries({
         queryKey: ["permissions", resourceType, resourceId],
       });
       add("Permission revoked", "success");

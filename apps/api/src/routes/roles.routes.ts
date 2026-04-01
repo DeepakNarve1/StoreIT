@@ -152,6 +152,19 @@ router.patch(
         return;
       }
 
+      // System roles: only capabilities and description are editable.
+      // Name and baseRole are locked to preserve system integrity.
+      if (role.isSystem) {
+        if (data.name !== undefined && data.name !== role.name) {
+          res.status(400).json({ error: "Built-in role names cannot be changed" });
+          return;
+        }
+        if (data.baseRole !== undefined && data.baseRole !== role.baseRole) {
+          res.status(400).json({ error: "Built-in role hierarchy cannot be changed" });
+          return;
+        }
+      }
+
       if (data.name && data.name !== role.name) {
         const duplicate = await prisma.roleProfile.findFirst({
           where: {

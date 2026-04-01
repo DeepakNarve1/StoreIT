@@ -265,6 +265,8 @@ export default function UsersPage() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["invites"] });
       queryClient.invalidateQueries({ queryKey: ["billing-status"] });
+      queryClient.refetchQueries({ queryKey: ["invites"] });
+      queryClient.refetchQueries({ queryKey: ["billing-status"] });
 
       const emailSent =
         data?.emailSent !== false && data?.code !== "INVITE_EMAIL_FAILED";
@@ -310,16 +312,61 @@ export default function UsersPage() {
     mutationFn: async (id: string) => {
       await api.delete(`/users/invites/${id}`);
     },
-    onSuccess: () => {
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ["invites"] });
+      const previous = queryClient.getQueryData<{ invites: Invite[] }>([
+        "invites",
+      ]);
+      queryClient.setQueryData<{ invites: Invite[] }>(["invites"], (cur) =>
+        cur ? { ...cur, invites: cur.invites.filter((i) => i.id !== id) } : cur,
+      );
+      return { previous };
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(["invites"], ctx.previous);
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["invites"] });
     },
   });
 
   const toggleUser = useMutation({
     mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
-      await api.patch(`/users/${id}`, { isActive });
+      const res = await api.patch(`/users/${id}`, { isActive });
+      return res.data as { user: User };
     },
-    onSuccess: () => {
+    onMutate: async (vars) => {
+      await queryClient.cancelQueries({ queryKey: ["users"] });
+      const previous = queryClient.getQueryData<{ users: User[] }>(["users"]);
+      queryClient.setQueryData<{ users: User[] }>(["users"], (cur) =>
+        cur
+          ? {
+              ...cur,
+              users: cur.users.map((u) =>
+                u.id === vars.id ? { ...u, isActive: vars.isActive } : u,
+              ),
+            }
+          : cur,
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(["users"], ctx.previous);
+    },
+    onSuccess: (data) => {
+      // Use server as source-of-truth to prevent "flip back" flicker.
+      queryClient.setQueryData<{ users: User[] }>(["users"], (cur) =>
+        cur
+          ? {
+              ...cur,
+              users: cur.users.map((u) =>
+                u.id === data.user.id ? { ...u, ...data.user } : u,
+              ),
+            }
+          : cur,
+      );
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       queryClient.invalidateQueries({ queryKey: ["billing-status"] });
     },
@@ -337,6 +384,41 @@ export default function UsersPage() {
     }) => {
       await api.patch(`/users/${id}`, { role, roleProfileId });
     },
+    onMutate: async (vars) => {
+      await queryClient.cancelQueries({ queryKey: ["users"] });
+      const previous = queryClient.getQueryData<{ users: User[] }>(["users"]);
+      const nextProfile =
+        vars.roleProfileId &&
+        roleProfiles.find((r) => r.id === vars.roleProfileId);
+      queryClient.setQueryData<{ users: User[] }>(["users"], (cur) =>
+        cur
+          ? {
+              ...cur,
+              users: cur.users.map((u) =>
+                u.id === vars.id
+                  ? {
+                      ...u,
+                      role: vars.role,
+                      roleProfileId: vars.roleProfileId,
+                      roleProfile: nextProfile
+                        ? {
+                            id: nextProfile.id,
+                            name: nextProfile.name,
+                            baseRole: nextProfile.baseRole,
+                            capabilities: nextProfile.capabilities ?? {},
+                          }
+                        : u.roleProfile,
+                    }
+                  : u,
+              ),
+            }
+          : cur,
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(["users"], ctx.previous);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
     },
@@ -349,7 +431,18 @@ export default function UsersPage() {
     mutationFn: async (id: string) => {
       await api.delete(`/users/${id}/permanent`);
     },
-    onSuccess: () => {
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ["users"] });
+      const previous = queryClient.getQueryData<{ users: User[] }>(["users"]);
+      queryClient.setQueryData<{ users: User[] }>(["users"], (cur) =>
+        cur ? { ...cur, users: cur.users.filter((u) => u.id !== id) } : cur,
+      );
+      return { previous };
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(["users"], ctx.previous);
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       queryClient.invalidateQueries({ queryKey: ["billing-status"] });
     },
@@ -360,14 +453,17 @@ export default function UsersPage() {
       api.post("/users/departments", { name }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["departments"] });
+      queryClient.refetchQueries({ queryKey: ["departments"] });
       setNewDeptName("");
     },
   });
 
   const deleteDept = useMutation({
     mutationFn: async (id: string) => api.delete(`/users/departments/${id}`),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["departments"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["departments"] });
+      queryClient.refetchQueries({ queryKey: ["departments"] });
+    },
   });
 
   const assignDept = useMutation({
@@ -388,6 +484,7 @@ export default function UsersPage() {
         return next;
       });
       queryClient.invalidateQueries({ queryKey: ["users"] });
+      queryClient.refetchQueries({ queryKey: ["users"] });
     },
   });
 
@@ -414,6 +511,9 @@ export default function UsersPage() {
       queryClient.invalidateQueries({ queryKey: ["role-profiles"] });
       queryClient.invalidateQueries({ queryKey: ["users"] });
       queryClient.invalidateQueries({ queryKey: ["invites"] });
+      queryClient.refetchQueries({ queryKey: ["role-profiles"] });
+      queryClient.refetchQueries({ queryKey: ["users"] });
+      queryClient.refetchQueries({ queryKey: ["invites"] });
       setRoleModalOpen(false);
       setEditingRole(null);
     },
@@ -427,6 +527,9 @@ export default function UsersPage() {
       queryClient.invalidateQueries({ queryKey: ["role-profiles"] });
       queryClient.invalidateQueries({ queryKey: ["users"] });
       queryClient.invalidateQueries({ queryKey: ["invites"] });
+      queryClient.refetchQueries({ queryKey: ["role-profiles"] });
+      queryClient.refetchQueries({ queryKey: ["users"] });
+      queryClient.refetchQueries({ queryKey: ["invites"] });
     },
   });
 
@@ -782,9 +885,9 @@ export default function UsersPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                           <span
-                            className={`text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap ${roleColors[user.role] || "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}
+                            className={`inline-flex items-center justify-center h-8 min-w-24 px-3 rounded-full whitespace-nowrap text-xs font-medium ${roleColors[user.role] || "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}
                           >
                             {user.roleProfile?.name ||
                               user.role?.replace("_", " ")}
@@ -818,8 +921,8 @@ export default function UsersPage() {
                                 roleProfileId: nextRoleProfile.id,
                               });
                             }}
-                            className="text-xs bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg px-2.5 py-1.5
-                                       focus:outline-none focus:ring-2 focus:ring-blue-400 dark:text-white appearance-none disabled:opacity-60"
+                            className="h-8 text-xs bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg px-3
+                                       focus:outline-none focus:ring-2 focus:ring-blue-400 dark:text-white appearance-none disabled:opacity-60 w-full sm:w-44"
                             title={
                               !canEditRoles
                                 ? "Only Org Admin can change roles"
@@ -883,9 +986,20 @@ export default function UsersPage() {
                                 isActive: !user.isActive,
                               })
                             }
+                            disabled={
+                              user.role === "SUPERADMIN" ||
+                              user.id === currentUser?.id ||
+                              toggleUser.isPending
+                            }
                             className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                             title={
-                              user.isActive ? "Disable user" : "Enable user"
+                              user.role === "SUPERADMIN"
+                                ? "SUPERADMIN accounts cannot be disabled"
+                                : user.id === currentUser?.id
+                                  ? "You cannot disable yourself"
+                                  : user.isActive
+                                    ? "Disable user"
+                                    : "Enable user"
                             }
                           >
                             {user.isActive ? (
@@ -910,6 +1024,7 @@ export default function UsersPage() {
                                 deleteUser.mutate(user.id);
                               }
                             }}
+                            disabled={user.role === "SUPERADMIN" || deleteUser.isPending}
                             className="text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
                             title="Permanently delete user"
                           >
@@ -988,7 +1103,7 @@ export default function UsersPage() {
                       </td>
                       <td className="px-4 py-3">
                         <span
-                          className={`text-xs font-medium px-2 py-1 rounded-full ${roleColors[invite.role] || "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}
+                          className={`inline-flex items-center justify-center h-8 min-w-24 px-3 rounded-full whitespace-nowrap text-xs font-medium ${roleColors[invite.role] || "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}
                         >
                           {invite.roleProfile?.name ||
                             invite.role?.replace("_", " ")}

@@ -70,6 +70,9 @@ export default function TrashPage() {
       queryClient.invalidateQueries({ queryKey: ["trash"] });
       queryClient.invalidateQueries({ queryKey: ["files"] });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
+      queryClient.refetchQueries({ queryKey: ["trash"] });
+      queryClient.refetchQueries({ queryKey: ["files"] });
+      queryClient.refetchQueries({ queryKey: ["folders"] });
     },
   });
 
@@ -81,6 +84,9 @@ export default function TrashPage() {
       queryClient.invalidateQueries({ queryKey: ["trash"] });
       queryClient.invalidateQueries({ queryKey: ["recent-files"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      queryClient.refetchQueries({ queryKey: ["trash"] });
+      queryClient.refetchQueries({ queryKey: ["recent-files"] });
+      queryClient.refetchQueries({ queryKey: ["dashboard-stats"] });
     },
     onSettled: () => setDeleteTarget(null),
   });
@@ -93,6 +99,9 @@ export default function TrashPage() {
       queryClient.invalidateQueries({ queryKey: ["trash"] });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       queryClient.invalidateQueries({ queryKey: ["files"] });
+      queryClient.refetchQueries({ queryKey: ["trash"] });
+      queryClient.refetchQueries({ queryKey: ["folders"] });
+      queryClient.refetchQueries({ queryKey: ["files"] });
     },
   });
 
@@ -104,6 +113,8 @@ export default function TrashPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["trash"] });
       queryClient.invalidateQueries({ queryKey: ["folders"] });
+      queryClient.refetchQueries({ queryKey: ["trash"] });
+      queryClient.refetchQueries({ queryKey: ["folders"] });
     },
     onSettled: () => setDeleteTarget(null),
   });

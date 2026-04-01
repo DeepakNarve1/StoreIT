@@ -28,6 +28,7 @@ export type AuditAction =
   | "file.unlock"
   | "folder.create"
   | "folder.rename"
+  | "folder.bulk_move"
   | "folder.delete"
   | "folder.delete.permanent"
   | "permission.grant"
@@ -43,7 +44,8 @@ export type AuditAction =
   | "superadmin.org.create"
   | "superadmin.org.update"
   | "superadmin.org.suspend"
-  | "superadmin.impersonate";
+  | "superadmin.impersonate"
+  | "superadmin.user.update";
 
 interface LogParams {
   action: AuditAction;

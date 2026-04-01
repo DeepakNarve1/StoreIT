@@ -32,8 +32,11 @@ const MetadataPage = lazy(() => import("./pages/MetadataPage"));
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30 * 1000,
+      // Lower staleTime keeps UI feeling "live" even if a mutation forgets to invalidate.
+      staleTime: 5 * 1000,
       retry: 1,
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
     },
   },
 });

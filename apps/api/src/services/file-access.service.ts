@@ -1,6 +1,29 @@
 import { prisma } from "../utils/prisma";
 import { getEffectiveRoleProfileForUser } from "./role-profiles.service";
 
+async function getAncestorChainForFolder(
+  tenantId: string,
+  startFolderId: string,
+  maxDepth = 80,
+): Promise<string[]> {
+  const rows = await prisma.folder.findMany({
+    where: { tenantId, isDeleted: false },
+    select: { id: true, parentId: true },
+  });
+  const parentById = new Map<string, string | null>(
+    rows.map((r) => [r.id, r.parentId]),
+  );
+  const chain: string[] = [];
+  let current: string | null = startFolderId;
+  let depth = 0;
+  while (current && depth < maxDepth) {
+    chain.push(current);
+    current = parentById.get(current) ?? null;
+    depth++;
+  }
+  return chain;
+}
+
 /** Whether the user may see / act on this file (tenant, role profile, grants, folder inherit). */
 export async function userCanAccessFile(
   fileId: string,
@@ -11,6 +34,7 @@ export async function userCanAccessFile(
   folderId?: string | null,
 ): Promise<boolean> {
   const roleContext = await getEffectiveRoleProfileForUser(userId);
+  if (roleContext && roleContext.tenantId !== tenantId) return false;
   if (
     roleContext &&
     roleContext.tenantId === tenantId &&
@@ -19,7 +43,14 @@ export async function userCanAccessFile(
   ) {
     return true;
   }
-  if (uploadedById === userId) return true;
+  if (uploadedById === userId) {
+    // Ensure the file is actually in this tenant (defense-in-depth).
+    const exists = await prisma.file.findFirst({
+      where: { id: fileId, tenantId, isDeleted: false },
+      select: { id: true },
+    });
+    if (exists) return true;
+  }
 
   const fileOrClauses: Array<
     | { grantedTo: string }
@@ -38,7 +69,10 @@ export async function userCanAccessFile(
       resourceType: "file",
       resourceId: fileId,
       OR: fileOrClauses,
-      AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
+      AND: [
+        { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+        { file: { tenantId } },
+      ],
     },
   });
   if (filePerm) return true;
@@ -47,19 +81,7 @@ export async function userCanAccessFile(
     // Allow access via:
     // - direct permission on the file's folder, OR
     // - an ancestor folder permission that has apply_subfolders enabled.
-    const chain: string[] = [];
-    let current: string | null = folderId;
-    let depth = 0;
-    while (current && depth < 80) {
-      chain.push(current);
-      const parent: { parentId: string | null } | null =
-        await prisma.folder.findFirst({
-        where: { id: current, tenantId },
-        select: { parentId: true },
-      });
-      current = parent?.parentId ?? null;
-      depth++;
-    }
+    const chain = await getAncestorChainForFolder(tenantId, folderId, 80);
 
     const folderPerms = await prisma.permission.findMany({
       where: {
@@ -154,19 +176,7 @@ export async function userHasResolvedFileCapability(opts: {
   // 2) Folder permission grant on containing folder OR an ancestor with apply_subfolders
   if (!folderId) return false;
 
-  const chain: string[] = [];
-  let current: string | null = folderId;
-  let depth = 0;
-  while (current && depth < 80) {
-    chain.push(current);
-    const parent: { parentId: string | null } | null =
-      await prisma.folder.findFirst({
-      where: { id: current, tenantId },
-      select: { parentId: true },
-    });
-    current = parent?.parentId ?? null;
-    depth++;
-  }
+  const chain = await getAncestorChainForFolder(tenantId, folderId, 80);
 
   const folderPerms = await prisma.permission.findMany({
     where: {
@@ -242,7 +252,6 @@ export async function userHasFilePermission(
     where: {
       resourceType: "file",
       resourceId: fileId,
-      fileId,
       OR: permOrClauses,
       AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
     },

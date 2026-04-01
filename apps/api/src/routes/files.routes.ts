@@ -91,7 +91,7 @@ const fileSelect = {
 // ─── GET /api/files ───────────────────────────────────────────────────────────
 router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
-    const { folderId, includeAll } = req.query;
+    const { folderId, includeAll, type } = req.query;
     const { userId, tenantId, role } = req.user!;
     const roleContext = await getEffectiveRoleProfileForUser(userId);
     const includeAllRaw = String(includeAll ?? "").toLowerCase();
@@ -102,6 +102,46 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
       : isValidUUID(folderId)
         ? folderId
         : null;
+
+    const typeFilter = String(type ?? "").toLowerCase();
+    const typeWhere =
+      !typeFilter || typeFilter === "all"
+        ? {}
+        : typeFilter === "pdf"
+          ? { mimeType: { contains: "pdf", mode: "insensitive" as const } }
+          : typeFilter === "image"
+            ? { mimeType: { startsWith: "image/" } }
+            : typeFilter === "video"
+              ? { mimeType: { startsWith: "video/" } }
+              : typeFilter === "word"
+                ? {
+                    OR: [
+                      { mimeType: { contains: "word", mode: "insensitive" as const } },
+                      { mimeType: { contains: "officedocument", mode: "insensitive" as const } },
+                      { name: { endsWith: ".doc", mode: "insensitive" as const } },
+                      { name: { endsWith: ".docx", mode: "insensitive" as const } },
+                    ],
+                  }
+                : typeFilter === "excel"
+                  ? {
+                      OR: [
+                        { mimeType: { contains: "excel", mode: "insensitive" as const } },
+                        { mimeType: { contains: "spreadsheet", mode: "insensitive" as const } },
+                        { name: { endsWith: ".xls", mode: "insensitive" as const } },
+                        { name: { endsWith: ".xlsx", mode: "insensitive" as const } },
+                        { name: { endsWith: ".csv", mode: "insensitive" as const } },
+                      ],
+                    }
+                  : typeFilter === "zip"
+                    ? {
+                        OR: [
+                          { mimeType: { contains: "zip", mode: "insensitive" as const } },
+                          { name: { endsWith: ".zip", mode: "insensitive" as const } },
+                          { name: { endsWith: ".rar", mode: "insensitive" as const } },
+                          { name: { endsWith: ".7z", mode: "insensitive" as const } },
+                        ],
+                      }
+                    : {};
 
     const isPrivileged =
       roleContext?.baseRole === "SUPERADMIN" ||
@@ -115,6 +155,7 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
           tenantId,
           folderId: folderFilter,
           isDeleted: false,
+          ...(typeWhere as any),
         },
         orderBy: { createdAt: "desc" },
         select: fileSelect,
@@ -214,6 +255,7 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
           tenantId,
           folderId: folderFilter,
           isDeleted: false,
+          ...(typeWhere as any),
           OR: [
             { id: { in: allowedFileIds } },
             { uploadedById: userId },

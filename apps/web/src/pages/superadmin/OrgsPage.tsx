@@ -45,6 +45,15 @@ interface RecentFile {
   size: number;
 }
 
+type OrgUserRow = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  isActive: boolean;
+  createdAt: string;
+};
+
 const PLANS = ["free", "starter", "pro", "enterprise"] as const;
 type Plan = (typeof PLANS)[number];
 
@@ -85,6 +94,7 @@ export default function OrgsPage() {
     adminPassword: "",
   });
   const [formError, setFormError] = useState("");
+  const [showOrgUsers, setShowOrgUsers] = useState(false);
 
   // Fetch all orgs
   const {
@@ -110,6 +120,37 @@ export default function OrgsPage() {
       return res.data;
     },
     enabled: !!selectedOrg?.id,
+  });
+
+  const { data: orgUsersData, isLoading: orgUsersLoading } = useQuery({
+    queryKey: ["superadmin", "org-users", selectedOrg?.id],
+    queryFn: async () => {
+      const res = await api.get(`/superadmin/orgs/${selectedOrg!.id}/users`);
+      return res.data as { users: OrgUserRow[] };
+    },
+    enabled: !!selectedOrg?.id && showOrgUsers,
+  });
+
+  const setOrgUserActive = useMutation({
+    mutationFn: async (vars: { orgId: string; userId: string; isActive: boolean }) => {
+      const res = await api.patch(
+        `/superadmin/orgs/${vars.orgId}/users/${vars.userId}`,
+        { isActive: vars.isActive },
+      );
+      return res.data as { user: OrgUserRow };
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData<{ users: OrgUserRow[] }>(
+        ["superadmin", "org-users", selectedOrg?.id],
+        (cur) =>
+          cur
+            ? {
+                ...cur,
+                users: cur.users.map((u) => (u.id === data.user.id ? data.user : u)),
+              }
+            : cur,
+      );
+    },
   });
 
   // Create org
@@ -584,6 +625,81 @@ export default function OrgsPage() {
                       )}
                       Login as Org Admin
                     </button>
+
+                    <button
+                      onClick={() => setShowOrgUsers((v) => !v)}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2
+                                 border border-gray-200 dark:border-gray-800
+                                 hover:bg-gray-50 dark:hover:bg-white/5
+                                 text-gray-700 dark:text-gray-200 text-xs font-medium rounded-lg transition-colors"
+                    >
+                      <Users size={12} />
+                      {showOrgUsers ? "Hide org users" : "Org users (recovery)"}
+                    </button>
+
+                    {showOrgUsers && (
+                      <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-2">
+                        {orgUsersLoading ? (
+                          <div className="flex items-center justify-center py-4 text-gray-400">
+                            <Loader size={14} className="animate-spin" />
+                          </div>
+                        ) : (orgUsersData?.users ?? []).length === 0 ? (
+                          <p className="text-xs text-gray-500">No users found.</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {(orgUsersData?.users ?? []).slice(0, 25).map((u) => (
+                              <div
+                                key={u.id}
+                                className="flex items-center gap-2 justify-between"
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-xs font-medium text-gray-800 dark:text-gray-100 truncate">
+                                    {u.email}
+                                  </p>
+                                  <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                                    {u.role} · {u.isActive ? "Active" : "Disabled"}
+                                  </p>
+                                </div>
+                                {u.role === "SUPERADMIN" ? (
+                                  <span
+                                    className="shrink-0 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border
+                                               border-gray-200 dark:border-gray-800 text-gray-500 dark:text-gray-400"
+                                    title="SUPERADMIN accounts cannot be disabled"
+                                  >
+                                    Protected
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() =>
+                                      setOrgUserActive.mutate({
+                                        orgId: selectedOrg.id,
+                                        userId: u.id,
+                                        isActive: !u.isActive,
+                                      })
+                                    }
+                                    disabled={setOrgUserActive.isPending}
+                                    className={clsx(
+                                      "shrink-0 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border transition-colors",
+                                      u.isActive
+                                        ? "border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                        : "border-green-200 dark:border-green-900 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20",
+                                    )}
+                                    title={u.isActive ? "Disable user" : "Enable user"}
+                                  >
+                                    {u.isActive ? "Disable" : "Enable"}
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                            {(orgUsersData?.users ?? []).length > 25 && (
+                              <p className="text-[11px] text-gray-400">
+                                Showing first 25 users…
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                       <button
                         onClick={() => {

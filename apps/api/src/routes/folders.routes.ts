@@ -535,6 +535,105 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: "Failed to fetch folders" });
   }
 });
+
+// ─── POST /api/folders/bulk-move — move folders to a parent ───────────────────
+router.post("/bulk-move", verifyAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { ids, parentId } = z
+      .object({
+        ids: z.array(z.string().uuid()).min(1).max(200),
+        parentId: z.string().uuid().nullable().optional(),
+      })
+      .parse(req.body);
+
+    const { tenantId, role, userId } = req.user!;
+    const privileged = PRIVILEGED.includes(role);
+    if (!privileged) {
+      res.status(403).json({ error: "You don't have permission to move folders." });
+      return;
+    }
+
+    const targetParentId = parentId ?? null;
+
+    if (targetParentId && ids.includes(targetParentId)) {
+      res.status(400).json({ error: "A folder cannot be moved inside itself." });
+      return;
+    }
+
+    // Ensure destination folder exists (if provided)
+    if (targetParentId) {
+      const dest = await prisma.folder.findFirst({
+        where: { id: targetParentId, tenantId, isDeleted: false },
+        select: { id: true },
+      });
+      if (!dest) {
+        res.status(404).json({ error: "Destination folder not found" });
+        return;
+      }
+    }
+
+    // Ensure all source folders exist and belong to tenant
+    const sourceFolders = await prisma.folder.findMany({
+      where: { id: { in: ids }, tenantId, isDeleted: false },
+      select: { id: true, name: true },
+    });
+    if (sourceFolders.length !== ids.length) {
+      res.status(404).json({ error: "One or more folders were not found" });
+      return;
+    }
+
+    // Prevent cycles: cannot move a folder into its own descendant.
+    if (targetParentId) {
+      const srcSet = new Set(ids);
+      let current: string | null = targetParentId;
+      let depth = 0;
+      while (current && depth < 80) {
+        if (srcSet.has(current)) {
+          res.status(400).json({
+            error: "Cannot move a folder into its own subfolder.",
+          });
+          return;
+        }
+        const parent: { parentId: string | null } | null =
+          await prisma.folder.findFirst({
+            where: { id: current, tenantId, isDeleted: false },
+            select: { parentId: true },
+          });
+        current = parent?.parentId ?? null;
+        depth++;
+      }
+    }
+
+    await prisma.folder.updateMany({
+      where: { id: { in: ids }, tenantId, isDeleted: false },
+      data: { parentId: targetParentId },
+    });
+
+    await createAuditLog({
+      action: "folder.bulk_move",
+      userId,
+      tenantId,
+      resourceType: "folder",
+      resourceId: targetParentId ?? "root",
+      resourceName: "Bulk move folders",
+      metadata: {
+        movedCount: ids.length,
+        folderIds: ids.slice(0, 50),
+        targetParentId,
+      },
+      req,
+    });
+
+    res.json({ message: "Folders moved", movedCount: ids.length, parentId: targetParentId });
+  } catch (err: any) {
+    if (err?.name === "ZodError") {
+      res.status(400).json({ error: "Invalid input" });
+      return;
+    }
+    console.error(err);
+    res.status(500).json({ error: "Failed to move folders" });
+  }
+});
 // ─── GET /api/folders/all — flat list for sidebar tree ───────────────────────
 router.get("/all", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {

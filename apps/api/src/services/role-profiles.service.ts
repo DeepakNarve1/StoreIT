@@ -218,21 +218,17 @@ export async function ensureTenantRoleProfiles(tenantId: string) {
     });
   }
 
+  // Only sync structural fields (name, description, baseRole) for existing system roles.
+  // Capabilities are intentionally excluded — admins can customise them and we must
+  // not overwrite their changes on every request.
   const updates = SYSTEM_ROLE_DEFINITIONS.flatMap((definition) => {
     const existingProfile = existingByKey.get(definition.key);
     if (!existingProfile) return [];
 
-    const existingCaps = normalizeCapabilities(existingProfile.capabilities);
-    const nextCaps = normalizeCapabilities(definition.capabilities);
-    const capsChanged = ALL_ROLE_CAPABILITIES.some(
-      (key) => existingCaps[key] !== nextCaps[key],
-    );
-
     const needsUpdate =
       existingProfile.name !== definition.name ||
       existingProfile.description !== definition.description ||
-      existingProfile.baseRole !== definition.key ||
-      capsChanged;
+      existingProfile.baseRole !== definition.key;
 
     if (!needsUpdate) return [];
 
@@ -243,7 +239,7 @@ export async function ensureTenantRoleProfiles(tenantId: string) {
           name: definition.name,
           description: definition.description,
           baseRole: definition.key,
-          capabilities: definition.capabilities,
+          // capabilities intentionally not updated — preserve admin customisations
         },
       }),
     ];

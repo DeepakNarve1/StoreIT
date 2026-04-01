@@ -67,6 +67,9 @@ const FileVersionsModal = lazy(
   () => import("../components/files/FileVersionsModal"),
 );
 const MoveFileModal = lazy(() => import("../components/files/MoveFileModal"));
+const MoveFolderModal = lazy(
+  () => import("../components/files/MoveFolderModal"),
+);
 const AssignCategoryModal = lazy(
   () => import("../components/files/AssignCategoryModal"),
 );
@@ -91,7 +94,7 @@ const ApprovalWorkflowCenterPanel = lazy(
   () => import("../components/files/ApprovalWorkflowCenterPanel"),
 );
 
-interface StoreITem {
+interface StoreItem {
   id: string;
   name: string;
   parentId: string | null;
@@ -178,6 +181,7 @@ export default function FileBrowserPage() {
   );
   const handleVersions = (file: BrowserFileItem) => setVersionsFile(file);
   const [moveFiles, setMoveFiles] = useState<BrowserFileItem[]>([]);
+  const [moveFolders, setMoveFolders] = useState<StoreItem[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
   const [newFolderCategoryId, setNewFolderCategoryId] = useState<string>("");
@@ -431,17 +435,24 @@ export default function FileBrowserPage() {
     queryFn: async () => {
       const includeAll = !folderId && typeFilter !== "all";
       const res = await api.get("/files", {
-        params: { folderId, ...(includeAll ? { includeAll: "1" } : {}) },
+        params: {
+          folderId,
+          type: typeFilter !== "all" ? typeFilter : undefined,
+          ...(includeAll ? { includeAll: "1" } : {}),
+        },
       });
       return res.data as { files: BrowserFileItem[] };
     },
   });
   const { user } = useAuthStore();
+  // Use resolved roleCapabilities (from the profile) when available.
+  // Fall back to role-string check only for built-in roles without a profile.
+  const resolvedCaps = user?.roleCapabilities;
   const canWrite =
     user?.role === "SUPERADMIN" ||
-    user?.roleCapabilities?.add_files === true ||
-    user?.roleCapabilities?.create_folders === true ||
-    ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(user?.role ?? "");
+    (resolvedCaps
+      ? resolvedCaps.add_files === true || resolvedCaps.create_folders === true
+      : ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(user?.role ?? ""));
 
   // ── Granular per-file capabilities for VIEWER role ───────────────────────
   const fileIds = (filesData?.files ?? []).map((f) => f.id);
@@ -454,7 +465,7 @@ export default function FileBrowserPage() {
       const res = await api.get("/folders", {
         params: { parentId: folderId ?? null },
       });
-      return res.data as { folders: StoreITem[] };
+      return res.data as { folders: StoreItem[] };
     },
   });
 
@@ -595,6 +606,7 @@ export default function FileBrowserPage() {
       });
       queryClient.invalidateQueries({ queryKey: ["recent-files"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["workflow-inbox"] });
       const updated =
         data.files?.find((f) => f.id === vars.targetFile.id) ?? null;
       if (updated) {
@@ -773,9 +785,13 @@ export default function FileBrowserPage() {
   };
 
   const bulkFolderMove = () => {
-    useToast
-      .getState()
-      .add("Bulk folder move will be added once folder move API is available");
+    if (selectedFolders.length === 0) return;
+    const selected = folders.filter((f) => selectedFolders.includes(f.id));
+    if (selected.length !== selectedFolders.length) {
+      useToast.getState().add("Some selected folders are missing", "error");
+      return;
+    }
+    setMoveFolders(selected);
   };
 
   const bulkFolderDelete = async () => {
@@ -804,6 +820,9 @@ export default function FileBrowserPage() {
     queryClient.invalidateQueries({ queryKey: ["folders"] });
     queryClient.invalidateQueries({ queryKey: ["recent-files"] });
     queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+    // Force immediate refresh so users don't need to reload.
+    queryClient.refetchQueries({ queryKey: ["files"] });
+    queryClient.refetchQueries({ queryKey: ["folders"] });
   };
 
   const applyImmediateMoveResult = (
@@ -832,30 +851,40 @@ export default function FileBrowserPage() {
       }));
     }
 
-    queryClient.setQueryData<{ folders: StoreITem[] }>(
+    queryClient.setQueryData<{ folders: StoreItem[] }>(
       ["folders", folderId ?? "root"],
       (current) =>
         current
           ? {
               ...current,
-              folders: current.folders.map((folder) =>
-                folder.id === targetFolderId
-                  ? {
-                      ...folder,
-                      _count: {
-                        ...folder._count,
-                        files: folder._count.files + fileIds.length,
-                      },
-                    }
-                  : folder,
-              ),
+              folders: current.folders.map((folder) => {
+                if (folder.id === targetFolderId) {
+                  return {
+                    ...folder,
+                    _count: {
+                      ...folder._count,
+                      files: folder._count.files + fileIds.length,
+                    },
+                  };
+                }
+                if (currentContainerId && folder.id === currentContainerId) {
+                  return {
+                    ...folder,
+                    _count: {
+                      ...folder._count,
+                      files: Math.max(0, folder._count.files - fileIds.length),
+                    },
+                  };
+                }
+                return folder;
+              }),
             }
           : current,
     );
 
     // Also update the global folders cache used by the Sidebar (queryKey: ["folders","all"]).
     // This keeps the folder counts in sync across the app so users don't need to refresh.
-    queryClient.setQueryData<{ folders: StoreITem[] }>(
+    queryClient.setQueryData<{ folders: StoreItem[] }>(
       ["folders", "all"],
       (current) =>
         current
@@ -1024,46 +1053,7 @@ export default function FileBrowserPage() {
   };
 
   const allFiles = filesData?.files ?? [];
-  const hasExt = (name: string | undefined, exts: string[]) => {
-    const n = String(name ?? "").toLowerCase();
-    return exts.some((ext) => n.endsWith(ext));
-  };
-  const filteredFiles = allFiles.filter((f) => {
-    const mime = String(f.mimeType ?? "").toLowerCase();
-    if (typeFilter === "all") return true;
-    if (typeFilter === "pdf")
-      return mime.includes("pdf") || hasExt(f.name, [".pdf"]);
-    if (typeFilter === "image")
-      return (
-        mime.startsWith("image/") ||
-        hasExt(f.name, [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"])
-      );
-    if (typeFilter === "video")
-      return (
-        mime.startsWith("video/") ||
-        hasExt(f.name, [".mp4", ".mov", ".avi", ".mkv", ".webm"])
-      );
-    if (typeFilter === "word")
-      return (
-        mime.includes("msword") ||
-        mime.includes("wordprocessingml") ||
-        hasExt(f.name, [".doc", ".docx"])
-      );
-    if (typeFilter === "excel")
-      return (
-        mime.includes("excel") ||
-        mime.includes("spreadsheetml") ||
-        hasExt(f.name, [".xls", ".xlsx", ".csv"])
-      );
-    if (typeFilter === "zip")
-      return (
-        mime.includes("zip") ||
-        mime.includes("compressed") ||
-        hasExt(f.name, [".zip", ".rar", ".7z", ".tar", ".gz"])
-      );
-    return true;
-  });
-  const files = applyManualOrder(filteredFiles, manualOrder.files);
+  const files = applyManualOrder(allFiles, manualOrder.files);
   const foldersRaw = foldersData?.folders ?? [];
   const folders =
     typeFilter === "all"
@@ -1075,7 +1065,7 @@ export default function FileBrowserPage() {
   const { capMap: folderCapMap } = useFolderCapabilities(folderIds);
   const isLoading = filesLoading || foldersLoading;
   const isFilteredEmpty =
-    files.length === 0 && allFiles.length > 0 && typeFilter !== "all";
+    files.length === 0 && typeFilter !== "all";
   const isEmpty = allFiles.length === 0 && folders.length === 0;
 
   const handleUploadComplete = () => {
@@ -1156,14 +1146,14 @@ export default function FileBrowserPage() {
   const handleShare = useCallback((file: BrowserFileItem) => {
     setPermissionsResource({ id: file.id, type: "file", name: file.name });
   }, []);
-  const handleFolderShare = (folder: StoreITem) => {
+  const handleFolderShare = (folder: StoreItem) => {
     setPermissionsResource({
       id: folder.id,
       type: "folder",
       name: folder.name,
     });
   };
-  const handleFolderDownload = async (folder: StoreITem) => {
+  const handleFolderDownload = async (folder: StoreItem) => {
     try {
       setIsZippingFolders(true);
       setZipFoldersProgress("zipping");
@@ -1349,7 +1339,7 @@ export default function FileBrowserPage() {
   const handleMove = useCallback((file: BrowserFileItem) => {
     setMoveFiles([file]);
   }, []);
-  const handleFolderAssignCategory = (folder: StoreITem) =>
+  const handleFolderAssignCategory = (folder: StoreItem) =>
     setCategoryResource({
       id: folder.id,
       type: "folder",
@@ -2810,7 +2800,7 @@ export default function FileBrowserPage() {
                   {selectedFolders.length !== 1 ? "s" : ""} selected
                 </span>
                 <div className="flex items-center gap-2 ml-auto">
-                  {canWrite && (
+                  {selectedFolders.every((id) => folderCan(id, "move_folders")) && (
                     <button
                       onClick={bulkFolderMove}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-primary-500 dark:text-pink-400
@@ -2820,7 +2810,7 @@ export default function FileBrowserPage() {
                       <FolderInput size={14} /> Move
                     </button>
                   )}
-                  {canWrite && (
+                  {selectedFolders.every((id) => folderCan(id, "download_folders")) && (
                     <button
                       onClick={bulkFolderDownload}
                       disabled={isZippingFolders}
@@ -2842,7 +2832,7 @@ export default function FileBrowserPage() {
                       )}
                     </button>
                   )}
-                  {canWrite && (
+                  {selectedFolders.every((id) => folderCan(id, "delete_folders")) && (
                     <button
                       onClick={() => setShowBulkFolderDelete(true)}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 dark:text-red-400
@@ -2871,7 +2861,7 @@ export default function FileBrowserPage() {
                   {selectedFiles.length} selected
                 </span>
                 <div className="flex items-center gap-2 ml-auto">
-                  {canWrite && (
+                  {selectedFiles.every((id) => fileCan(id, "move_files")) && (
                     <button
                       onClick={() =>
                         setMoveFiles(
@@ -2885,7 +2875,7 @@ export default function FileBrowserPage() {
                       <FolderInput size={14} /> Move
                     </button>
                   )}
-                  {canWrite && (
+                  {selectedFiles.every((id) => fileCan(id, "delete_files")) && (
                     <button
                       onClick={() => setShowBulkDelete(true)}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 dark:text-red-400
@@ -2895,7 +2885,7 @@ export default function FileBrowserPage() {
                       <Trash2 size={14} /> Delete
                     </button>
                   )}
-                  {canWrite && (
+                  {selectedFiles.every((id) => fileCan(id, "download_files")) && (
                     <button
                       onClick={bulkDownload}
                       disabled={isZipping}
@@ -3296,6 +3286,14 @@ export default function FileBrowserPage() {
                                       folder._count.files) !== 1
                                       ? "s"
                                       : ""}
+                                    {folder._count.children > 0 && (
+                                      <>
+                                        {" · "}
+                                        {folder._count.children}{" "}
+                                        folder
+                                        {folder._count.children !== 1 ? "s" : ""}
+                                      </>
+                                    )}
                                   </span>
                                   {missingMetaCount > 0 && (
                                     <span
@@ -3412,6 +3410,14 @@ export default function FileBrowserPage() {
                                     folder._count.files) !== 1
                                     ? "s"
                                     : ""}
+                                  {folder._count.children > 0 && (
+                                    <>
+                                      {" · "}
+                                      {folder._count.children}{" "}
+                                      folder
+                                      {folder._count.children !== 1 ? "s" : ""}
+                                    </>
+                                  )}
                                 </span>
                                 {missingMetaCount > 0 && (
                                   <span
@@ -3793,6 +3799,53 @@ export default function FileBrowserPage() {
               setSelectedFiles((prev) =>
                 prev.filter((id) => !movedFileIds.includes(id)),
               );
+            }}
+          />
+        )}
+        {moveFolders.length > 0 && (
+          <MoveFolderModal
+            folders={moveFolders.map((f) => ({ id: f.id, name: f.name }))}
+            onClose={() => setMoveFolders([])}
+            onSuccess={(targetParentId, movedFolderIds) => {
+              const movedCount = movedFolderIds.length;
+              // Update children counts optimistically in both caches
+              const updateChildren = (folders: StoreItem[]) =>
+                folders.map((folder) => {
+                  if (folder.id === targetParentId) {
+                    return {
+                      ...folder,
+                      _count: {
+                        ...folder._count,
+                        children: folder._count.children + movedCount,
+                      },
+                    };
+                  }
+                  if (folder.id === (folderId ?? null)) {
+                    return {
+                      ...folder,
+                      _count: {
+                        ...folder._count,
+                        children: Math.max(0, folder._count.children - movedCount),
+                      },
+                    };
+                  }
+                  return folder;
+                });
+
+              queryClient.setQueryData<{ folders: StoreItem[] }>(
+                ["folders", folderId ?? "root"],
+                (current) =>
+                  current ? { ...current, folders: updateChildren(current.folders) } : current,
+              );
+              queryClient.setQueryData<{ folders: StoreItem[] }>(
+                ["folders", "all"],
+                (current) =>
+                  current ? { ...current, folders: updateChildren(current.folders) } : current,
+              );
+
+              invalidateBrowserQueries();
+              setSelectedFolders([]);
+              setMoveFolders([]);
             }}
           />
         )}

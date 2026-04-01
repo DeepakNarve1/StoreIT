@@ -362,4 +362,96 @@ router.post(
   },
 );
 
+// ─── GET /api/superadmin/orgs/:id/users — list all users in tenant ────────────
+router.get("/orgs/:id/users", async (req: AuthRequest, res: Response) => {
+  try {
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id } });
+    if (!tenant) {
+      res.status(404).json({ error: "Organisation not found" });
+      return;
+    }
+
+    const users = await prisma.user.findMany({
+      where: { tenantId: req.params.id },
+      orderBy: [{ role: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+      },
+    });
+
+    res.json({ users });
+  } catch {
+    res.status(500).json({ error: "Failed to fetch organisation users" });
+  }
+});
+
+// ─── PATCH /api/superadmin/orgs/:id/users/:userId — enable/disable user ───────
+router.patch("/orgs/:id/users/:userId", async (req: AuthRequest, res: Response) => {
+  try {
+    const { isActive } = z
+      .object({ isActive: z.boolean() })
+      .parse(req.body);
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id } });
+    if (!tenant) {
+      res.status(404).json({ error: "Organisation not found" });
+      return;
+    }
+
+    const user = await prisma.user.findFirst({
+      where: { id: req.params.userId, tenantId: req.params.id },
+      select: { id: true, email: true, role: true, isActive: true },
+    });
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+    if (user.role === "SUPERADMIN") {
+      res.status(403).json({ error: "Cannot modify a Superadmin" });
+      return;
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: { isActive },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+      },
+    });
+
+    await createAuditLog({
+      action: "superadmin.user.update",
+      userId: req.user!.userId,
+      tenantId: req.user!.tenantId,
+      resourceType: "user",
+      resourceId: updated.id,
+      resourceName: updated.email,
+      metadata: {
+        targetTenantId: req.params.id,
+        isActive,
+        previousIsActive: user.isActive,
+      },
+      req,
+    });
+
+    res.json({ user: updated });
+  } catch (err: any) {
+    if (err?.name === "ZodError") {
+      res.status(400).json({ error: "Invalid input" });
+      return;
+    }
+    res.status(500).json({ error: "Failed to update user" });
+  }
+});
+
 export default router;
