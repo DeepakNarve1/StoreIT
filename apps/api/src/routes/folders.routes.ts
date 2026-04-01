@@ -56,6 +56,7 @@ async function getVisibleFolderIdSetForUser(opts: {
   });
 
   const directlyVisible = new Set<string>();
+  const expandToDescendants = new Set<string>();
   for (const p of perms) {
     const caps = (p as any).capabilities as Record<string, boolean> | null;
     const hasSeeFolders =
@@ -65,6 +66,7 @@ async function getVisibleFolderIdSetForUser(opts: {
       p.action,
     );
     if (hasSeeFolders || hasAnyFolderAccess) directlyVisible.add(p.resourceId);
+    if (caps?.apply_subfolders === true) expandToDescendants.add(p.resourceId);
   }
 
   if (directlyVisible.size === 0) return new Set<string>();
@@ -79,6 +81,30 @@ async function getVisibleFolderIdSetForUser(opts: {
   allFolders.forEach((f) => byId.set(f.id, f));
 
   const visible = new Set<string>(directlyVisible);
+
+  // If the grant is marked "apply_subfolders", include all descendants too.
+  if (expandToDescendants.size > 0) {
+    const childrenByParent = new Map<string | null, string[]>();
+    for (const f of allFolders) {
+      const arr = childrenByParent.get(f.parentId ?? null) ?? [];
+      arr.push(f.id);
+      childrenByParent.set(f.parentId ?? null, arr);
+    }
+
+    const queue: string[] = Array.from(expandToDescendants);
+    const seen = new Set(queue);
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const children = childrenByParent.get(current) ?? [];
+      for (const childId of children) {
+        if (seen.has(childId)) continue;
+        seen.add(childId);
+        visible.add(childId);
+        queue.push(childId);
+      }
+    }
+  }
+
   for (const id of directlyVisible) {
     let current = byId.get(id)?.parentId ?? null;
     let depth = 0;

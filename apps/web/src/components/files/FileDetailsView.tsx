@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   FileText,
@@ -16,6 +17,7 @@ import {
 } from "lucide-react";
 import api from "../../api/axios";
 import { getAuditActionLabel } from "../../utils/auditAction";
+import { useToast } from "../ui/toastStore";
 
 interface FileItem {
   id: string;
@@ -46,9 +48,16 @@ interface Props {
   onOpenVersionHistory?: (file: FileItem) => void;
   onOpenWorkflow?: (file: FileItem) => void;
   canViewMetadata?: boolean;
+  canEditMetadata?: boolean;
   isLocking?: boolean;
   isUploadingVersion?: boolean;
   workflowButtonLabel?: string;
+  canToggleLock?: boolean;
+  canUploadVersion?: boolean;
+  canOpenWorkflow?: boolean;
+  canManageRetention?: boolean;
+  canManageShare?: boolean;
+  canManageReminders?: boolean;
 }
 
 const formatBytes = (bytes: number) => {
@@ -99,10 +108,21 @@ export default function FileDetailsView({
   onOpenVersionHistory,
   onOpenWorkflow,
   canViewMetadata = true,
+  canEditMetadata = false,
   isLocking = false,
   isUploadingVersion = false,
   workflowButtonLabel = "Start approval workflow",
+  canToggleLock = true,
+  canUploadVersion = true,
+  canOpenWorkflow = true,
+  canManageRetention = true,
+  canManageShare = true,
+  canManageReminders = true,
 }: Props) {
+  const queryClient = useQueryClient();
+  const { add } = useToast();
+  const [noteDraft, setNoteDraft] = useState("");
+
   const { data: metadataData, isLoading: metadataLoading } = useQuery({
     queryKey: ["file-metadata-preview-inline", file?.id],
     enabled: !!file?.id && canViewMetadata,
@@ -143,9 +163,41 @@ export default function FileDetailsView({
   if (!file) return null;
   const metadataRows = metadataData?.metadata ?? [];
   const auditLogs = auditData?.logs ?? [];
-  const topMeta = metadataRows.slice(0, 8);
+  const notesRow = useMemo(
+    () => metadataRows.find((m) => m.key.toLowerCase() === "notes"),
+    [metadataRows],
+  );
+  const topMeta = metadataRows
+    .filter((m) => m.key.toLowerCase() !== "notes")
+    .slice(0, 8);
   const versions = versionsData?.versions ?? [];
   const previousVersions = versions.filter((v) => !v.isCurrent).slice(0, 3);
+  const notesChanged = noteDraft.trim() !== (notesRow?.value ?? "").trim();
+
+  useEffect(() => {
+    setNoteDraft(notesRow?.value ?? "");
+  }, [file.id, notesRow?.value]);
+
+  const saveNotes = useMutation({
+    mutationFn: async () => {
+      const remaining = metadataRows
+        .filter((row) => row.key.toLowerCase() !== "notes")
+        .map((row) => ({ key: row.key, value: row.value ?? "" }));
+      const next = noteDraft.trim();
+      const fields =
+        next.length > 0 ? [...remaining, { key: "notes", value: next }] : remaining;
+      await api.put(`/files/${file.id}/metadata`, { fields });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["file-metadata-preview-inline", file.id],
+      });
+      add("Notes saved", "success");
+    },
+    onError: () => {
+      add("Failed to save notes", "error");
+    },
+  });
 
   return (
     <div className="space-y-4">
@@ -233,10 +285,38 @@ export default function FileDetailsView({
                     <p className="text-blue-600 dark:text-blue-400 font-semibold mb-1">
                       Notes
                     </p>
-                    <p className="text-gray-700 dark:text-gray-200">
-                      {metadataRows.find((m) => m.key.toLowerCase() === "notes")
-                        ?.value || "—"}
-                    </p>
+                    {canEditMetadata ? (
+                      <div className="space-y-2">
+                        <textarea
+                          value={noteDraft}
+                          onChange={(e) => setNoteDraft(e.target.value)}
+                          rows={4}
+                          className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2.5 py-2 text-xs text-gray-700 dark:text-gray-200"
+                          placeholder="Add a note for this document..."
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => saveNotes.mutate()}
+                            disabled={!notesChanged || saveNotes.isPending}
+                            className="px-2.5 py-1.5 text-xs rounded bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-50"
+                          >
+                            {saveNotes.isPending ? "Saving..." : "Save note"}
+                          </button>
+                          {notesChanged && (
+                            <button
+                              onClick={() => setNoteDraft(notesRow?.value ?? "")}
+                              className="px-2 py-1.5 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-gray-700 dark:text-gray-200 whitespace-pre-wrap">
+                        {notesRow?.value || "—"}
+                      </p>
+                    )}
                   </div>
                   <div>
                     <p className="text-blue-600 dark:text-blue-400 font-semibold mb-1">
@@ -389,62 +469,76 @@ export default function FileDetailsView({
         </div>
 
         <div className="xl:col-span-3 space-y-3">
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/90 p-3">
-            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2 inline-flex items-center gap-1">
-              <Bell size={14} /> Reminders
-            </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              No reminders
-            </p>
-            <button className="mt-2 text-xs text-gray-600 dark:text-gray-300 hover:underline">
-              + Add new reminder
-            </button>
-          </div>
-
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/90 p-3 space-y-2">
-            <div>
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1 inline-flex items-center gap-1">
-                <Share2 size={14} /> Shared to
+          {canManageReminders && (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/90 p-3">
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2 inline-flex items-center gap-1">
+                <Bell size={14} /> Reminders
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Edit from permissions
+                No reminders
               </p>
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1 mr-2 inline-flex items-center gap-1">
-                <ShieldCheck size={14} /> Retention
-              </p>
-              <button
-                onClick={() => onOpenRetention?.(file)}
-                className="mt-2 text-xs text-gray-700 dark:text-gray-300 hover:underline"
-              >
-                {retentionLabel}
+              <button className="mt-2 text-xs text-gray-600 dark:text-gray-300 hover:underline">
+                + Add new reminder
               </button>
             </div>
-          </div>
+          )}
+
+          {(canManageShare || canManageRetention) && (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/90 p-3 space-y-2">
+              {canManageShare && (
+                <div>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1 inline-flex items-center gap-1">
+                    <Share2 size={14} /> Shared to
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Edit from permissions
+                  </p>
+                </div>
+              )}
+              {canManageRetention && (
+                <div>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1 mr-2 inline-flex items-center gap-1">
+                    <ShieldCheck size={14} /> Retention
+                  </p>
+                  <button
+                    onClick={() => onOpenRetention?.(file)}
+                    className="mt-2 text-xs text-gray-700 dark:text-gray-300 hover:underline"
+                  >
+                    {retentionLabel}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2">
-            <button
-              onClick={() => onToggleLock?.(file)}
-              disabled={isLocking}
-              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded bg-primary-600 text-white hover:bg-primary-500 dark:bg-primary-600 dark:hover:bg-primary-400 disabled:opacity-60"
-            >
-              <Lock size={13} /> {file.isLocked ? "Unlock file" : "Lock file"}
-            </button>
-            <button
-              onClick={() => onUploadNewVersion?.(file)}
-              disabled={isUploadingVersion}
-              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded bg-primary-600 text-white hover:bg-primary-500 dark:bg-primary-600 dark:hover:bg-primary-400 disabled:opacity-60"
-            >
-              <Upload size={13} />{" "}
-              {isUploadingVersion ? "Uploading..." : "Upload new version"}
-            </button>
-            <button
-              onClick={() => onOpenWorkflow?.(file)}
-              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded bg-primary-600 text-white hover:bg-primary-500 dark:bg-primary-600 dark:hover:bg-primary-400"
-            >
-              <Workflow size={13} /> {workflowButtonLabel}
-            </button>
+            {canToggleLock && (
+              <button
+                onClick={() => onToggleLock?.(file)}
+                disabled={isLocking}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded bg-primary-600 text-white hover:bg-primary-500 dark:bg-primary-600 dark:hover:bg-primary-400 disabled:opacity-60"
+              >
+                <Lock size={13} /> {file.isLocked ? "Unlock file" : "Lock file"}
+              </button>
+            )}
+            {canUploadVersion && (
+              <button
+                onClick={() => onUploadNewVersion?.(file)}
+                disabled={isUploadingVersion}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded bg-primary-600 text-white hover:bg-primary-500 dark:bg-primary-600 dark:hover:bg-primary-400 disabled:opacity-60"
+              >
+                <Upload size={13} />{" "}
+                {isUploadingVersion ? "Uploading..." : "Upload new version"}
+              </button>
+            )}
+            {canOpenWorkflow && (
+              <button
+                onClick={() => onOpenWorkflow?.(file)}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded bg-primary-600 text-white hover:bg-primary-500 dark:bg-primary-600 dark:hover:bg-primary-400"
+              >
+                <Workflow size={13} /> {workflowButtonLabel}
+              </button>
+            )}
           </div>
         </div>
       </div>

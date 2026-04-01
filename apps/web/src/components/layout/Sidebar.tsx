@@ -238,6 +238,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
   const location = useLocation();
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
+  const isViewer = user?.role === "VIEWER";
   const canWrite =
     user?.role === "SUPERADMIN" ||
     user?.roleCapabilities?.create_folders === true ||
@@ -395,6 +396,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
       };
     },
     staleTime: 60 * 1000,
+    enabled: !isViewer,
   });
   const stats = statsData?.stats;
 
@@ -732,7 +734,8 @@ export default function Sidebar({ isOpen }: SidebarProps) {
           </button>
         )}
         {/* Storage quota */}
-        {stats &&
+        {!isViewer &&
+          stats &&
           (() => {
             const cap = stats.storageLimit;
             const unlimited = cap === null || cap > 1e15;

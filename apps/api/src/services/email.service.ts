@@ -82,13 +82,13 @@ export const sendInviteEmail = async ({
                     border:1px solid #e5e7eb;overflow:hidden;">
 
           <!-- Header -->
-          <div style="background:#1d4ed8;padding:24px 32px;">
+          <div style="background:#db2777;padding:24px 32px;">
             <div style="display:flex;align-items:center;gap:10px;">
               <div style="width:32px;height:32px;background:white;border-radius:8px;
                           display:flex;align-items:center;justify-content:center;">
-                <span style="color:#1d4ed8;font-weight:700;font-size:16px;">F</span>
+                <span style="color:#db2777;font-weight:700;font-size:16px;">S</span>
               </div>
-              <span style="color:white;font-weight:600;font-size:16px;">StoreIT  </span>
+              <span style="color:white;font-weight:600;font-size:16px;">StoreIT</span>
             </div>
           </div>
 
@@ -104,7 +104,7 @@ export const sendInviteEmail = async ({
 
             <!-- CTA Button -->
             <a href="${inviteUrl}"
-               style="display:inline-block;background:#1d4ed8;color:white;
+               style="display:inline-block;background:#db2777;color:white;
                       font-size:14px;font-weight:600;padding:12px 24px;
                       border-radius:8px;text-decoration:none;margin-bottom:24px;">
               Accept Invitation →

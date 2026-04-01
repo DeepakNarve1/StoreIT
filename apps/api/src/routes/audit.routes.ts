@@ -5,6 +5,7 @@ import XLSX from "xlsx";
 import PDFDocument from "pdfkit";
 import { userHasCapability } from "./permissions.routes";
 import { z } from "zod";
+import { userCanAccessFile } from "../services/file-access.service";
 
 const router = Router();
 
@@ -84,6 +85,26 @@ router.get(
       const privileged = ["SUPERADMIN", "ORG_ADMIN", "MANAGER", "EDITOR"].includes(role);
 
       if (!privileged) {
+        const file = await prisma.file.findFirst({
+          where: { id: fileId, tenantId, isDeleted: false },
+          select: { id: true, uploadedById: true, folderId: true },
+        });
+        if (!file) {
+          res.status(404).json({ error: "File not found" });
+          return;
+        }
+        const canAccess = await userCanAccessFile(
+          file.id,
+          userId,
+          tenantId,
+          role,
+          file.uploadedById,
+          file.folderId,
+        );
+        if (!canAccess) {
+          res.status(403).json({ error: "Access denied" });
+          return;
+        }
         const ok = await userHasCapability(
           userId,
           tenantId,

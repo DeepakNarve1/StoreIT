@@ -13,6 +13,8 @@ import api from "../../api/axios";
 interface FileVersionsModalProps {
   file: { id: string; name: string; version?: number };
   onClose: () => void;
+  canRestore?: boolean;
+  canView?: boolean;
 }
 
 type FileVersionRow = {
@@ -35,6 +37,8 @@ const formatBytes = (bytes: number) => {
 export default function FileVersionsModal({
   file,
   onClose,
+  canRestore = true,
+  canView = true,
 }: FileVersionsModalProps) {
   const queryClient = useQueryClient();
   const [openingVersionId, setOpeningVersionId] = useState<string | null>(null);
@@ -193,36 +197,42 @@ export default function FileVersionsModal({
                     <div className="flex items-center gap-1 shrink-0">
                       {!ver.isCurrent && (
                         <>
-                          <button
-                            onClick={() => openPreviousVersion(ver.id)}
-                            disabled={openingVersionId === ver.id}
-                            className="flex items-center gap-1 px-2 py-1.5 text-xs
+                          {canView && (
+                            <button
+                              onClick={() => openPreviousVersion(ver.id)}
+                              disabled={openingVersionId === ver.id}
+                              className="flex items-center gap-1 px-2 py-1.5 text-xs
                                        font-medium text-gray-600 hover:bg-gray-100
                                        rounded-lg transition-colors disabled:opacity-50"
-                            title="Open this version"
-                          >
-                            {openingVersionId === ver.id ? (
-                              <Loader size={12} className="animate-spin" />
-                            ) : (
-                              <History size={12} />
-                            )}
-                            View
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (confirm(`Restore to version ${ver.version}?`)) {
-                                restore.mutate(ver.id);
-                              }
-                            }}
-                            disabled={restore.isPending}
-                            className="flex items-center gap-1 px-2 py-1.5 text-xs
+                              title="Open this version"
+                            >
+                              {openingVersionId === ver.id ? (
+                                <Loader size={12} className="animate-spin" />
+                              ) : (
+                                <History size={12} />
+                              )}
+                              View
+                            </button>
+                          )}
+                          {canRestore && (
+                            <button
+                              onClick={() => {
+                                if (
+                                  confirm(`Restore to version ${ver.version}?`)
+                                ) {
+                                  restore.mutate(ver.id);
+                                }
+                              }}
+                              disabled={restore.isPending}
+                              className="flex items-center gap-1 px-2 py-1.5 text-xs
                                        font-medium text-primary-500 hover:bg-primary-50
                                        rounded-lg transition-colors disabled:opacity-50"
-                            title="Restore this version"
-                          >
-                            <RotateCcw size={12} />
-                            Restore
-                          </button>
+                              title="Restore this version"
+                            >
+                              <RotateCcw size={12} />
+                              Restore
+                            </button>
+                          )}
                         </>
                       )}
                     </div>

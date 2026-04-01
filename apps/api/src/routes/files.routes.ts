@@ -22,6 +22,7 @@ import { userHasCapability } from "./permissions.routes";
 import {
   userCanAccessFile,
   userHasFilePermission,
+  userHasResolvedFileCapability,
 } from "../services/file-access.service";
 
 const router = Router();
@@ -166,11 +167,47 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
             { folder: { tenantId } },
           ],
         },
-        select: { resourceId: true },
+        select: { resourceId: true, capabilities: true },
       });
 
       const allowedFileIds = filePerms.map((p) => p.resourceId);
-      const allowedFolderIds = folderPerms.map((p) => p.resourceId);
+      let allowedFolderIds = folderPerms.map((p) => p.resourceId);
+
+      // If the permission is marked apply_subfolders, include descendants.
+      const rootsToExpand = folderPerms
+        .filter((p) => {
+          const caps = (p as any).capabilities as Record<string, boolean> | null;
+          return caps?.apply_subfolders === true;
+        })
+        .map((p) => p.resourceId);
+
+      if (rootsToExpand.length > 0) {
+        const allFolders = await prisma.folder.findMany({
+          where: { tenantId, isDeleted: false },
+          select: { id: true, parentId: true },
+        });
+        const childrenByParent = new Map<string | null, string[]>();
+        for (const f of allFolders) {
+          const arr = childrenByParent.get(f.parentId ?? null) ?? [];
+          arr.push(f.id);
+          childrenByParent.set(f.parentId ?? null, arr);
+        }
+
+        const expanded = new Set<string>(allowedFolderIds);
+        const queue: string[] = rootsToExpand.slice();
+        const seen = new Set(queue);
+        while (queue.length > 0) {
+          const current = queue.shift()!;
+          const children = childrenByParent.get(current) ?? [];
+          for (const childId of children) {
+            if (seen.has(childId)) continue;
+            seen.add(childId);
+            expanded.add(childId);
+            queue.push(childId);
+          }
+        }
+        allowedFolderIds = Array.from(expanded);
+      }
 
       files = await prisma.file.findMany({
         where: {
@@ -1146,6 +1183,7 @@ router.get(
         tenantId,
         role,
         file.uploadedById,
+        file.folderId,
       );
       if (!canAccess) {
         res.status(403).json({ error: "Access denied" });
@@ -1205,10 +1243,11 @@ router.get(
       return;
     }
     try {
+      const { userId, tenantId, role } = req.user!;
       const file = await prisma.file.findFirst({
         where: {
           id: req.params.id,
-          tenantId: req.user!.tenantId,
+          tenantId,
           isDeleted: false,
         },
         include: {
@@ -1221,6 +1260,18 @@ router.get(
       });
       if (!file) {
         res.status(404).json({ error: "File not found" });
+        return;
+      }
+      const canAccess = await userCanAccessFile(
+        file.id,
+        userId,
+        tenantId,
+        role,
+        file.uploadedById,
+        file.folderId,
+      );
+      if (!canAccess) {
+        res.status(403).json({ error: "Access denied" });
         return;
       }
       const allVersions = [
@@ -1266,10 +1317,34 @@ router.get(
         tenantId,
         role,
         file.uploadedById,
+        file.folderId,
       );
       if (!canAccess) {
         res.status(403).json({ error: "Access denied" });
         return;
+      }
+
+      // Granular guard: viewing a previous version is still "preview".
+      // If you don't have preview permission, you must not get a signed URL.
+      const isPrivileged = [
+        "SUPERADMIN",
+        "ORG_ADMIN",
+        "MANAGER",
+        "EDITOR",
+      ].includes(role);
+      if (!isPrivileged) {
+        const canPreview = await userHasResolvedFileCapability({
+          userId,
+          tenantId,
+          fileId: file.id,
+          folderId: file.folderId,
+          uploadedById: file.uploadedById,
+          capability: "preview_files",
+        });
+        if (!canPreview) {
+          res.status(403).json({ error: "You don't have permission to preview this file." });
+          return;
+        }
       }
 
       const versionRecord = await prisma.fileVersion.findFirst({
@@ -1330,6 +1405,32 @@ router.post(
       if (!file) {
         res.status(404).json({ error: "File not found" });
         return;
+      }
+
+      // ── PERMISSION GUARD ──────────────────────────────────────────────────
+      // Viewers should never be allowed to restore previous versions.
+      // Privileged roles can; non-privileged require update_versions capability.
+      const isPrivileged = [
+        "SUPERADMIN",
+        "ORG_ADMIN",
+        "MANAGER",
+        "EDITOR",
+      ].includes(req.user!.role);
+      if (!isPrivileged) {
+        const canRestore = await userHasCapability(
+          req.user!.userId,
+          req.user!.tenantId,
+          req.user!.role,
+          "file",
+          file.id,
+          "update_versions",
+        );
+        if (!canRestore) {
+          res.status(403).json({
+            error: "You don't have permission to restore previous versions.",
+          });
+          return;
+        }
       }
 
       // ── LOCK GUARD ────────────────────────────────────────────────────────
@@ -1468,16 +1569,29 @@ router.get("/:id/tags", verifyAuth, async (req: AuthRequest, res: Response) => {
     return;
   }
   try {
+    const { userId, tenantId, role } = req.user!;
     const file = await prisma.file.findFirst({
       where: {
         id: req.params.id,
-        tenantId: req.user!.tenantId,
+        tenantId,
         isDeleted: false,
       },
-      select: { id: true },
+      select: { id: true, uploadedById: true, folderId: true },
     });
     if (!file) {
       res.status(404).json({ error: "File not found" });
+      return;
+    }
+    const canAccess = await userCanAccessFile(
+      file.id,
+      userId,
+      tenantId,
+      role,
+      file.uploadedById,
+      file.folderId,
+    );
+    if (!canAccess) {
+      res.status(403).json({ error: "Access denied" });
       return;
     }
     const tags = await prisma.fileTag.findMany({
@@ -1511,11 +1625,36 @@ router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
       tenantId,
       role,
       file.uploadedById,
+      file.folderId,
     );
     if (!canAccess) {
       res.status(403).json({ error: "Access denied" });
       return;
     }
+
+    // VIEWER-style sharing is often done at the folder level; resolve preview access
+    // from either a direct file grant or the containing folder's grant.
+    const isPrivileged = [
+      "SUPERADMIN",
+      "ORG_ADMIN",
+      "MANAGER",
+      "EDITOR",
+    ].includes(role);
+    if (!isPrivileged) {
+      const canPreview = await userHasResolvedFileCapability({
+        userId,
+        tenantId,
+        fileId: file.id,
+        folderId: file.folderId,
+        uploadedById: file.uploadedById,
+        capability: "preview_files",
+      });
+      if (!canPreview) {
+        res.status(403).json({ error: "You don't have permission to preview this file." });
+        return;
+      }
+    }
+
     const viewUrl = await getFileViewUrl(file.storageKey, SIGNED_URL_TTL.VIEW);
     await createAuditLog({
       action: "file.view",
@@ -1923,28 +2062,29 @@ router.get(
       return;
     }
     try {
+      const { userId, tenantId, role } = req.user!;
       const file = await prisma.file.findFirst({
         where: {
           id: req.params.id,
-          tenantId: req.user!.tenantId,
+          tenantId,
           isDeleted: false,
         },
-        select: { id: true },
+        select: { id: true, uploadedById: true, folderId: true },
       });
       if (!file) {
         res.status(404).json({ error: "File not found" });
         return;
       }
-      const fileForPerm = await prisma.file.findFirst({
-        where: {
-          id: req.params.id,
-          tenantId: req.user!.tenantId,
-          isDeleted: false,
-        },
-        select: { id: true, uploadedById: true },
-      });
-      if (!fileForPerm) {
-        res.status(404).json({ error: "File not found" });
+      const canAccess = await userCanAccessFile(
+        file.id,
+        userId,
+        tenantId,
+        role,
+        file.uploadedById,
+        file.folderId,
+      );
+      if (!canAccess) {
+        res.status(403).json({ error: "Access denied" });
         return;
       }
       const isPrivileged = [
@@ -1952,14 +2092,14 @@ router.get(
         "ORG_ADMIN",
         "MANAGER",
         "EDITOR",
-      ].includes(req.user!.role);
+      ].includes(role);
       if (!isPrivileged) {
         const canViewMetadata = await userHasCapability(
-          req.user!.userId,
-          req.user!.tenantId,
-          req.user!.role,
+          userId,
+          tenantId,
+          role,
           "file",
-          fileForPerm.id,
+          file.id,
           "view_metadata",
         );
         if (!canViewMetadata) {
@@ -1988,28 +2128,29 @@ router.get(
       return;
     }
     try {
+      const { userId, tenantId, role } = req.user!;
       const file = await prisma.file.findFirst({
         where: {
           id: req.params.id,
-          tenantId: req.user!.tenantId,
+          tenantId,
           isDeleted: false,
         },
-        select: { id: true },
+        select: { id: true, uploadedById: true, folderId: true },
       });
       if (!file) {
         res.status(404).json({ error: "File not found" });
         return;
       }
-      const fileForPerm = await prisma.file.findFirst({
-        where: {
-          id: req.params.id,
-          tenantId: req.user!.tenantId,
-          isDeleted: false,
-        },
-        select: { id: true, uploadedById: true },
-      });
-      if (!fileForPerm) {
-        res.status(404).json({ error: "File not found" });
+      const canAccess = await userCanAccessFile(
+        file.id,
+        userId,
+        tenantId,
+        role,
+        file.uploadedById,
+        file.folderId,
+      );
+      if (!canAccess) {
+        res.status(403).json({ error: "Access denied" });
         return;
       }
       const isPrivileged = [
@@ -2017,14 +2158,14 @@ router.get(
         "ORG_ADMIN",
         "MANAGER",
         "EDITOR",
-      ].includes(req.user!.role);
+      ].includes(role);
       if (!isPrivileged) {
         const canViewMetadata = await userHasCapability(
-          req.user!.userId,
-          req.user!.tenantId,
-          req.user!.role,
+          userId,
+          tenantId,
+          role,
           "file",
-          fileForPerm.id,
+          file.id,
           "view_metadata",
         );
         if (!canViewMetadata) {
@@ -2035,7 +2176,7 @@ router.get(
 
       const logs = await prisma.auditLog.findMany({
         where: {
-          tenantId: req.user!.tenantId,
+          tenantId,
           resourceType: "file",
           resourceId: req.params.id,
           action: { in: ["file.metadata.update", "file.metadata.bulk_update"] },
@@ -2061,10 +2202,11 @@ router.get(
       return;
     }
     try {
+      const { userId, tenantId, role } = req.user!;
       const file = await prisma.file.findFirst({
         where: {
           id: req.params.id,
-          tenantId: req.user!.tenantId,
+          tenantId,
           isDeleted: false,
         },
         select: { id: true, folderId: true, uploadedById: true },
@@ -2073,17 +2215,29 @@ router.get(
         res.status(404).json({ error: "File not found" });
         return;
       }
+      const canAccess = await userCanAccessFile(
+        file.id,
+        userId,
+        tenantId,
+        role,
+        file.uploadedById,
+        file.folderId,
+      );
+      if (!canAccess) {
+        res.status(403).json({ error: "Access denied" });
+        return;
+      }
       const isPrivileged = [
         "SUPERADMIN",
         "ORG_ADMIN",
         "MANAGER",
         "EDITOR",
-      ].includes(req.user!.role);
+      ].includes(role);
       if (!isPrivileged) {
         const canViewMetadata = await userHasCapability(
-          req.user!.userId,
-          req.user!.tenantId,
-          req.user!.role,
+          userId,
+          tenantId,
+          role,
           "file",
           file.id,
           "view_metadata",
@@ -2111,7 +2265,7 @@ router.get(
           await prisma.folder.findFirst({
             where: {
               id: current,
-              tenantId: req.user!.tenantId,
+              tenantId,
               isDeleted: false,
             },
             select: { parentId: true },
@@ -2122,7 +2276,7 @@ router.get(
 
       const defs = await prisma.folderMetadataField.findMany({
         where: {
-          tenantId: req.user!.tenantId,
+          tenantId,
           folderId: { in: folderIds.map((f) => f.id) },
         },
         select: {
@@ -2437,16 +2591,29 @@ router.get(
       return;
     }
     try {
+      const { userId, tenantId, role } = req.user!;
       const file = await prisma.file.findFirst({
         where: {
           id: req.params.id,
-          tenantId: req.user!.tenantId,
+          tenantId,
           isDeleted: false,
         },
-        select: { id: true },
+        select: { id: true, uploadedById: true, folderId: true },
       });
       if (!file) {
         res.status(404).json({ error: "File not found" });
+        return;
+      }
+      const canAccess = await userCanAccessFile(
+        file.id,
+        userId,
+        tenantId,
+        role,
+        file.uploadedById,
+        file.folderId,
+      );
+      if (!canAccess) {
+        res.status(403).json({ error: "Access denied" });
         return;
       }
       const comments = await prisma.fileComment.findMany({
@@ -2470,18 +2637,32 @@ router.post(
       return;
     }
     try {
+      const { userId, tenantId, role } = req.user!;
       const { content } = z
         .object({ content: z.string().min(1).max(1000) })
         .parse(req.body);
       const file = await prisma.file.findFirst({
         where: {
           id: req.params.id,
-          tenantId: req.user!.tenantId,
+          tenantId,
           isDeleted: false,
         },
+        select: { id: true, uploadedById: true, folderId: true },
       });
       if (!file) {
         res.status(404).json({ error: "File not found" });
+        return;
+      }
+      const canAccess = await userCanAccessFile(
+        file.id,
+        userId,
+        tenantId,
+        role,
+        file.uploadedById,
+        file.folderId,
+      );
+      if (!canAccess) {
+        res.status(403).json({ error: "Access denied" });
         return;
       }
       const comment = await prisma.fileComment.create({
@@ -2504,19 +2685,32 @@ router.delete(
   verifyAuth,
   async (req: AuthRequest, res: Response) => {
     try {
+      const { userId, tenantId, role } = req.user!;
       const file = await prisma.file.findFirst({
-        where: { id: req.params.id, tenantId: req.user!.tenantId },
-        select: { id: true },
+        where: { id: req.params.id, tenantId, isDeleted: false },
+        select: { id: true, uploadedById: true, folderId: true },
       });
       if (!file) {
         res.status(404).json({ error: "File not found" });
+        return;
+      }
+      const canAccess = await userCanAccessFile(
+        file.id,
+        userId,
+        tenantId,
+        role,
+        file.uploadedById,
+        file.folderId,
+      );
+      if (!canAccess) {
+        res.status(403).json({ error: "Access denied" });
         return;
       }
       const comment = await prisma.fileComment.findFirst({
         where: {
           id: req.params.commentId,
           fileId: req.params.id,
-          userId: req.user!.userId,
+          userId,
         },
       });
       if (!comment) {

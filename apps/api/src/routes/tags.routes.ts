@@ -3,6 +3,7 @@ import { z } from "zod";
 import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import { userHasCapability } from "./permissions.routes";
+import { userCanAccessFile } from "../services/file-access.service";
 
 const router = Router();
 
@@ -74,6 +75,18 @@ router.post(
         res.status(404).json({ error: "File not found" });
         return;
       }
+      const canAccess = await userCanAccessFile(
+        file.id,
+        req.user!.userId,
+        req.user!.tenantId,
+        req.user!.role,
+        file.uploadedById,
+        file.folderId,
+      );
+      if (!canAccess) {
+        res.status(403).json({ error: "Access denied" });
+        return;
+      }
 
       const isPrivileged = [
         "SUPERADMIN",
@@ -125,6 +138,29 @@ router.delete(
     try {
       if (!isValidUUID(req.params.id) || !isValidUUID(req.params.fileId)) {
         res.status(400).json({ error: "Invalid ID" });
+        return;
+      }
+      const file = await prisma.file.findFirst({
+        where: {
+          id: req.params.fileId,
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+        },
+      });
+      if (!file) {
+        res.status(404).json({ error: "File not found" });
+        return;
+      }
+      const canAccess = await userCanAccessFile(
+        file.id,
+        req.user!.userId,
+        req.user!.tenantId,
+        req.user!.role,
+        file.uploadedById,
+        file.folderId,
+      );
+      if (!canAccess) {
+        res.status(403).json({ error: "Access denied" });
         return;
       }
       const isPrivileged = [
@@ -179,7 +215,7 @@ router.get(
         return;
       }
 
-      const files = await prisma.file.findMany({
+      const allFiles = await prisma.file.findMany({
         where: {
           tenantId: req.user!.tenantId,
           isDeleted: false,
@@ -192,10 +228,36 @@ router.get(
           size: true,
           createdAt: true,
           version: true,
+          uploadedById: true,
+          folderId: true,
           folder: { select: { name: true } },
         },
       });
-      res.json({ tag, files });
+      const privileged = [
+        "SUPERADMIN",
+        "ORG_ADMIN",
+        "MANAGER",
+        "EDITOR",
+      ].includes(req.user!.role);
+      if (privileged) {
+        res.json({ tag, files: allFiles });
+        return;
+      }
+
+      const visible: typeof allFiles = [];
+      for (const f of allFiles) {
+        const ok = await userCanAccessFile(
+          f.id,
+          req.user!.userId,
+          req.user!.tenantId,
+          req.user!.role,
+          f.uploadedById,
+          f.folderId,
+        );
+        if (ok) visible.push(f);
+      }
+
+      res.json({ tag, files: visible });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch tag files" });
     }

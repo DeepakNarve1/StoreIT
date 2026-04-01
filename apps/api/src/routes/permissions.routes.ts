@@ -264,37 +264,10 @@ router.post(
           roleContext.baseRole === "VIEWER" && !activePerm && !isOwner
             ? normalizeCapabilities({})
             : baseCaps;
+        // Final capability map for this file:
+        // - seed with role profile caps (or empty for unshared VIEWERs),
+        // - merge in the shared capabilities from the active permission row (direct file or folder).
         result[fileId] = mergeCapabilities(seededCaps, sharedCaps);
-        if (true) {
-          // No grant at all — only preview allowed
-          result[fileId] = result[fileId];
-        } else if (caps && typeof caps === "object" && Object.keys(caps ?? {}).length > 0) {
-          // Explicit granular capabilities from the permission record
-          result[fileId] = ALL_CAPS.reduce(
-            (acc, k) => ({ ...acc, [k]: (caps?.[k] ?? false) === true }),
-            {} as Record<string, boolean>,
-          );
-          // Always allow preview
-          result[fileId]["preview_files"] = true;
-        } else {
-          // Coarse action — map to capabilities
-          const action = activePerm?.action ?? "read";
-          const coarseWrite = ["write", "delete", "admin"].includes(action);
-          const coarseDelete = ["delete", "admin"].includes(action);
-          result[fileId] = {
-            preview_files: true,
-            see_files: true,
-            see_folders: coarseWrite,
-            download_files: coarseWrite || isOwner,
-            add_files: coarseWrite,
-            delete_files: coarseDelete || isOwner,
-            edit_file_attrs: coarseWrite || isOwner,
-            view_metadata: coarseWrite || isOwner,
-            edit_metadata: coarseWrite || isOwner,
-            share_files: action === "admin",
-            share_folders: action === "admin",
-          };
-        }
 
         // File owner always gets full self-access
         if (isOwner) {

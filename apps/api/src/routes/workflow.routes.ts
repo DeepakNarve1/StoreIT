@@ -4,6 +4,7 @@ import { verifyAuth, AuthRequest } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import { userHasCapability } from "./permissions.routes";
 import { createAuditLog } from "../services/audit.service";
+import { userCanAccessFile } from "../services/file-access.service";
 import {
   approvalWorkflowInclude,
   cancelWorkflowInTransaction,
@@ -105,9 +106,18 @@ router.get("/approvers", verifyAuth, async (req: AuthRequest, res: Response) => 
 
 router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
   try {
+    const privileged = ADMIN_ROLES.has(req.user!.role);
     const workflows = await prisma.approvalWorkflow.findMany({
       where: {
         tenantId: req.user!.tenantId,
+        ...(privileged
+          ? {}
+          : {
+              OR: [
+                { ownerId: req.user!.userId },
+                { steps: { some: { approverUserId: req.user!.userId } } },
+              ],
+            }),
       },
       orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
       include: approvalWorkflowInclude,
@@ -203,11 +213,24 @@ router.get(
           activeWorkflowId: true,
           currentStepOrder: true,
           uploadedById: true,
+          folderId: true,
         },
       });
 
       if (!file) {
         res.status(404).json({ error: "File not found" });
+        return;
+      }
+      const canAccess = await userCanAccessFile(
+        file.id,
+        req.user!.userId,
+        req.user!.tenantId,
+        req.user!.role,
+        file.uploadedById,
+        file.folderId,
+      );
+      if (!canAccess) {
+        res.status(403).json({ error: "Access denied" });
         return;
       }
 
@@ -263,11 +286,24 @@ router.post(
           activeWorkflowId: true,
           approvalStatus: true,
           uploadedById: true,
+          folderId: true,
         },
       });
 
       if (!file) {
         res.status(404).json({ error: "File not found" });
+        return;
+      }
+      const canAccess = await userCanAccessFile(
+        file.id,
+        req.user!.userId,
+        req.user!.tenantId,
+        req.user!.role,
+        file.uploadedById,
+        file.folderId,
+      );
+      if (!canAccess) {
+        res.status(403).json({ error: "Access denied" });
         return;
       }
 

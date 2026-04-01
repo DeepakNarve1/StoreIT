@@ -84,7 +84,8 @@ const roleColors: Record<string, string> = {
 const roleHelpItems = [
   {
     label: "See files / folders",
-    detail: "Lets the role open and browse content. Without this, people cannot really work inside that area.",
+    detail:
+      "Lets the role open and browse content. Without this, people cannot really work inside that area.",
   },
   {
     label: "Add files / create folders",
@@ -108,37 +109,44 @@ const roleHelpItems = [
   },
   {
     label: "See audit trails",
-    detail: "Lets the role view activity history like who changed, downloaded, or approved something.",
+    detail:
+      "Lets the role view activity history like who changed, downloaded, or approved something.",
   },
 ] as const;
 
 const baseRoleExamples = [
   {
     name: "Viewer",
-    detail: "Best for people who only need to open, preview, and download content.",
+    detail:
+      "Best for people who only need to open, preview, and download content.",
   },
   {
     name: "Editor",
-    detail: "Best for people who create files, update versions, and maintain everyday content.",
+    detail:
+      "Best for people who create files, update versions, and maintain everyday content.",
   },
   {
     name: "Manager",
-    detail: "Best for team leads who need broader control like sharing, deleting, and reviewing activity.",
+    detail:
+      "Best for team leads who need broader control like sharing, deleting, and reviewing activity.",
   },
 ] as const;
 
 const toolbarAccessExamples = [
   {
     name: "Viewer",
-    detail: "Mostly read-only access. They can browse, search, preview, and download when allowed, but usually will not get create or upload actions.",
+    detail:
+      "Mostly read-only access. They can browse, search, preview, and download when allowed, but usually will not get create or upload actions.",
   },
   {
     name: "Editor",
-    detail: "Gets everyday work actions in the toolbar and workspace, like upload, create, update, and organize content.",
+    detail:
+      "Gets everyday work actions in the toolbar and workspace, like upload, create, update, and organize content.",
   },
   {
     name: "Manager",
-    detail: "Gets broader operational control, so they can handle team workflows and more advanced management actions.",
+    detail:
+      "Gets broader operational control, so they can handle team workflows and more advanced management actions.",
   },
 ] as const;
 
@@ -228,10 +236,7 @@ export default function UsersPage() {
       return res.data as { roles: RoleProfile[] };
     },
   });
-  const roleProfiles = useMemo(
-    () => rolesData?.roles ?? [],
-    [rolesData],
-  );
+  const roleProfiles = useMemo(() => rolesData?.roles ?? [], [rolesData]);
 
   const defaultInviteProfile = useMemo(
     () =>
@@ -261,7 +266,8 @@ export default function UsersPage() {
       queryClient.invalidateQueries({ queryKey: ["invites"] });
       queryClient.invalidateQueries({ queryKey: ["billing-status"] });
 
-      const emailSent = data?.emailSent !== false && data?.code !== "INVITE_EMAIL_FAILED";
+      const emailSent =
+        data?.emailSent !== false && data?.code !== "INVITE_EMAIL_FAILED";
       if (emailSent) {
         setInviteSuccess(`Invite sent to ${inviteEmail}`);
         setInviteError("");
@@ -270,7 +276,9 @@ export default function UsersPage() {
       } else {
         setInviteSuccess("");
         setIsLimitError(false);
-        setInviteError(data?.error || "Invite created, but email failed to send");
+        setInviteError(
+          data?.error || "Invite created, but email failed to send",
+        );
       }
 
       setInviteEmail("");
@@ -618,7 +626,9 @@ export default function UsersPage() {
                 onChange={(e) => {
                   const nextId = e.target.value;
                   setInviteRoleProfileId(nextId);
-                  const nextRole = roleProfiles.find((role) => role.id === nextId);
+                  const nextRole = roleProfiles.find(
+                    (role) => role.id === nextId,
+                  );
                   if (nextRole) setInviteRole(nextRole.baseRole);
                 }}
                 className="px-3 py-2 bg-white dark:bg-gray-900 border border-blue-200 dark:border-blue-800 rounded-lg text-sm
@@ -626,7 +636,11 @@ export default function UsersPage() {
                 disabled={rolesLoading}
               >
                 {roleProfiles.map((role) => (
-                  <option key={role.id} value={role.id} className="dark:bg-gray-900">
+                  <option
+                    key={role.id}
+                    value={role.id}
+                    className="dark:bg-gray-900"
+                  >
                     {role.name} ({role.baseRole.replace("_", " ")})
                   </option>
                 ))}
@@ -772,7 +786,8 @@ export default function UsersPage() {
                           <span
                             className={`text-xs font-medium px-2 py-1 rounded-full whitespace-nowrap ${roleColors[user.role] || "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}
                           >
-                            {user.roleProfile?.name || user.role?.replace("_", " ")}
+                            {user.roleProfile?.name ||
+                              user.role?.replace("_", " ")}
                           </span>
                           <select
                             value={
@@ -794,7 +809,8 @@ export default function UsersPage() {
                                 (role) => role.id === e.target.value,
                               );
                               if (!nextRoleProfile) return;
-                              if (nextRoleProfile.id === user.roleProfileId) return;
+                              if (nextRoleProfile.id === user.roleProfileId)
+                                return;
                               setRoleUpdatingUserId(user.id);
                               updateUserRole.mutate({
                                 id: user.id,
@@ -974,7 +990,8 @@ export default function UsersPage() {
                         <span
                           className={`text-xs font-medium px-2 py-1 rounded-full ${roleColors[invite.role] || "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}
                         >
-                          {invite.roleProfile?.name || invite.role?.replace("_", " ")}
+                          {invite.roleProfile?.name ||
+                            invite.role?.replace("_", " ")}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
@@ -1167,7 +1184,8 @@ export default function UsersPage() {
                   </button>
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Create custom roles and tune built-in ones using the same permissions as sharing.
+                  Create custom roles and tune built-in ones using the same
+                  permissions as sharing.
                 </p>
               </div>
               <button
@@ -1189,8 +1207,9 @@ export default function UsersPage() {
             ) : (
               <div className="grid gap-4 md:grid-cols-2">
                 {roleProfiles.map((role) => {
-                  const enabledCount = Object.values(role.capabilities ?? {}).filter(Boolean)
-                    .length;
+                  const enabledCount = Object.values(
+                    role.capabilities ?? {},
+                  ).filter(Boolean).length;
                   return (
                     <div
                       key={role.id}
@@ -1307,7 +1326,7 @@ export default function UsersPage() {
       />
 
       {showRoleHelp && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-90 flex items-center justify-center bg-black/50 p-4">
           <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-[#111111]">
             <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-800">
               <div>
@@ -1315,7 +1334,8 @@ export default function UsersPage() {
                   Role help
                 </h3>
                 <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                  A quick guide to base role and the permissions that matter most.
+                  A quick guide to base role and the permissions that matter
+                  most.
                 </p>
               </div>
               <button
@@ -1334,13 +1354,14 @@ export default function UsersPage() {
                   What is base role?
                 </p>
                 <p className="mt-1 text-sm leading-6 text-blue-900/90 dark:text-blue-100/90">
-                  Base role is the role&apos;s starting level. It tells StoreIT what kind of
-                  role this is before the detailed permission switches are applied.
+                  Base role is the role&apos;s starting level. It tells StoreIT
+                  what kind of role this is before the detailed permission
+                  switches are applied.
                 </p>
                 <p className="mt-2 text-sm leading-6 text-blue-900/90 dark:text-blue-100/90">
-                  It is there because some features still depend on role level, not only on the
-                  checkboxes. Think of it as the safety rail, and the permissions as the fine
-                  tuning.
+                  It is there because some features still depend on role level,
+                  not only on the checkboxes. Think of it as the safety rail,
+                  and the permissions as the fine tuning.
                 </p>
               </div>
 
@@ -1370,9 +1391,10 @@ export default function UsersPage() {
                   Toolbar and area access
                 </p>
                 <p className="mt-1 text-sm leading-6 text-amber-900/90 dark:text-amber-100/90">
-                  Base role also affects which actions appear in the toolbar and which wider
-                  areas of StoreIT a user can access. Permissions refine this, but base role is
-                  still the first signal the app uses.
+                  Base role also affects which actions appear in the toolbar and
+                  which wider areas of StoreIT a user can access. Permissions
+                  refine this, but base role is still the first signal the app
+                  uses.
                 </p>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   {toolbarAccessExamples.map((role) => (

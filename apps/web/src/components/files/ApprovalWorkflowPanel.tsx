@@ -31,6 +31,7 @@ interface ApprovalWorkflowPanelProps {
   onClose: () => void;
   onStartWorkflow?: (templateApproverUserIds?: string[]) => void;
   onWorkflowChanged?: (workflow: WorkflowWithFile) => void;
+  canStartWorkflow?: boolean;
 }
 
 function iconForLogAction(action: string): LucideIcon {
@@ -78,6 +79,7 @@ export default function ApprovalWorkflowPanel({
   onClose,
   onStartWorkflow,
   onWorkflowChanged,
+  canStartWorkflow = true,
 }: ApprovalWorkflowPanelProps) {
   const queryClient = useQueryClient();
   const [note, setNote] = useState("");
@@ -179,12 +181,18 @@ export default function ApprovalWorkflowPanel({
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   Start a sequential approval flow for this file.
                 </p>
-                <button
-                  onClick={() => onStartWorkflow?.()}
-                  className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 text-sm font-medium"
-                >
-                  <Workflow size={15} /> Start workflow
-                </button>
+                {canStartWorkflow ? (
+                  <button
+                    onClick={() => onStartWorkflow?.()}
+                    className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 text-sm font-medium"
+                  >
+                    <Workflow size={15} /> Start workflow
+                  </button>
+                ) : (
+                  <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
+                    You can view workflows, but you don’t have permission to start one.
+                  </p>
+                )}
               </div>
             ) : (
               <>
@@ -198,16 +206,18 @@ export default function ApprovalWorkflowPanel({
                     {(workflow.status === "approved" ||
                       workflow.status === "rejected" ||
                       workflow.status === "cancelled") && (
-                      <button
-                        onClick={() =>
-                          onStartWorkflow?.(
-                            workflow.templateApproverUserIds ?? [],
-                          )
-                        }
-                        className="inline-flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
-                      >
-                        <RotateCcw size={14} /> Start again
-                      </button>
+                      canStartWorkflow && (
+                        <button
+                          onClick={() =>
+                            onStartWorkflow?.(
+                              workflow.templateApproverUserIds ?? [],
+                            )
+                          }
+                          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+                        >
+                          <RotateCcw size={14} /> Start again
+                        </button>
+                      )
                     )}
                   </div>
 

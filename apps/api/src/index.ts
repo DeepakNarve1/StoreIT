@@ -1,6 +1,5 @@
 // Env validation FIRST — fails fast if required vars are missing
 import "./utils/env";
-import "dotenv/config";
 
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";

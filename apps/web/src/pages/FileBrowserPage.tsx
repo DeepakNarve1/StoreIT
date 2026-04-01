@@ -57,7 +57,9 @@ const UploadZone = lazy(() => import("../components/files/UploadZone"));
 const FileDocumentPreviewModal = lazy(
   () => import("../components/files/FileDocumentPreviewModal"),
 );
-const FileDetailsView = lazy(() => import("../components/files/FileDetailsView"));
+const FileDetailsView = lazy(
+  () => import("../components/files/FileDetailsView"),
+);
 const PermissionsPanel = lazy(
   () => import("../components/permissions/PermissionsPanel"),
 );
@@ -1086,13 +1088,16 @@ export default function FileBrowserPage() {
     }, 150);
   };
 
-  const handleFileDragStart = useCallback((file: BrowserFileItem) => {
-    const ids =
-      selectedFiles.length > 1 && selectedFiles.includes(file.id)
-        ? selectedFiles
-        : [file.id];
-    setDraggedFileIds(ids);
-  }, [selectedFiles]);
+  const handleFileDragStart = useCallback(
+    (file: BrowserFileItem) => {
+      const ids =
+        selectedFiles.length > 1 && selectedFiles.includes(file.id)
+          ? selectedFiles
+          : [file.id];
+      setDraggedFileIds(ids);
+    },
+    [selectedFiles],
+  );
 
   const handleFileClick = useCallback((file: BrowserFileItem) => {
     setSelectedFiles([]);
@@ -1252,10 +1257,7 @@ export default function FileBrowserPage() {
   const workflowToolbarFile = detailFile ?? singleSelectedFile ?? null;
 
   const openWorkflowComposer = useCallback(
-    (
-      file: { id: string; name: string },
-      initialApproverIds: string[] = [],
-    ) => {
+    (file: { id: string; name: string }, initialApproverIds: string[] = []) => {
       setWorkflowTemplateApproverIds(initialApproverIds);
       setWorkflowComposerFile({ id: file.id, name: file.name });
     },
@@ -1527,6 +1529,12 @@ export default function FileBrowserPage() {
       selectedFiles.length === 0 &&
       selectedFolders.length === 0
     ) {
+      if (!fileCan(detailFile.id, "delete_files")) {
+        useToast
+          .getState()
+          .add("You don't have permission to set retention for this file", "error");
+        return;
+      }
       setSelectedFiles([detailFile.id]);
       setSelectedFolders([]);
       setRetentionScope("file");
@@ -1548,9 +1556,26 @@ export default function FileBrowserPage() {
       return;
     }
     if (selectedFiles.length > 0) {
+      const ok = selectedFiles.every((id) => fileCan(id, "delete_files"));
+      if (!ok) {
+        useToast
+          .getState()
+          .add("Retention requires delete permission for all selected files", "error");
+        return;
+      }
       setRetentionScope("file");
       setRetentionModalNonce((n) => n + 1);
       setShowRetentionModal(true);
+      return;
+    }
+    const ok = selectedFolders.every((id) => folderCan(id, "delete_folders"));
+    if (!ok) {
+      useToast
+        .getState()
+        .add(
+          "Retention requires delete permission for all selected folders",
+          "error",
+        );
       return;
     }
     setRetentionScope("folder");
@@ -1572,6 +1597,26 @@ export default function FileBrowserPage() {
       if (!ids || ids.length === 0) {
         useToast.getState().add("Select items first", "error");
         return;
+      }
+      if (retentionScope === "file") {
+        const ok = ids.every((id) => fileCan(id, "delete_files"));
+        if (!ok) {
+          useToast
+            .getState()
+            .add("Retention requires delete permission for all selected files", "error");
+          return;
+        }
+      } else {
+        const ok = ids.every((id) => folderCan(id, "delete_folders"));
+        if (!ok) {
+          useToast
+            .getState()
+            .add(
+              "Retention requires delete permission for all selected folders",
+              "error",
+            );
+          return;
+        }
       }
 
       const now = Date.now();
@@ -1734,6 +1779,12 @@ export default function FileBrowserPage() {
 
   const openRetentionDetails = useCallback(
     (file: BrowserFileItem) => {
+      if (!fileCan(file.id, "delete_files")) {
+        useToast
+          .getState()
+          .add("You don't have permission to manage retention for this file", "error");
+        return;
+      }
       const job = getCurrentRetentionJobForFile(file.id);
       setRetentionDetailsFile(file);
       setRetentionDetailsJob(job);
@@ -1799,6 +1850,10 @@ export default function FileBrowserPage() {
         for (const job of dueJobs) {
           try {
             if (job.scope === "file") {
+              const canApply = (job.resourceIds ?? []).every((id) =>
+                fileCan(id, "delete_files"),
+              );
+              if (!canApply) continue;
               if (job.action === "move_to_trash") {
                 await api.post("/files/bulk-delete", { ids: job.resourceIds });
               } else {
@@ -1811,6 +1866,10 @@ export default function FileBrowserPage() {
                 if (!ok) throw new Error("Some files permanent-delete failed");
               }
             } else {
+              const canApply = (job.resourceIds ?? []).every((id) =>
+                folderCan(id, "delete_folders"),
+              );
+              if (!canApply) continue;
               if (job.action === "move_to_trash") {
                 await Promise.all(
                   job.resourceIds.map((id) => api.delete(`/folders/${id}`)),
@@ -2906,7 +2965,13 @@ export default function FileBrowserPage() {
 
           {/* Main content */}
           {detailFile ? (
-            <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading details...</div>}>
+            <Suspense
+              fallback={
+                <div className="p-6 text-sm text-gray-500">
+                  Loading details...
+                </div>
+              }
+            >
               <FileDetailsView
                 file={detailFile}
                 onBack={() => setDetailFile(null)}
@@ -2918,7 +2983,11 @@ export default function FileBrowserPage() {
                     label: a.name,
                     clickable: true,
                   })),
-                  { id: detailFile.id, label: detailFile.name, clickable: false },
+                  {
+                    id: detailFile.id,
+                    label: detailFile.name,
+                    clickable: false,
+                  },
                 ]}
                 onBreadcrumbClick={(item) => {
                   if (!item.clickable) return;
@@ -2962,6 +3031,16 @@ export default function FileBrowserPage() {
                 onUploadNewVersion={(file) => handleOpenVersionUpload(file)}
                 onOpenVersionHistory={(file) => setVersionsFile(file)}
                 canViewMetadata={fileCan(detailFile.id, "view_metadata")}
+                canEditMetadata={fileCan(detailFile.id, "edit_metadata")}
+                canToggleLock={fileCan(detailFile.id, "edit_file_attrs")}
+                canUploadVersion={
+                  fileCan(detailFile.id, "update_versions") ||
+                  fileCan(detailFile.id, "add_files")
+                }
+                canOpenWorkflow={fileCan(detailFile.id, "edit_file_attrs")}
+                canManageRetention={fileCan(detailFile.id, "delete_files")}
+                canManageShare={fileCan(detailFile.id, "share_files")}
+                canManageReminders={fileCan(detailFile.id, "edit_file_attrs")}
                 isLocking={lockMutation.isPending}
                 isUploadingVersion={uploadNewVersionMutation.isPending}
                 workflowButtonLabel={
@@ -3645,16 +3724,16 @@ export default function FileBrowserPage() {
             onClose={() => setPreviewFile(null)}
           />
         )}
-      <input
-        ref={versionFileInputRef}
-        type="file"
-        className="hidden"
-        onChange={(e) => {
-          const selected = e.target.files?.[0] ?? null;
-          handleVersionFileSelected(selected);
-          e.currentTarget.value = "";
-        }}
-      />
+        <input
+          ref={versionFileInputRef}
+          type="file"
+          className="hidden"
+          onChange={(e) => {
+            const selected = e.target.files?.[0] ?? null;
+            handleVersionFileSelected(selected);
+            e.currentTarget.value = "";
+          }}
+        />
         {permissionsResource && (
           <PermissionsPanel
             resourceId={permissionsResource.id}
@@ -3666,6 +3745,8 @@ export default function FileBrowserPage() {
         {versionsFile && (
           <FileVersionsModal
             file={versionsFile}
+            canRestore={fileCan(versionsFile.id, "update_versions")}
+            canView={fileCan(versionsFile.id, "preview_files")}
             onClose={() => setVersionsFile(null)}
           />
         )}
@@ -3732,78 +3813,83 @@ export default function FileBrowserPage() {
           <ApprovalWorkflowPanel
             file={workflowPanelFile}
             onClose={() => setWorkflowPanelFile(null)}
-            onStartWorkflow={(templateApproverUserIds) => {
-              setWorkflowPanelFile(null);
-              openWorkflowComposer(
-                workflowPanelFile,
-                templateApproverUserIds ?? [],
-              );
-            }}
+            canStartWorkflow={fileCan(workflowPanelFile.id, "edit_file_attrs")}
+            onStartWorkflow={
+              fileCan(workflowPanelFile.id, "edit_file_attrs")
+                ? (templateApproverUserIds) => {
+                    setWorkflowPanelFile(null);
+                    openWorkflowComposer(
+                      workflowPanelFile,
+                      templateApproverUserIds ?? [],
+                    );
+                  }
+                : undefined
+            }
             onWorkflowChanged={(workflow) => {
               patchDetailWorkflowState(workflow);
             }}
           />
         )}
 
-      {approvalFile && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-md p-6 shadow-xl">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-1">
-              Review approval
-            </h3>
-            <p className="text-sm text-gray-500 mb-4 truncate">
-              {approvalFile.name}
-            </p>
-            <textarea
-              value={approvalNote}
-              onChange={(e) => setApprovalNote(e.target.value)}
-              placeholder="Optional note…"
-              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm
+        {approvalFile && (
+          <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-md p-6 shadow-xl">
+              <h3 className="font-semibold text-gray-900 dark:text-white mb-1">
+                Review approval
+              </h3>
+              <p className="text-sm text-gray-500 mb-4 truncate">
+                {approvalFile.name}
+              </p>
+              <textarea
+                value={approvalNote}
+                onChange={(e) => setApprovalNote(e.target.value)}
+                placeholder="Optional note…"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm
                          focus:outline-none focus:ring-2 focus:ring-blue-400 mb-4
                          dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-              rows={3}
-            />
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => {
-                  setApprovalFile(null);
-                  setApprovalNote("");
-                }}
-                className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() =>
-                  approveMutation.mutate({
-                    fileId: approvalFile.id,
-                    action: "rejected",
-                    note: approvalNote,
-                  })
-                }
-                className="px-4 py-2 text-sm bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400
+                rows={3}
+              />
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => {
+                    setApprovalFile(null);
+                    setApprovalNote("");
+                  }}
+                  className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() =>
+                    approveMutation.mutate({
+                      fileId: approvalFile.id,
+                      action: "rejected",
+                      note: approvalNote,
+                    })
+                  }
+                  className="px-4 py-2 text-sm bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400
                            border border-red-200 dark:border-red-800 rounded-xl hover:bg-red-100
                            dark:hover:bg-red-900/50 font-medium"
-              >
-                Reject
-              </button>
-              <button
-                onClick={() =>
-                  approveMutation.mutate({
-                    fileId: approvalFile.id,
-                    action: "approved",
-                    note: approvalNote,
-                  })
-                }
-                className="px-4 py-2 text-sm bg-green-600 text-white rounded-xl hover:bg-green-700
+                >
+                  Reject
+                </button>
+                <button
+                  onClick={() =>
+                    approveMutation.mutate({
+                      fileId: approvalFile.id,
+                      action: "approved",
+                      note: approvalNote,
+                    })
+                  }
+                  className="px-4 py-2 text-sm bg-green-600 text-white rounded-xl hover:bg-green-700
                            dark:bg-green-500 dark:hover:bg-green-600 font-medium"
-              >
-                Approve
-              </button>
+                >
+                  Approve
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
         {approvalDetailFile && (
           <ApprovalDetailPanel
@@ -3819,7 +3905,10 @@ export default function FileBrowserPage() {
           <RetentionDetailsModal
             file={
               retentionDetailsFile
-                ? { id: retentionDetailsFile.id, name: retentionDetailsFile.name }
+                ? {
+                    id: retentionDetailsFile.id,
+                    name: retentionDetailsFile.name,
+                  }
                 : null
             }
             job={retentionDetailsJob}

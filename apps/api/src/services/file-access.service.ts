@@ -44,20 +44,151 @@ export async function userCanAccessFile(
   if (filePerm) return true;
 
   if (folderId) {
-    const folderPerm = await prisma.permission.findFirst({
+    // Allow access via:
+    // - direct permission on the file's folder, OR
+    // - an ancestor folder permission that has apply_subfolders enabled.
+    const chain: string[] = [];
+    let current: string | null = folderId;
+    let depth = 0;
+    while (current && depth < 80) {
+      chain.push(current);
+      const parent: { parentId: string | null } | null =
+        await prisma.folder.findFirst({
+        where: { id: current, tenantId },
+        select: { parentId: true },
+      });
+      current = parent?.parentId ?? null;
+      depth++;
+    }
+
+    const folderPerms = await prisma.permission.findMany({
       where: {
         resourceType: "folder",
-        resourceId: folderId,
+        resourceId: { in: chain },
         OR: fileOrClauses,
         AND: [
           { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
           { folder: { tenantId } },
         ],
       },
+      select: { resourceId: true, capabilities: true, action: true },
     });
-    if (folderPerm) return true;
+
+    for (const p of folderPerms) {
+      if (p.resourceId === folderId) return true;
+      const caps = (p as any).capabilities as Record<string, boolean> | null;
+      if (caps?.apply_subfolders === true) return true;
+    }
   }
 
+  return false;
+}
+
+/**
+ * Checks a granular capability for a file, resolving both:
+ * - direct file permission grants, and
+ * - folder grants on the file's containing folder (common for VIEWER sharing).
+ *
+ * Note: folder permission records may carry file-related capability keys (like preview_files)
+ * because the UI stores a single capabilities map for both resource types.
+ */
+export async function userHasResolvedFileCapability(opts: {
+  userId: string;
+  tenantId: string;
+  fileId: string;
+  folderId?: string | null;
+  uploadedById?: string | null;
+  capability: string;
+}): Promise<boolean> {
+  const { userId, tenantId, fileId, folderId, uploadedById, capability } = opts;
+  const roleContext = await getEffectiveRoleProfileForUser(userId);
+  if (!roleContext || roleContext.tenantId !== tenantId) return false;
+
+  // Non-viewers can rely on role profile capabilities for tenant-wide access.
+  if (roleContext.baseRole !== "VIEWER" && roleContext.capabilities[capability] === true) {
+    return true;
+  }
+
+  // File owner always has full self-access for common read operations.
+  if (uploadedById && uploadedById === userId) return true;
+
+  const orClauses: Array<
+    | { grantedTo: string }
+    | { grantedTo: string; userId: string }
+    | { grantedTo: string; departmentId: string }
+  > = [{ grantedTo: "all" }, { grantedTo: "user", userId }];
+  if (roleContext.departmentId) {
+    orClauses.push({
+      grantedTo: "department",
+      departmentId: roleContext.departmentId,
+    });
+  }
+
+  const readByAction = (action: string | null | undefined): boolean => {
+    // For file viewing, treat any coarse grant as allowing preview unless explicitly disabled via capabilities map.
+    return ["read", "write", "delete", "admin"].includes(String(action));
+  };
+
+  const hasCapInRow = (row: any): boolean | null => {
+    const caps = row?.capabilities as Record<string, boolean> | null | undefined;
+    if (!caps || typeof caps !== "object") return null;
+    if (!(capability in caps)) return null;
+    return caps[capability] === true;
+  };
+
+  // 1) Direct file permission grant
+  const filePerm = await prisma.permission.findFirst({
+    where: {
+      resourceType: "file",
+      resourceId: fileId,
+      OR: orClauses,
+      AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
+    },
+    select: { action: true, capabilities: true },
+  });
+  if (filePerm) {
+    const explicit = hasCapInRow(filePerm);
+    return explicit ?? readByAction(filePerm.action);
+  }
+
+  // 2) Folder permission grant on containing folder OR an ancestor with apply_subfolders
+  if (!folderId) return false;
+
+  const chain: string[] = [];
+  let current: string | null = folderId;
+  let depth = 0;
+  while (current && depth < 80) {
+    chain.push(current);
+    const parent: { parentId: string | null } | null =
+      await prisma.folder.findFirst({
+      where: { id: current, tenantId },
+      select: { parentId: true },
+    });
+    current = parent?.parentId ?? null;
+    depth++;
+  }
+
+  const folderPerms = await prisma.permission.findMany({
+    where: {
+      resourceType: "folder",
+      resourceId: { in: chain },
+      OR: orClauses,
+      AND: [
+        { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+        { folder: { tenantId } },
+      ],
+    },
+    select: { resourceId: true, action: true, capabilities: true },
+  });
+
+  for (const p of folderPerms) {
+    const isSelf = p.resourceId === folderId;
+    const caps = (p as any).capabilities as Record<string, boolean> | null;
+    const canInherit = isSelf || caps?.apply_subfolders === true;
+    if (!canInherit) continue;
+    const explicit = hasCapInRow(p);
+    return explicit ?? readByAction(p.action);
+  }
   return false;
 }
 
