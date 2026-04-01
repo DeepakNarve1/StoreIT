@@ -534,6 +534,26 @@ router.post(
           },
         });
 
+        // VIEWER overwrite guard: uploading a new version requires update_versions
+        // on the existing file (or implicit owner access).
+        if (existingFile && !isPrivileged) {
+          const isOwner = existingFile.uploadedById === req.user!.userId;
+          const canUpdateVersions = await userHasCapability(
+            userId,
+            req.user!.tenantId,
+            role,
+            "file",
+            existingFile.id,
+            "update_versions",
+          );
+          if (!isOwner && !canUpdateVersions) {
+            res.status(403).json({
+              error: `You don't have permission to upload a new version of "${safeName}".`,
+            });
+            return;
+          }
+        }
+
         // ── LOCK GUARD: block uploading a new version over a locked file ──
         if (
           existingFile &&

@@ -13,6 +13,8 @@ export const approvalWorkflowInclude = {
       approvalStatus: true,
       activeWorkflowId: true,
       currentStepOrder: true,
+      uploadedById: true,
+      folderId: true,
     },
   },
   steps: {

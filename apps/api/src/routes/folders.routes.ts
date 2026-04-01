@@ -702,17 +702,15 @@ router.post("/", verifyAuth, async (req: AuthRequest, res: Response) => {
           .json({ error: "You don't have permission to create folders here." });
         return;
       }
-      const perm = await prisma.permission.findFirst({
-        where: {
-          resourceType: "folder",
-          resourceId: parentId,
-          OR: [{ grantedTo: "all" }, { grantedTo: "user", userId }],
-          AND: [
-            { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
-          ],
-        },
-      });
-      if (!perm || !["write", "delete", "admin"].includes(perm.action)) {
+      const canCreate = await userHasCapability(
+        userId,
+        tenantId,
+        role,
+        "folder",
+        parentId,
+        "create_folders",
+      );
+      if (!canCreate) {
         res
           .status(403)
           .json({ error: "You don't have permission to create folders here." });

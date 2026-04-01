@@ -145,7 +145,14 @@ export default function UploadZone({
           or{" "}
           <span className="text-primary-500 hover:underline">browse files</span>{" "}
           or{" "}
-          <label className="text-primary-500 hover:underline cursor-pointer">
+          <label
+            className="text-primary-500 hover:underline cursor-pointer"
+            onClick={(e) => {
+              // Prevent react-dropzone root click from also opening
+              // the default file picker when user intends to pick a folder.
+              e.stopPropagation();
+            }}
+          >
             upload a folder
             <input
               type="file"
@@ -156,8 +163,11 @@ export default function UploadZone({
                 directory: "",
               } as InputHTMLAttributes<HTMLInputElement>)}
               onChange={(e) => {
+                e.stopPropagation();
                 const files = Array.from(e.target.files || []);
                 if (files.length > 0) onDrop(files);
+                // Allow selecting the same folder again to re-trigger change.
+                e.target.value = "";
               }}
             />
           </label>

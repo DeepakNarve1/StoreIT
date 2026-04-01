@@ -121,11 +121,32 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
       },
       orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
       include: approvalWorkflowInclude,
-      take: 200,
+      take: privileged ? 200 : 500,
     });
 
+    const visible = privileged
+      ? workflows
+      : (
+          await Promise.all(
+            workflows.map(async (workflow) => {
+              const canAccess = await userCanAccessFile(
+                workflow.fileId,
+                req.user!.userId,
+                req.user!.tenantId,
+                req.user!.role,
+                // available via approvalWorkflowInclude's file selection
+                (workflow as any).file?.uploadedById ?? null,
+                (workflow as any).file?.folderId ?? null,
+              );
+              return canAccess ? workflow : null;
+            }),
+          )
+        )
+          .filter(Boolean)
+          .slice(0, 200);
+
     res.json({
-      workflows: workflows.map((workflow) =>
+      workflows: (visible as any[]).map((workflow) =>
         serializeWorkflow(workflow, {
           userId: req.user!.userId,
           role: req.user!.role,

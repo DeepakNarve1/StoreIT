@@ -454,6 +454,14 @@ export default function FileBrowserPage() {
       ? resolvedCaps.add_files === true || resolvedCaps.create_folders === true
       : ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(user?.role ?? ""));
 
+  const canCreateFolderHere =
+    user?.role === "SUPERADMIN" ||
+    (user?.role === "VIEWER"
+      ? !!folderId && folderCan(folderId, "create_folders")
+      : resolvedCaps
+        ? resolvedCaps.create_folders === true
+        : ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(user?.role ?? ""));
+
   // ── Granular per-file capabilities for VIEWER role ───────────────────────
   const fileIds = (filesData?.files ?? []).map((f) => f.id);
   const { capMap } = useFileCapabilities(fileIds);
@@ -1064,8 +1072,7 @@ export default function FileBrowserPage() {
     : folders.map((f) => f.id);
   const { capMap: folderCapMap } = useFolderCapabilities(folderIds);
   const isLoading = filesLoading || foldersLoading;
-  const isFilteredEmpty =
-    files.length === 0 && typeFilter !== "all";
+  const isFilteredEmpty = files.length === 0 && typeFilter !== "all";
   const isEmpty = allFiles.length === 0 && folders.length === 0;
 
   const handleUploadComplete = () => {
@@ -1095,6 +1102,12 @@ export default function FileBrowserPage() {
     setDetailFile(file);
   }, []);
   const handleOpenVersionUpload = (file: BrowserFileItem) => {
+    if (!fileCan(file.id, "update_versions")) {
+      useToast
+        .getState()
+        .add("You don't have permission to upload a new version.", "error");
+      return;
+    }
     setVersionUploadTarget(file);
     versionFileInputRef.current?.click();
   };
@@ -1339,6 +1352,12 @@ export default function FileBrowserPage() {
   const handleCreateFolder = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFolderName.trim()) return;
+    if (!canCreateFolderHere) {
+      useToast
+        .getState()
+        .add("You don't have permission to create folders here.", "error");
+      return;
+    }
     createFolder.mutate(newFolderName.trim());
   };
   const handleMove = useCallback((file: BrowserFileItem) => {
@@ -1527,7 +1546,10 @@ export default function FileBrowserPage() {
       if (!fileCan(detailFile.id, "delete_files")) {
         useToast
           .getState()
-          .add("You don't have permission to set retention for this file", "error");
+          .add(
+            "You don't have permission to set retention for this file",
+            "error",
+          );
         return;
       }
       setSelectedFiles([detailFile.id]);
@@ -1555,7 +1577,10 @@ export default function FileBrowserPage() {
       if (!ok) {
         useToast
           .getState()
-          .add("Retention requires delete permission for all selected files", "error");
+          .add(
+            "Retention requires delete permission for all selected files",
+            "error",
+          );
         return;
       }
       setRetentionScope("file");
@@ -1598,7 +1623,10 @@ export default function FileBrowserPage() {
         if (!ok) {
           useToast
             .getState()
-            .add("Retention requires delete permission for all selected files", "error");
+            .add(
+              "Retention requires delete permission for all selected files",
+              "error",
+            );
           return;
         }
       } else {
@@ -1777,7 +1805,10 @@ export default function FileBrowserPage() {
       if (!fileCan(file.id, "delete_files")) {
         useToast
           .getState()
-          .add("You don't have permission to manage retention for this file", "error");
+          .add(
+            "You don't have permission to manage retention for this file",
+            "error",
+          );
         return;
       }
       const job = getCurrentRetentionJobForFile(file.id);
@@ -2159,7 +2190,7 @@ export default function FileBrowserPage() {
 
           {/* Folderit-style action toolbar */}
           <div className="flex items-center gap-0.5 mb-4 pb-3 border-b border-gray-100 dark:border-gray-800">
-            {canWrite && (
+            {canCreateFolderHere && (
               <button
                 onClick={() => setShowNewFolder(true)}
                 className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-primary-600 transition-colors"
@@ -2518,7 +2549,10 @@ export default function FileBrowserPage() {
                     } else {
                       useToast
                         .getState()
-                        .add("Select a file or folder to view metadata", "error");
+                        .add(
+                          "Select a file or folder to view metadata",
+                          "error",
+                        );
                     }
                     return;
                   }
@@ -2826,7 +2860,9 @@ export default function FileBrowserPage() {
                   {selectedFolders.length !== 1 ? "s" : ""} selected
                 </span>
                 <div className="flex items-center gap-2 ml-auto">
-                  {selectedFolders.every((id) => folderCan(id, "move_folders")) && (
+                  {selectedFolders.every((id) =>
+                    folderCan(id, "move_folders"),
+                  ) && (
                     <button
                       onClick={bulkFolderMove}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-primary-500 dark:text-pink-400
@@ -2836,7 +2872,9 @@ export default function FileBrowserPage() {
                       <FolderInput size={14} /> Move
                     </button>
                   )}
-                  {selectedFolders.every((id) => folderCan(id, "download_folders")) && (
+                  {selectedFolders.every((id) =>
+                    folderCan(id, "download_folders"),
+                  ) && (
                     <button
                       onClick={bulkFolderDownload}
                       disabled={isZippingFolders}
@@ -2858,7 +2896,9 @@ export default function FileBrowserPage() {
                       )}
                     </button>
                   )}
-                  {selectedFolders.every((id) => folderCan(id, "delete_folders")) && (
+                  {selectedFolders.every((id) =>
+                    folderCan(id, "delete_folders"),
+                  ) && (
                     <button
                       onClick={() => setShowBulkFolderDelete(true)}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 dark:text-red-400
@@ -2911,7 +2951,9 @@ export default function FileBrowserPage() {
                       <Trash2 size={14} /> Delete
                     </button>
                   )}
-                  {selectedFiles.every((id) => fileCan(id, "download_files")) && (
+                  {selectedFiles.every((id) =>
+                    fileCan(id, "download_files"),
+                  ) && (
                     <button
                       onClick={bulkDownload}
                       disabled={isZipping}
@@ -3082,10 +3124,7 @@ export default function FileBrowserPage() {
                 canViewMetadata={fileCan(detailFile.id, "view_metadata")}
                 canEditMetadata={fileCan(detailFile.id, "edit_metadata")}
                 canToggleLock={fileCan(detailFile.id, "edit_file_attrs")}
-                canUploadVersion={
-                  fileCan(detailFile.id, "update_versions") ||
-                  fileCan(detailFile.id, "add_files")
-                }
+                canUploadVersion={fileCan(detailFile.id, "update_versions")}
                 canOpenWorkflow={fileCan(detailFile.id, "edit_file_attrs")}
                 canManageRetention={fileCan(detailFile.id, "delete_files")}
                 canManageShare={fileCan(detailFile.id, "share_files")}
@@ -3134,7 +3173,7 @@ export default function FileBrowserPage() {
                           ? "Upload files or create a folder to get started"
                           : "No files have been shared with you here yet"}
                       </p>
-                      {canWrite && (
+                      {canCreateFolderHere && (
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => setShowNewFolder(true)}
@@ -3315,9 +3354,10 @@ export default function FileBrowserPage() {
                                     {folder._count.children > 0 && (
                                       <>
                                         {" · "}
-                                        {folder._count.children}{" "}
-                                        folder
-                                        {folder._count.children !== 1 ? "s" : ""}
+                                        {folder._count.children} folder
+                                        {folder._count.children !== 1
+                                          ? "s"
+                                          : ""}
                                       </>
                                     )}
                                   </span>
@@ -3439,8 +3479,7 @@ export default function FileBrowserPage() {
                                   {folder._count.children > 0 && (
                                     <>
                                       {" · "}
-                                      {folder._count.children}{" "}
-                                      folder
+                                      {folder._count.children} folder
                                       {folder._count.children !== 1 ? "s" : ""}
                                     </>
                                   )}
@@ -3851,7 +3890,10 @@ export default function FileBrowserPage() {
                       ...folder,
                       _count: {
                         ...folder._count,
-                        children: Math.max(0, folder._count.children - movedCount),
+                        children: Math.max(
+                          0,
+                          folder._count.children - movedCount,
+                        ),
                       },
                     };
                   }
@@ -3861,12 +3903,16 @@ export default function FileBrowserPage() {
               queryClient.setQueryData<{ folders: StoreItem[] }>(
                 ["folders", folderId ?? "root"],
                 (current) =>
-                  current ? { ...current, folders: updateChildren(current.folders) } : current,
+                  current
+                    ? { ...current, folders: updateChildren(current.folders) }
+                    : current,
               );
               queryClient.setQueryData<{ folders: StoreItem[] }>(
                 ["folders", "all"],
                 (current) =>
-                  current ? { ...current, folders: updateChildren(current.folders) } : current,
+                  current
+                    ? { ...current, folders: updateChildren(current.folders) }
+                    : current,
               );
 
               invalidateBrowserQueries();
