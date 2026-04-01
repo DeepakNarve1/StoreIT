@@ -62,7 +62,7 @@ interface FileListProps {
   onRename?: (file: FileItem) => void;
   selectedIds?: string[];
   onSelectChange?: (ids: string[]) => void;
-  sortBy?: "name" | "size" | "createdAt" | "mimeType";
+  sortBy?: "manual" | "name" | "size" | "createdAt" | "mimeType";
   sortDir?: "asc" | "desc";
   onSort?: (col: "name" | "size" | "createdAt" | "mimeType") => void;
   onDragStart?: (file: FileItem) => void;

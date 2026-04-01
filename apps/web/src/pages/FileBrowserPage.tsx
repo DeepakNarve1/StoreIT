@@ -186,9 +186,9 @@ export default function FileBrowserPage() {
   const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
   const [newFolderCategoryId, setNewFolderCategoryId] = useState<string>("");
   const [sortBy, setSortBy] = useState<
-    "name" | "size" | "createdAt" | "mimeType"
-  >("createdAt");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+    "manual" | "name" | "size" | "createdAt" | "mimeType"
+  >("manual");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [draggedFileIds, setDraggedFileIds] = useState<string[]>([]);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [folderMenuId, setFolderMenuId] = useState<string | null>(null);
@@ -1175,11 +1175,12 @@ export default function FileBrowserPage() {
   };
   const handleSort = useCallback(
     (col: "name" | "size" | "createdAt" | "mimeType") => {
-      if (sortBy === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-      else {
-        setSortBy(col);
-        setSortDir("asc");
+      if (sortBy === col) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+        return;
       }
+      setSortBy(col);
+      setSortDir("asc");
     },
     [sortBy],
   );
@@ -1193,6 +1194,8 @@ export default function FileBrowserPage() {
     canWrite || folderCapMap[folderId]?.[cap] === true;
   const reorderFileItems = useCallback(
     (fromId: string, toId: string) => {
+      setSortBy("manual");
+      setSortDir("asc");
       setManualOrder((prev) => {
         const next = {
           ...prev,
@@ -1216,6 +1219,8 @@ export default function FileBrowserPage() {
   );
   const reorderFolderItems = useCallback(
     (fromId: string, toId: string) => {
+      setSortBy("manual");
+      setSortDir("asc");
       setManualOrder((prev) => {
         const next = {
           ...prev,
@@ -3657,7 +3662,7 @@ export default function FileBrowserPage() {
                       capabilitiesMap={capMap}
                       visibleColumns={visibleColumns}
                       onRetentionClick={openRetentionDetails}
-                      preserveOrder
+                      preserveOrder={sortBy === "manual"}
                       onReorder={reorderFileItems}
                     />
                   )}
