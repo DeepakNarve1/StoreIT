@@ -258,23 +258,66 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
         allowedFolderIds = Array.from(expanded);
       }
 
-      files = await prisma.file.findMany({
-        where: {
-          tenantId,
-          folderId: folderFilter,
-          isDeleted: false,
-          ...(typeWhere as any),
-          OR: [
-            { id: { in: allowedFileIds } },
-            { uploadedById: userId },
-            ...(allowedFolderIds.length > 0
-              ? [{ folderId: { in: allowedFolderIds } }]
-              : []),
-          ],
-        },
-        orderBy: { createdAt: "desc" },
-        select: fileSelect,
-      });
+      const viewerAccessOr: Array<Record<string, unknown>> = [
+        ...(allowedFileIds.length > 0 ? [{ id: { in: allowedFileIds } }] : []),
+        { uploadedById: userId },
+        ...(allowedFolderIds.length > 0
+          ? [{ folderId: { in: allowedFolderIds } }]
+          : []),
+      ];
+
+      // Root listing (folderFilter === null): Prisma previously required folderId: null AND OR,
+      // which hid files that only had a direct file grant but lived inside a subfolder.
+      // Include those via a top-level OR branch so "All files" can surface direct shares.
+      if (folderFilter === undefined) {
+        files = await prisma.file.findMany({
+          where: {
+            tenantId,
+            isDeleted: false,
+            ...(typeWhere as any),
+            OR: viewerAccessOr,
+          },
+          orderBy: { createdAt: "desc" },
+          select: fileSelect,
+        });
+      } else if (folderFilter !== null) {
+        files = await prisma.file.findMany({
+          where: {
+            tenantId,
+            folderId: folderFilter,
+            isDeleted: false,
+            ...(typeWhere as any),
+            OR: viewerAccessOr,
+          },
+          orderBy: { createdAt: "desc" },
+          select: fileSelect,
+        });
+      } else {
+        files = await prisma.file.findMany({
+          where: {
+            tenantId,
+            isDeleted: false,
+            ...(typeWhere as any),
+            OR: [
+              {
+                AND: [
+                  { folderId: null },
+                  { OR: viewerAccessOr },
+                ],
+              },
+              ...(allowedFileIds.length > 0
+                ? [{ id: { in: allowedFileIds } }]
+                : []),
+              { uploadedById: userId },
+              ...(allowedFolderIds.length > 0
+                ? [{ folderId: { in: allowedFolderIds } }]
+                : []),
+            ],
+          },
+          orderBy: { createdAt: "desc" },
+          select: fileSelect,
+        });
+      }
     }
 
     // ─── FolderIT-style "missing required metadata" indicator ─────────────

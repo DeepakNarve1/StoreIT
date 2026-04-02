@@ -61,6 +61,32 @@ async function getVisibleFolderIdSetForUser(opts: {
   });
 
   const directlyVisible = new Set<string>();
+
+  // Folders that contain a file shared directly to this user (file ACL only — no folder row).
+  // Without this, viewers see no path to open the folder that holds the shared file.
+  const fileSharePerms = await prisma.permission.findMany({
+    where: {
+      resourceType: "file",
+      action: { in: ["read", "write", "delete", "admin"] },
+      OR: orClauses,
+      AND: [
+        { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+        { file: { tenantId, isDeleted: false } },
+      ],
+    },
+    select: { resourceId: true },
+  });
+  if (fileSharePerms.length > 0) {
+    const sharedIds = fileSharePerms.map((p) => p.resourceId);
+    const sharedFiles = await prisma.file.findMany({
+      where: { id: { in: sharedIds }, tenantId, isDeleted: false },
+      select: { folderId: true },
+    });
+    for (const row of sharedFiles) {
+      if (row.folderId) directlyVisible.add(row.folderId);
+    }
+  }
+
   const expandToDescendants = new Set<string>();
   for (const p of perms) {
     const caps = (p as any).capabilities as Record<string, boolean> | null;

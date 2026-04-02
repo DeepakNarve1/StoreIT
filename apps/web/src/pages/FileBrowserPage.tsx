@@ -707,13 +707,38 @@ export default function FileBrowserPage() {
         parentId: folderId ?? null,
         categoryId: newFolderCategoryId || null,
       });
-      return res.data;
+      return res.data as {
+        folder: {
+          id: string;
+          name: string;
+          parentId: string | null;
+          categoryId: string | null;
+          createdAt: string;
+        };
+      };
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["folders", folderId ?? "root"],
-      });
-      queryClient.invalidateQueries({ queryKey: ["folders", "root"] });
+    onSuccess: (data) => {
+      const created = data?.folder;
+      if (created) {
+        const listKey = created.parentId ?? "root";
+        const item: StoreItem = {
+          id: created.id,
+          name: created.name,
+          parentId: created.parentId,
+          _count: { files: 0, children: 0 },
+          categoryId: created.categoryId ?? null,
+        };
+        queryClient.setQueryData<{ folders: StoreItem[] }>(
+          ["folders", listKey],
+          (current) => {
+            if (!current) return { folders: [item] };
+            if (current.folders.some((f) => f.id === item.id)) return current;
+            return { ...current, folders: [...current.folders, item] };
+          },
+        );
+      }
+      // Same as upload: invalidate + refetch all folder/file browser queries (Sidebar uses ["folders","all"]).
+      invalidateBrowserQueries();
       setNewFolderName("");
       setNewFolderCategoryId("");
       setShowNewFolder(false);
