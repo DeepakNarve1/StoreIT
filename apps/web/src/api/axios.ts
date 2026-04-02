@@ -42,6 +42,23 @@ api.interceptors.response.use(
         window.location.href = "/login";
       }
     }
+    // Handle account disabled or tenant suspended
+    if (
+      error.response?.status === 401 &&
+      error.response?.data?.error === "ACCOUNT_DISABLED"
+    ) {
+      localStorage.removeItem("access_token");
+      window.location.href = "/login?reason=disabled";
+      return Promise.reject(error);
+    }
+    if (
+      error.response?.status === 403 &&
+      error.response?.data?.error === "TENANT_SUSPENDED"
+    ) {
+      localStorage.removeItem("access_token");
+      window.location.href = "/login?reason=suspended";
+      return Promise.reject(error);
+    }
     return Promise.reject(error);
   },
 );

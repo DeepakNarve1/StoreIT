@@ -37,6 +37,7 @@ class HttpError extends Error {
 
 const startWorkflowSchema = z.object({
   approverUserIds: z.array(z.string().uuid()).min(1).max(10).optional(),
+  workflowMode: z.enum(["sequential", "parallel"]).optional(),
   note: z.string().max(500).optional(),
 });
 
@@ -129,6 +130,12 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
       : (
           await Promise.all(
             workflows.map(async (workflow) => {
+              const assignedToUser = workflow.steps.some(
+                (step) => step.approverUserId === req.user!.userId,
+              );
+              if (assignedToUser || workflow.ownerId === req.user!.userId) {
+                return workflow;
+              }
               const canAccess = await userCanAccessFile(
                 workflow.fileId,
                 req.user!.userId,
@@ -250,7 +257,19 @@ router.get(
         file.uploadedById,
         file.folderId,
       );
-      if (!canAccess) {
+      const pendingAssignedStep = await prisma.approvalStep.findFirst({
+        where: {
+          tenantId: req.user!.tenantId,
+          approverUserId: req.user!.userId,
+          status: "pending",
+          workflow: {
+            fileId: file.id,
+            status: "in_review",
+          },
+        },
+        select: { id: true },
+      });
+      if (!canAccess && !pendingAssignedStep) {
         res.status(403).json({ error: "Access denied" });
         return;
       }
@@ -294,7 +313,10 @@ router.post(
     }
 
     try {
-      const { approverUserIds, note } = startWorkflowSchema.parse(req.body);
+      const { approverUserIds, workflowMode, note } = startWorkflowSchema.parse(
+        req.body,
+      );
+      const mode = workflowMode ?? "sequential";
       const file = await prisma.file.findFirst({
         where: {
           id: req.params.fileId,
@@ -398,20 +420,66 @@ router.post(
       }
 
       const workflowId = await prisma.$transaction(async (tx) => {
+        const workflowPreviewCapabilities: Record<string, boolean> = {
+          // Workflow-scoped read-only share so approvers can review before acting.
+          workflow_access: true,
+          see_files: true,
+          preview_files: true,
+          download_files: false,
+          edit_file_attrs: false,
+          view_metadata: false,
+          edit_metadata: false,
+          update_versions: false,
+          move_files: false,
+          delete_files: false,
+          share_files: false,
+          share_public_link_file: false,
+        };
+        for (const approverUserId of orderedApproverIds) {
+          const existingGrant = await tx.permission.findFirst({
+            where: {
+              resourceType: "file",
+              resourceId: file.id,
+              grantedTo: "user",
+              userId: approverUserId,
+              OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+            },
+            select: { id: true },
+          });
+          if (existingGrant) continue;
+          await tx.permission.create({
+            data: {
+              resourceType: "file",
+              resourceId: file.id,
+              grantedTo: "user",
+              userId: approverUserId,
+              action: "read",
+              capabilities: workflowPreviewCapabilities,
+              fileId: file.id,
+              folderId: null,
+            },
+          });
+        }
+
         const workflow = await tx.approvalWorkflow.create({
           data: {
             tenantId: req.user!.tenantId,
             fileId: file.id,
             ownerId: req.user!.userId,
             status: "in_review",
-            currentStepOrder: 1,
+            currentStepOrder: mode === "parallel" ? null : 1,
             startedAt: new Date(),
             steps: {
               create: orderedApproverIds.map((approverId, index) => ({
                 tenantId: req.user!.tenantId,
                 approverUserId: approverId,
                 stepOrder: index + 1,
-                status: index === 0 ? "pending" : "queued",
+                status:
+                  mode === "parallel"
+                    ? "pending"
+                    : index === 0
+                      ? "pending"
+                      : "queued",
               })),
             },
           },
@@ -428,7 +496,7 @@ router.post(
           data: {
             approvalStatus: "in_review",
             activeWorkflowId: workflow.id,
-            currentStepOrder: 1,
+            currentStepOrder: mode === "parallel" ? null : 1,
             approvedById: null,
             approvedAt: null,
             approvalNote: null,
@@ -443,15 +511,27 @@ router.post(
               userId: req.user!.userId,
               action: "workflow_started",
               note: note ?? null,
+              metadata: { mode },
             },
-            {
-              tenantId: req.user!.tenantId,
-              workflowId: workflow.id,
-              stepId: workflow.steps[0]?.id ?? null,
-              userId: req.user!.userId,
-              action: "step_opened",
-              note: null,
-            },
+            ...(mode === "parallel"
+              ? workflow.steps.map((step) => ({
+                  tenantId: req.user!.tenantId,
+                  workflowId: workflow.id,
+                  stepId: step.id,
+                  userId: req.user!.userId,
+                  action: "step_opened",
+                  note: null,
+                }))
+              : [
+                  {
+                    tenantId: req.user!.tenantId,
+                    workflowId: workflow.id,
+                    stepId: workflow.steps[0]?.id ?? null,
+                    userId: req.user!.userId,
+                    action: "step_opened",
+                    note: null,
+                  },
+                ]),
           ],
         });
 
@@ -472,6 +552,7 @@ router.post(
         resourceName: file.name,
         metadata: {
           approverCount: orderedApproverIds.length,
+          workflowMode: mode,
         },
         req,
       });
@@ -527,6 +608,12 @@ async function handleWorkflowAction(
               status: true,
             },
           },
+          actionLogs: {
+            where: { action: "workflow_started" },
+            orderBy: { createdAt: "asc" },
+            take: 1,
+            select: { metadata: true },
+          },
         },
       });
 
@@ -538,12 +625,21 @@ async function handleWorkflowAction(
         throw new HttpError(400, "This workflow is no longer active");
       }
 
+      const startedMeta = (workflow.actionLogs[0]?.metadata as any) ?? null;
+      const workflowMode =
+        startedMeta?.mode === "parallel" ? "parallel" : "sequential";
       const currentStep =
-        workflow.steps.find(
-          (step) =>
-            step.stepOrder === workflow.currentStepOrder &&
-            step.status === "pending",
-        ) ?? null;
+        workflowMode === "parallel"
+          ? (workflow.steps.find(
+              (step) =>
+                step.status === "pending" &&
+                step.approverUserId === req.user!.userId,
+            ) ?? null)
+          : (workflow.steps.find(
+              (step) =>
+                step.stepOrder === workflow.currentStepOrder &&
+                step.status === "pending",
+            ) ?? null);
 
       if (!currentStep) {
         throw new HttpError(409, "The active workflow step is stale");
@@ -570,7 +666,7 @@ async function handleWorkflowAction(
         throw new HttpError(409, "This approval step was already processed");
       }
 
-      if (action === "approve") {
+      if (action === "approve" && workflowMode === "sequential") {
         const nextStep =
           workflow.steps.find(
             (step) =>
@@ -668,12 +764,86 @@ async function handleWorkflowAction(
             ],
           });
         }
+      } else if (action === "approve" && workflowMode === "parallel") {
+        const remainingPending = workflow.steps.filter(
+          (step) => step.status === "pending" && step.id !== currentStep.id,
+        );
+
+        if (remainingPending.length > 0) {
+          await tx.approvalWorkflow.update({
+            where: { id: workflow.id },
+            data: {
+              currentStepOrder: null,
+            },
+          });
+
+          await tx.file.update({
+            where: { id: workflow.file.id },
+            data: {
+              approvalStatus: "in_review",
+              currentStepOrder: null,
+            },
+          });
+
+          await tx.approvalActionLog.create({
+            data: {
+              tenantId: req.user!.tenantId,
+              workflowId: workflow.id,
+              stepId: currentStep.id,
+              userId: req.user!.userId,
+              action: "step_approved",
+              note: note ?? null,
+            },
+          });
+        } else {
+          await tx.approvalWorkflow.update({
+            where: { id: workflow.id },
+            data: {
+              status: "approved",
+              currentStepOrder: null,
+              completedAt: actedAt,
+            },
+          });
+
+          await tx.file.update({
+            where: { id: workflow.file.id },
+            data: {
+              approvalStatus: "approved",
+              activeWorkflowId: null,
+              currentStepOrder: null,
+              approvedById: req.user!.userId,
+              approvedAt: actedAt,
+              approvalNote: note ?? null,
+            },
+          });
+
+          await tx.approvalActionLog.createMany({
+            data: [
+              {
+                tenantId: req.user!.tenantId,
+                workflowId: workflow.id,
+                stepId: currentStep.id,
+                userId: req.user!.userId,
+                action: "step_approved",
+                note: note ?? null,
+              },
+              {
+                tenantId: req.user!.tenantId,
+                workflowId: workflow.id,
+                stepId: currentStep.id,
+                userId: req.user!.userId,
+                action: "workflow_approved",
+                note: note ?? null,
+              },
+            ],
+          });
+        }
       } else {
         await tx.approvalStep.updateMany({
           where: {
             workflowId: workflow.id,
-            stepOrder: { gt: currentStep.stepOrder },
-            status: "queued",
+            id: { not: currentStep.id },
+            status: { in: ["queued", "pending"] },
           },
           data: {
             status: "skipped",

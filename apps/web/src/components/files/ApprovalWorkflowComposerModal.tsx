@@ -24,6 +24,9 @@ export default function ApprovalWorkflowComposerModal({
 }: ApprovalWorkflowComposerModalProps) {
   const queryClient = useQueryClient();
   const [selectedApproverId, setSelectedApproverId] = useState("");
+  const [workflowMode, setWorkflowMode] = useState<"sequential" | "parallel">(
+    "sequential",
+  );
   const [approverIds, setApproverIds] = useState<string[]>(() => [
     ...initialApproverUserIds,
   ]);
@@ -53,6 +56,7 @@ export default function ApprovalWorkflowComposerModal({
     mutationFn: async () => {
       const res = await api.post(`/workflow/files/${file.id}/start`, {
         approverUserIds: approverIds,
+        workflowMode,
       });
       return res.data as { workflow: StartedApprovalWorkflow };
     },
@@ -100,13 +104,38 @@ export default function ApprovalWorkflowComposerModal({
           </div>
 
           <div className="p-5 space-y-4">
-            <div className="rounded-xl border border-blue-100 dark:border-blue-900/60 bg-blue-50/70 dark:bg-blue-900/20 px-4 py-3">
+            <div className="rounded-xl border border-blue-100 dark:border-blue-900/60 bg-blue-50/70 dark:bg-blue-900/20 px-4 py-3 space-y-3">
               <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
-                Sequential approvals
+                Approval mode
               </p>
-              <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                Approvers act one after another. Rejecting stops the workflow and
-                sends the file back to draft.
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <button
+                  onClick={() => setWorkflowMode("sequential")}
+                  className={`rounded-lg border px-3 py-2 text-left text-xs ${
+                    workflowMode === "sequential"
+                      ? "border-blue-400 bg-white/80 dark:bg-blue-900/40 text-blue-900 dark:text-blue-200"
+                      : "border-blue-200/80 dark:border-blue-800 text-blue-800 dark:text-blue-300"
+                  }`}
+                >
+                  <p className="font-semibold">Sequential</p>
+                  <p className="mt-0.5">One by one in selected order</p>
+                </button>
+                <button
+                  onClick={() => setWorkflowMode("parallel")}
+                  className={`rounded-lg border px-3 py-2 text-left text-xs ${
+                    workflowMode === "parallel"
+                      ? "border-blue-400 bg-white/80 dark:bg-blue-900/40 text-blue-900 dark:text-blue-200"
+                      : "border-blue-200/80 dark:border-blue-800 text-blue-800 dark:text-blue-300"
+                  }`}
+                >
+                  <p className="font-semibold">Parallel</p>
+                  <p className="mt-0.5">All selected approvers can act anytime</p>
+                </button>
+              </div>
+              <p className="text-xs text-blue-700 dark:text-blue-300">
+                {workflowMode === "sequential"
+                  ? "Approvers act one after another. Rejecting stops the workflow."
+                  : "Any selected approver can approve immediately. Workflow completes after all approvals."}
               </p>
             </div>
 
@@ -141,7 +170,9 @@ export default function ApprovalWorkflowComposerModal({
             <div className="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-800/50">
                 <p className="text-sm font-medium text-gray-900 dark:text-white">
-                  Approval steps
+                  {workflowMode === "sequential"
+                    ? "Approval steps"
+                    : "Approvers (parallel)"}
                 </p>
               </div>
               <div className="p-4 space-y-2">

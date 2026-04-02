@@ -233,17 +233,6 @@ router.get(
           folder: { select: { name: true } },
         },
       });
-      const privileged = [
-        "SUPERADMIN",
-        "ORG_ADMIN",
-        "MANAGER",
-        "EDITOR",
-      ].includes(req.user!.role);
-      if (privileged) {
-        res.json({ tag, files: allFiles });
-        return;
-      }
-
       const visible: typeof allFiles = [];
       for (const f of allFiles) {
         const ok = await userCanAccessFile(

@@ -46,11 +46,21 @@ export type WorkflowWithRelations = Prisma.ApprovalWorkflowGetPayload<{
 }>;
 
 type Tx = Prisma.TransactionClient | PrismaClient;
+type WorkflowMode = "sequential" | "parallel";
+
+function resolveWorkflowMode(workflow: WorkflowWithRelations): WorkflowMode {
+  const startedLog = workflow.actionLogs.find(
+    (log) => log.action === "workflow_started",
+  );
+  const mode = (startedLog?.metadata as any)?.mode;
+  return mode === "parallel" ? "parallel" : "sequential";
+}
 
 export function serializeWorkflow(
   workflow: WorkflowWithRelations,
   currentUser: { userId: string; role: string },
 ) {
+  const workflowMode = resolveWorkflowMode(workflow);
   const currentStep =
     workflow.status === "in_review"
       ? (workflow.steps.find(
@@ -64,8 +74,14 @@ export function serializeWorkflow(
     (workflow.ownerId === currentUser.userId ||
       ADMIN_ROLES.has(currentUser.role));
   const canAct =
-    currentStep?.approverUserId === currentUser.userId &&
-    workflow.status === "in_review";
+    workflow.status === "in_review" &&
+    (workflowMode === "parallel"
+      ? workflow.steps.some(
+          (step) =>
+            step.status === "pending" &&
+            step.approverUserId === currentUser.userId,
+        )
+      : currentStep?.approverUserId === currentUser.userId);
 
   return {
     id: workflow.id,
@@ -81,6 +97,7 @@ export function serializeWorkflow(
     cancelledAt: workflow.cancelledAt,
     owner: workflow.owner,
     file: workflow.file,
+    workflowMode,
     currentStep,
     steps: workflow.steps,
     actionLogs: workflow.actionLogs,

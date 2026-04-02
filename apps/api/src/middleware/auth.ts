@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { prisma } from "../utils/prisma";
 
 export interface AuthRequest extends Request {
   user?: {
@@ -11,7 +12,7 @@ export interface AuthRequest extends Request {
   };
 }
 
-export const verifyAuth = (
+export const verifyAuth = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction,
@@ -39,6 +40,24 @@ export const verifyAuth = (
       email: decoded.email,
       impersonatedBy: decoded.impersonatedBy, // SEC FIX #5
     };
+
+    // Check user is still active and tenant is not suspended.
+    // We do a lightweight DB check here to prevent stale JWTs from working
+    // after a user is deactivated or an org is suspended.
+    const user = await prisma.user.findFirst({
+      where: { id: decoded.userId, tenantId: decoded.tenantId },
+      select: { isActive: true, tenant: { select: { isActive: true } } },
+    });
+
+    if (!user || !user.isActive) {
+      res.status(401).json({ error: "ACCOUNT_DISABLED" });
+      return;
+    }
+    if (!user.tenant?.isActive) {
+      res.status(403).json({ error: "TENANT_SUSPENDED" });
+      return;
+    }
+
     next();
   } catch (err: any) {
     if (err.name === "TokenExpiredError") {

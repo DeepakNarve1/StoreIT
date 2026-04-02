@@ -195,9 +195,13 @@ router.post("/invite/accept", async (req: Request, res: Response) => {
 
     const tenant = await prisma.tenant.findUnique({
       where: { id: invite.tenantId },
-      select: { plan: true },
+      select: { plan: true, planExpiresAt: true },
     });
-    const { maxUsers } = getPlanLimits(tenant?.plan ?? "free");
+    const effectivePlan =
+      tenant?.planExpiresAt && tenant.planExpiresAt < new Date()
+        ? "free"
+        : (tenant?.plan ?? "free");
+    const { maxUsers } = getPlanLimits(effectivePlan);
     const currentUsers = await prisma.user.count({
       where: { tenantId: invite.tenantId, isActive: true },
     });
@@ -311,8 +315,9 @@ router.post("/reset-password", async (req: Request, res: Response) => {
       where: { email: record.email },
       data: { password: hashed },
     });
-    await prisma.passwordResetToken.update({
-      where: { token },
+    // Invalidate ALL unused reset tokens for this email, not just the one used
+    await prisma.passwordResetToken.updateMany({
+      where: { email: record.email, isUsed: false },
       data: { isUsed: true },
     });
 

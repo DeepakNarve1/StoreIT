@@ -152,10 +152,12 @@ function CategoryNode({
   category,
   onDelete,
   canDelete,
+  hideCount = false,
 }: {
   category: CategoryItem;
   onDelete: (id: string, name: string) => void;
   canDelete: boolean;
+  hideCount?: boolean;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -200,7 +202,7 @@ function CategoryNode({
             )}
           />
           <span className="truncate font-medium">{category.name}</span>
-          {totalItems > 0 && (
+          {!hideCount && totalItems > 0 && (
             <span
               className="ml-auto text-xs text-gray-400 bg-gray-100 dark:bg-gray-800
                              px-1.5 py-0.5 rounded-full shrink-0"
@@ -613,6 +615,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
                 category={cat}
                 onDelete={handleDeleteCategory}
                 canDelete={canWrite}
+                hideCount={isViewer}
               />
             ))
           )}

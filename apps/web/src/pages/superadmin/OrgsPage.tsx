@@ -35,6 +35,7 @@ interface Org {
   slug: string;
   plan: Plan;
   isActive: boolean;
+  planExpiresAt?: string | null;
   storageBytes: number;
   _count: OrgCount;
 }

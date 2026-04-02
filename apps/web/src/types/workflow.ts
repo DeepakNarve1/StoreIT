@@ -2,6 +2,7 @@
 export type StartedApprovalWorkflow = {
   id: string;
   status?: string;
+  workflowMode?: "sequential" | "parallel";
   fileId?: string;
   currentStepOrder?: number | null;
   file?: {

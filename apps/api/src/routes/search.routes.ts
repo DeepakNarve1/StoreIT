@@ -1,6 +1,8 @@
 import { Router, Response } from "express";
 import { verifyAuth, AuthRequest } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
+import { userCanAccessFile } from "../services/file-access.service";
+import { userHasCapability } from "./permissions.routes";
 
 const router = Router();
 
@@ -35,24 +37,8 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
       "EDITOR",
     ].includes(role);
 
-    // ── Build file permission filter for viewers ──────────────────────────────
-    let allowedFileIds: string[] = [];
-    if (!isPrivileged) {
-      const permissions = await prisma.permission.findMany({
-        where: {
-          resourceType: "file",
-          OR: [{ grantedTo: "all" }, { grantedTo: "user", userId }],
-          AND: [
-            { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
-          ],
-        },
-        select: { resourceId: true },
-      });
-      allowedFileIds = permissions.map((p) => p.resourceId);
-    }
-
     // ── Search files ──────────────────────────────────────────────────────────
-    const files =
+    const fileCandidates =
       resolvedType === "all" || resolvedType === "file"
         ? await prisma.file.findMany({
             where: {
@@ -67,19 +53,12 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
                   }
                 : {}),
               ...(categoryId ? { categoryId: String(categoryId) } : {}),
-              AND: [
-                {
-                  OR: [
-                    { name: { contains: query, mode: "insensitive" } },
-                    { metadata: { some: { value: { contains: query, mode: "insensitive" } } } },
-                  ]
-                },
-                ...(!isPrivileged
-                  ? [{ OR: [{ id: { in: allowedFileIds } }, { uploadedById: userId }] }]
-                  : []),
+              OR: [
+                { name: { contains: query, mode: "insensitive" } },
+                { metadata: { some: { value: { contains: query, mode: "insensitive" } } } },
               ],
             },
-            take: limitNum,
+            take: isPrivileged ? limitNum : Math.min(limitNum * 4, 200),
             orderBy: { createdAt: "desc" },
             select: {
               id: true,
@@ -89,14 +68,34 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
               createdAt: true,
               version: true,
               folderId: true,
+              uploadedById: true,
               folder: { select: { name: true } },
               category: { select: { id: true, name: true } },
             },
           })
         : [];
+    const files = isPrivileged
+      ? fileCandidates.slice(0, limitNum)
+      : (
+          await Promise.all(
+            fileCandidates.map(async (file) => {
+              const canAccess = await userCanAccessFile(
+                file.id,
+                userId,
+                tenantId,
+                role,
+                file.uploadedById ?? null,
+                file.folderId ?? null,
+              );
+              return canAccess ? file : null;
+            }),
+          )
+        )
+          .filter((f): f is (typeof fileCandidates)[number] => !!f)
+          .slice(0, limitNum);
 
     // ── Search folders ────────────────────────────────────────────────────────
-    const folders =
+    const folderCandidates =
       resolvedType === "all" || resolvedType === "folder"
         ? await prisma.folder.findMany({
             where: {
@@ -122,6 +121,23 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
             },
           })
         : [];
+    const folders = isPrivileged
+      ? folderCandidates
+      : (
+          await Promise.all(
+            folderCandidates.map(async (folder) => {
+              const canSeeFolder = await userHasCapability(
+                userId,
+                tenantId,
+                role,
+                "folder",
+                folder.id,
+                "see_folders",
+              );
+              return canSeeFolder ? folder : null;
+            }),
+          )
+        ).filter((f): f is (typeof folderCandidates)[number] => !!f);
 
     // ── Search categories ─────────────────────────────────────────────────────
     const categories =

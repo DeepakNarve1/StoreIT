@@ -4037,6 +4037,32 @@ export default function FileBrowserPage() {
           <ApprovalWorkflowPanel
             file={workflowPanelFile}
             onClose={() => setWorkflowPanelFile(null)}
+            onOpenFile={async (file) => {
+              try {
+                const existing = allFiles.find((f) => f.id === file.id);
+                if (existing) {
+                  setPreviewFile(existing);
+                  return;
+                }
+                const res = await api.get(`/files/${file.id}`);
+                const row = res.data?.file as Partial<BrowserFileItem> | undefined;
+                if (!row?.id || !row?.name || !row?.mimeType) {
+                  throw new Error("File details unavailable");
+                }
+                setPreviewFile({
+                  id: row.id,
+                  name: row.name,
+                  mimeType: row.mimeType,
+                  size: Number(row.size ?? 0),
+                  createdAt: row.createdAt ?? new Date().toISOString(),
+                  viewUrl: row.viewUrl ?? null,
+                });
+              } catch {
+                useToast
+                  .getState()
+                  .add("Unable to open file preview for this workflow item.", "error");
+              }
+            }}
             canStartWorkflow={fileCan(workflowPanelFile.id, "edit_file_attrs")}
             onStartWorkflow={
               fileCan(workflowPanelFile.id, "edit_file_attrs")

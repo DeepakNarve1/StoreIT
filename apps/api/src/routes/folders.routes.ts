@@ -14,6 +14,7 @@ import {
   deleteFolderIdsLeavesFirstInTx,
 } from "../services/folder-tree.service";
 import { purgeAllFilesUnderFolderIdsInTx } from "../services/permanent-purge.service";
+import { cancelActiveWorkflowForFile } from "../services/workflow.service";
 
 const router = Router();
 
@@ -1096,16 +1097,35 @@ router.delete("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
       }
     }
 
-    await prisma.$transaction([
-      prisma.folder.updateMany({
+    await prisma.$transaction(async (tx) => {
+      // Cancel any active approval workflows on files inside these folders
+      const filesWithWorkflows = await tx.file.findMany({
+        where: {
+          folderId: { in: allFolderIds },
+          tenantId: req.user!.tenantId,
+          isDeleted: false,
+          activeWorkflowId: { not: null },
+        },
+        select: { id: true },
+      });
+      for (const file of filesWithWorkflows) {
+        await cancelActiveWorkflowForFile(tx, {
+          fileId: file.id,
+          tenantId: req.user!.tenantId,
+          actorUserId: req.user!.userId,
+          note: "Cancelled automatically because the containing folder was deleted.",
+        });
+      }
+
+      await tx.folder.updateMany({
         where: { id: { in: allFolderIds }, tenantId: req.user!.tenantId },
         data: { isDeleted: true },
-      }),
-      prisma.file.updateMany({
+      });
+      await tx.file.updateMany({
         where: { folderId: { in: allFolderIds }, tenantId: req.user!.tenantId },
         data: { isDeleted: true },
-      }),
-    ]);
+      });
+    });
 
     await createAuditLog({
       action: "folder.delete",

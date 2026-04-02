@@ -2,6 +2,8 @@ import { Router, Response } from "express";
 import { z } from "zod";
 import { verifyAuth, AuthRequest } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
+import { userCanAccessFile } from "../services/file-access.service";
+import { userHasCapability } from "./permissions.routes";
 
 const router = Router();
 
@@ -180,6 +182,7 @@ router.get(
             storageKey: true,
             createdAt: true,
             folderId: true,
+            uploadedById: true,
           },
         }),
         prisma.folder.findMany({
@@ -204,7 +207,41 @@ router.get(
         }),
       ]);
 
-      res.json({ category, files, folders });
+      const privileged = ["SUPERADMIN", "ORG_ADMIN", "MANAGER", "EDITOR"].includes(
+        req.user!.role,
+      );
+      if (privileged) {
+        res.json({ category, files, folders });
+        return;
+      }
+
+      const visibleFiles: typeof files = [];
+      for (const file of files) {
+        const canAccess = await userCanAccessFile(
+          file.id,
+          req.user!.userId,
+          req.user!.tenantId,
+          req.user!.role,
+          file.uploadedById ?? null,
+          file.folderId,
+        );
+        if (canAccess) visibleFiles.push(file);
+      }
+
+      const visibleFolders: typeof folders = [];
+      for (const folder of folders) {
+        const canSeeFolder = await userHasCapability(
+          req.user!.userId,
+          req.user!.tenantId,
+          req.user!.role,
+          "folder",
+          folder.id,
+          "see_folders",
+        );
+        if (canSeeFolder) visibleFolders.push(folder);
+      }
+
+      res.json({ category, files: visibleFiles, folders: visibleFolders });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch category contents" });
     }

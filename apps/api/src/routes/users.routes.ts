@@ -133,11 +133,15 @@ router.post(
       // FIX #1: single query fetches both plan and name — removes duplicate const tenant declaration
       const tenant = await prisma.tenant.findUnique({
         where: { id: req.user!.tenantId },
-        select: { plan: true, name: true },
+        select: { plan: true, name: true, planExpiresAt: true },
       });
 
-      // Check user limit
-      const { maxUsers } = getPlanLimits(tenant?.plan ?? "free");
+      // Check user limit — use effective plan (respect grace period expiry)
+      const effectivePlan =
+        tenant?.planExpiresAt && tenant.planExpiresAt < new Date()
+          ? "free"
+          : (tenant?.plan ?? "free");
+      const { maxUsers } = getPlanLimits(effectivePlan);
       const currentUsers = await prisma.user.count({
         where: { tenantId: req.user!.tenantId, isActive: true },
       });

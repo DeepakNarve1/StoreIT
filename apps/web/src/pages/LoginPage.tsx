@@ -1,16 +1,25 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuthStore } from "../store/authStore";
 import api from "../api/axios";
 import { apiErrorMessage } from "../utils/apiError";
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const setAuth = useAuthStore((s) => s.setAuth);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const reason = searchParams.get("reason");
+  const reasonMessage =
+    reason === "disabled"
+      ? "Your account has been deactivated. Contact your administrator."
+      : reason === "suspended"
+        ? "Your organisation account has been suspended. Contact support."
+        : null;
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,6 +51,12 @@ export default function LoginPage() {
         <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">
           Enter your credentials to access your workspace
         </p>
+
+        {reasonMessage && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3 rounded-lg mb-4">
+            {reasonMessage}
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4">

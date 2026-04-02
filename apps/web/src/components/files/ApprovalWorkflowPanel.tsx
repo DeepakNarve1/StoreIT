@@ -5,6 +5,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   CheckCircle2,
   Clock3,
+  ExternalLink,
   FileCheck2,
   PlayCircle,
   RotateCcw,
@@ -29,6 +30,7 @@ interface ApprovalWorkflowPanelProps {
     name: string;
   };
   onClose: () => void;
+  onOpenFile?: (file: { id: string; name: string }) => void;
   onStartWorkflow?: (templateApproverUserIds?: string[]) => void;
   onWorkflowChanged?: (workflow: WorkflowWithFile) => void;
   canStartWorkflow?: boolean;
@@ -77,6 +79,7 @@ const statusLabel: Record<string, string> = {
 export default function ApprovalWorkflowPanel({
   file,
   onClose,
+  onOpenFile,
   onStartWorkflow,
   onWorkflowChanged,
   canStartWorkflow = true,
@@ -203,10 +206,17 @@ export default function ApprovalWorkflowPanel({
                     >
                       {statusLabel[wfStatus] ?? wfStatus}
                     </span>
-                    {(workflow.status === "approved" ||
-                      workflow.status === "rejected" ||
-                      workflow.status === "cancelled") && (
-                      canStartWorkflow && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => onOpenFile?.({ id: file.id, name: file.name })}
+                        className="inline-flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+                      >
+                        <ExternalLink size={14} /> Open file
+                      </button>
+                      {(workflow.status === "approved" ||
+                        workflow.status === "rejected" ||
+                        workflow.status === "cancelled") &&
+                        canStartWorkflow && (
                         <button
                           onClick={() =>
                             onStartWorkflow?.(
@@ -217,8 +227,8 @@ export default function ApprovalWorkflowPanel({
                         >
                           <RotateCcw size={14} /> Start again
                         </button>
-                      )
-                    )}
+                        )}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
@@ -243,6 +253,16 @@ export default function ApprovalWorkflowPanel({
                               : workflow.status === "cancelled"
                                 ? "Workflow cancelled"
                                 : "Not started")}
+                      </p>
+                    </div>
+                    <div className="rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 px-3 py-3">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Approval mode
+                      </p>
+                      <p className="mt-1 font-medium text-gray-900 dark:text-white">
+                        {workflow.workflowMode === "parallel"
+                          ? "Parallel"
+                          : "Sequential"}
                       </p>
                     </div>
                   </div>

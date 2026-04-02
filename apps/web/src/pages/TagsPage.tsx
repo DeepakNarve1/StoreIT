@@ -127,9 +127,6 @@ export default function TagsPage() {
               <h1 className="text-lg font-semibold text-gray-900 dark:text-white  ">
                 Tags
               </h1>
-              <p className="text-xs text-gray-400 dark:text-gray-500">
-                {tags.length} tag{tags.length !== 1 ? "s" : ""}
-              </p>
             </div>
           </div>
           {canMutate && (
@@ -229,9 +226,6 @@ export default function TagsPage() {
                     <span className="text-sm font-medium text-gray-800 dark:text-gray-200 flex-1 truncate">
                       {tag.name}
                     </span>
-                    <span className="text-xs text-gray-400 dark:text-gray-500">
-                      {tag._count?.files ?? 0}
-                    </span>
                     {canMutate && (
                       <button
                         onClick={(e) => {
@@ -288,9 +282,6 @@ export default function TagsPage() {
                   />
                   <span className="text-sm font-semibold text-gray-900 dark:text-white">
                     {selectedTag.name}
-                  </span>
-                  <span className="text-xs text-gray-400 dark:text-gray-500 ml-1">
-                    {tagFiles.length} file{tagFiles.length !== 1 ? "s" : ""}
                   </span>
                 </div>
                 {tagFiles.map((file, i) => {

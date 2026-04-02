@@ -49,9 +49,6 @@ export default function CategoryPage() {
             <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
               {category?.name ?? "Category"}
             </h1>
-            <p className="text-xs text-gray-400 dark:text-gray-500">
-              {files.length} files · {folders.length} folders
-            </p>
           </div>
         </div>
 
@@ -78,7 +75,7 @@ export default function CategoryPage() {
             {folders.length > 0 && (
               <div>
                 <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">
-                  Folders ({folders.length})
+                  Folders
                 </p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                   {folders.map((folder) => (
@@ -105,7 +102,7 @@ export default function CategoryPage() {
             {files.length > 0 && (
               <div>
                 <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">
-                  Files ({files.length})
+                  Files
                 </p>
                 <FileGrid files={files} onFileClick={setPreviewFile} />
               </div>
