@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import api from "../../api/axios";
 import { useToast } from "../ui/toastStore";
+import { useAuthStore } from "../../store/authStore";
 import {
   FILE_PERMISSION_OPTIONS,
   FOLDER_PERMISSION_OPTIONS,
@@ -162,17 +163,24 @@ export default function PermissionsPanel({
     },
   });
 
+  const { user: currentUser } = useAuthStore();
+  const isPrivileged = ["ORG_ADMIN", "MANAGER", "SUPERADMIN"].includes(
+    currentUser?.role ?? "",
+  );
+
   const {
     data: usersData,
     isError: usersError,
     isLoading: usersLoading,
   } = useQuery({
-    queryKey: ["users"],
+    // Use a separate cache key from the admin users list so a VIEWER's 403
+    // doesn't poison the cache for privileged users opening the same panel.
+    queryKey: ["users-for-permissions-panel"],
     queryFn: async () => {
       const res = await api.get("/users");
       return res.data as { users: OrgUserOption[] };
     },
-    retry: false,
+    retry: 1,
   });
 
   const { data: deptsData, isLoading: deptsLoading } = useQuery({
@@ -528,8 +536,9 @@ export default function PermissionsPanel({
                           className="text-red-500 shrink-0"
                         />
                         <p className="text-xs text-red-600 dark:text-red-400">
-                          You don't have permission to view the user list. Ask
-                          an Admin to share.
+                          {isPrivileged
+                            ? "Failed to load users. Please try again."
+                            : "You don't have permission to view the user list. Ask an Admin to share."}
                         </p>
                       </div>
                     ) : (
