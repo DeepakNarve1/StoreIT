@@ -445,14 +445,18 @@ export default function FileBrowserPage() {
     },
   });
   const { user } = useAuthStore();
+  const rawRole = (user?.roleProfile?.baseRole ?? user?.role ?? "").toUpperCase();
+  const baseRole =
+    rawRole === "ADMIN" || rawRole === "ORGADMIN" ? "ORG_ADMIN" : rawRole;
   // Use resolved roleCapabilities (from the profile) when available.
   // Fall back to role-string check only for built-in roles without a profile.
   const resolvedCaps = user?.roleCapabilities;
+  const hasResolvedCaps = !!resolvedCaps && Object.keys(resolvedCaps).length > 0;
   const canWrite =
-    user?.role === "SUPERADMIN" ||
-    (resolvedCaps
+    baseRole === "SUPERADMIN" ||
+    (hasResolvedCaps
       ? resolvedCaps.add_files === true || resolvedCaps.create_folders === true
-      : ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(user?.role ?? ""));
+      : ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(baseRole));
 
   // ── Granular per-file capabilities for VIEWER role ───────────────────────
   const fileIds = (filesData?.files ?? []).map((f) => f.id);
@@ -1199,15 +1203,13 @@ export default function FileBrowserPage() {
     canWrite || folderCapMap[folderId]?.[cap] === true;
 
   const canCreateFolderHere =
-    user?.role === "SUPERADMIN" ||
-    (user?.role === "VIEWER"
-      ? // If the VIEWER's role profile grants tenant-wide folder creation,
-        // allow showing the button even at root.
-        resolvedCaps?.create_folders === true ||
+    baseRole === "SUPERADMIN" ||
+    (baseRole === "VIEWER"
+      ? resolvedCaps?.create_folders === true ||
         (!!folderId && folderCan(folderId, "create_folders"))
-      : resolvedCaps
+      : hasResolvedCaps
         ? resolvedCaps.create_folders === true
-        : ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(user?.role ?? ""));
+        : ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(baseRole));
   const reorderFileItems = useCallback(
     (fromId: string, toId: string) => {
       setSortBy("manual");

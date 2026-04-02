@@ -852,7 +852,7 @@ function FileList({
                           <History size={14} /> Version History
                         </button>
                       )}
-                      {fileCan(file.id, "add_files") && onMove && (
+                      {fileCan(file.id, "move_files") && onMove && (
                         <button
                           onClick={() => {
                             onMove(file);

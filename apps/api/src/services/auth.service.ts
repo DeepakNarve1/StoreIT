@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { prisma } from "../utils/prisma";
-import { serializeRoleProfile } from "./role-profiles.service";
+import { serializeRoleProfile, getDefaultCapabilitiesForBaseRole } from "./role-profiles.service";
 
 // ─── TOKEN GENERATION ─────────────────────────────────────────────────────────
 export const generateTokens = (payload: {
@@ -92,25 +92,14 @@ export const loginUser = async (email: string, password: string) => {
               }
             : null,
       ),
-      roleCapabilities:
-        serializeRoleProfile(
-          user.roleProfile
-            ? {
-                id: user.roleProfile.id,
-                name: user.roleProfile.name,
-                baseRole: user.roleProfile.baseRole as any,
-                capabilities: user.roleProfile.capabilities,
-              }
-            : user.role === "SUPERADMIN"
-              ? {
-                  name: "Superadmin",
-                  baseRole: "SUPERADMIN",
-                }
-              : {
-                  name: user.role,
-                  baseRole: user.role as any,
-                },
-        )?.capabilities ?? {},
+      roleCapabilities: user.roleProfile
+        ? serializeRoleProfile({
+            id: user.roleProfile.id,
+            name: user.roleProfile.name,
+            baseRole: user.roleProfile.baseRole as any,
+            capabilities: user.roleProfile.capabilities,
+          })?.capabilities ?? {}
+        : getDefaultCapabilitiesForBaseRole(user.role as any),
     },
     ...tokens,
   };

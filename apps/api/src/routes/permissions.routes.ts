@@ -205,7 +205,9 @@ router.post(
         },
       });
 
-      // Also fetch folder-level permissions so we can propagate to files
+      // Also fetch folder-level permissions so we can propagate to files.
+      // Walk the full ancestor chain for each file's folder so that
+      // apply_subfolders grants on parent folders are respected.
       const files = await prisma.file.findMany({
         where: { id: { in: fileIds }, tenantId, isDeleted: false },
         select: { id: true, folderId: true, uploadedById: true },
@@ -215,24 +217,52 @@ router.post(
         ...new Set(files.map((f) => f.folderId).filter(Boolean) as string[]),
       ];
 
-      const folderPerms =
-        folderIds.length > 0
-          ? await prisma.permission.findMany({
-              where: {
-                resourceType: "folder",
-                resourceId: { in: folderIds },
-                OR: orClauses,
-                AND: [
-                  { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
-                ],
-              },
-            })
-          : [];
+      // Build full ancestor chains for all distinct folder IDs in one query
+      let folderPerms: typeof filePerms = [];
+      if (folderIds.length > 0) {
+        // Fetch all folders for the tenant to walk chains in memory
+        const allFolders = await prisma.folder.findMany({
+          where: { tenantId, isDeleted: false },
+          select: { id: true, parentId: true },
+        });
+        const parentById = new Map(allFolders.map((f) => [f.id, f.parentId]));
+
+        // Collect all ancestor folder IDs across all file folders
+        const allAncestorIds = new Set<string>();
+        for (const fId of folderIds) {
+          let current: string | null = fId;
+          let depth = 0;
+          while (current && depth < 80) {
+            allAncestorIds.add(current);
+            current = parentById.get(current) ?? null;
+            depth++;
+          }
+        }
+
+        folderPerms = await prisma.permission.findMany({
+          where: {
+            resourceType: "folder",
+            resourceId: { in: Array.from(allAncestorIds) },
+            OR: orClauses,
+            AND: [
+              { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+            ],
+          },
+        });
+      }
 
       // Build result map
       const result: Record<string, Record<string, boolean>> = {};
       const baseCaps = normalizeCapabilities(roleContext.capabilities);
-      const ALL_CAPS = [...FILE_CAPABILITIES, "see_folders", "share_folders"] as const;
+
+      // Build parentById map once (already fetched above if folderIds.length > 0)
+      const allFoldersForChain = folderIds.length > 0
+        ? await prisma.folder.findMany({
+            where: { tenantId, isDeleted: false },
+            select: { id: true, parentId: true },
+          })
+        : [];
+      const parentByIdForFiles = new Map(allFoldersForChain.map((f) => [f.id, f.parentId]));
 
       for (const fileId of fileIds) {
         const file = files.find((f) => f.id === fileId);
@@ -240,10 +270,29 @@ router.post(
 
         // Direct file perm takes priority
         const directPerm = filePerms.find((p) => p.resourceId === fileId);
-        // Folder perm as fallback
-        const folderPerm = file?.folderId
-          ? folderPerms.find((p) => p.resourceId === file.folderId)
-          : null;
+
+        // Folder perm: prefer direct folder match, then nearest ancestor with apply_subfolders
+        let folderPerm: (typeof folderPerms)[number] | null = null;
+        if (!directPerm && file?.folderId) {
+          let current: string | null = file.folderId;
+          let depth = 0;
+          while (current && depth < 80) {
+            const perm = folderPerms.find((p) => p.resourceId === current);
+            if (perm) {
+              if (current === file.folderId) {
+                folderPerm = perm;
+                break;
+              }
+              const caps = (perm as any).capabilities as Record<string, boolean> | null;
+              if (caps?.apply_subfolders === true) {
+                folderPerm = perm;
+                break;
+              }
+            }
+            current = parentByIdForFiles.get(current) ?? null;
+            depth++;
+          }
+        }
 
         const activePerm = directPerm ?? folderPerm;
 
@@ -356,22 +405,73 @@ router.post(
         },
       });
 
+      // Also fetch ancestor permissions for apply_subfolders support
+      const allFolders = await prisma.folder.findMany({
+        where: { tenantId: roleContext.tenantId, isDeleted: false },
+        select: { id: true, parentId: true },
+      });
+      const parentById = new Map(allFolders.map((f) => [f.id, f.parentId]));
+
+      // Collect all ancestor IDs beyond the direct folders
+      const ancestorIds = new Set<string>();
+      for (const fId of folderIds) {
+        let current: string | null = parentById.get(fId) ?? null;
+        let depth = 0;
+        while (current && depth < 80) {
+          ancestorIds.add(current);
+          current = parentById.get(current) ?? null;
+          depth++;
+        }
+      }
+
+      const ancestorPerms = ancestorIds.size > 0
+        ? await prisma.permission.findMany({
+            where: {
+              resourceType: "folder",
+              resourceId: { in: Array.from(ancestorIds) },
+              OR: orClauses,
+              AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
+            },
+          })
+        : [];
+
       const result: Record<string, Record<string, boolean>> = {};
       const baseCaps = normalizeCapabilities(roleContext.capabilities);
       for (const folderId of folderIds) {
+        // Direct permission on this folder
         const perm = folderPerms.find((p) => p.resourceId === folderId);
-        const caps = (perm as any)?.capabilities as
+
+        // If no direct perm, check ancestors with apply_subfolders
+        let activePerm = perm ?? null;
+        if (!activePerm) {
+          let current: string | null = parentById.get(folderId) ?? null;
+          let depth = 0;
+          while (current && depth < 80) {
+            const ancestorPerm = ancestorPerms.find((p) => p.resourceId === current);
+            if (ancestorPerm) {
+              const caps = (ancestorPerm as any).capabilities as Record<string, boolean> | null;
+              if (caps?.apply_subfolders === true) {
+                activePerm = ancestorPerm;
+                break;
+              }
+            }
+            current = parentById.get(current) ?? null;
+            depth++;
+          }
+        }
+
+        const caps = (activePerm as any)?.capabilities as
           | Record<string, boolean>
           | null
           | undefined;
         const sharedCaps =
           caps && typeof caps === "object" && Object.keys(caps).length > 0
             ? normalizeCapabilities(caps)
-            : perm
-              ? actionToFolderCapabilities(perm.action)
+            : activePerm
+              ? actionToFolderCapabilities(activePerm.action)
               : normalizeCapabilities({});
         const seededCaps =
-          roleContext.baseRole === "VIEWER" && !perm
+          roleContext.baseRole === "VIEWER" && !activePerm
             ? normalizeCapabilities({})
             : baseCaps;
         result[folderId] = mergeCapabilities(seededCaps, sharedCaps);

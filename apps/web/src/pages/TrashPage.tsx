@@ -17,6 +17,7 @@ import clsx from "clsx";
 import { useState } from "react";
 import { useAuthStore } from "../store/authStore";
 import DeleteModal from "../components/common/DeleteModal";
+import { useToast } from "../components/ui/toastStore";
 
 type TrashFolderRow = { id: string; name: string; updatedAt: string };
 type TrashFileRow = { id: string; name: string; mimeType: string; updatedAt: string };
@@ -47,12 +48,16 @@ export default function TrashPage() {
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; type: "file" | "folder" } | null>(null);
+  const [showEmptyTrashConfirm, setShowEmptyTrashConfirm] = useState(false);
+  const rawRole = (user?.roleProfile?.baseRole ?? user?.role ?? "").toUpperCase();
+  const baseRole =
+    rawRole === "ADMIN" || rawRole === "ORGADMIN" ? "ORG_ADMIN" : rawRole;
   const canRestore = ["ORG_ADMIN", "SUPERADMIN", "MANAGER", "EDITOR"].includes(
-    user?.role ?? "",
+    baseRole,
   );
   // Only MANAGER+ can hard-delete from trash (Editor can soft-delete files, not permanently erase them)
   const canPermanentDelete = ["ORG_ADMIN", "SUPERADMIN", "MANAGER"].includes(
-    user?.role ?? "",
+    baseRole,
   );
   const { data, isLoading } = useQuery({
     queryKey: ["trash"],
@@ -87,6 +92,13 @@ export default function TrashPage() {
       queryClient.refetchQueries({ queryKey: ["trash"] });
       queryClient.refetchQueries({ queryKey: ["recent-files"] });
       queryClient.refetchQueries({ queryKey: ["dashboard-stats"] });
+      useToast.getState().add("File permanently deleted");
+    },
+    onError: (err: unknown) => {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data
+          ?.error ?? "Failed to delete file permanently";
+      useToast.getState().add(msg, "error");
     },
     onSettled: () => setDeleteTarget(null),
   });
@@ -115,8 +127,61 @@ export default function TrashPage() {
       queryClient.invalidateQueries({ queryKey: ["folders"] });
       queryClient.refetchQueries({ queryKey: ["trash"] });
       queryClient.refetchQueries({ queryKey: ["folders"] });
+      useToast.getState().add("Folder permanently deleted");
+    },
+    onError: (err: unknown) => {
+      const msg =
+        (err as { response?: { data?: { error?: string } } })?.response?.data
+          ?.error ?? "Failed to delete folder permanently";
+      useToast.getState().add(msg, "error");
     },
     onSettled: () => setDeleteTarget(null),
+  });
+
+  const emptyTrash = useMutation({
+    mutationFn: async () => {
+      const res = await api.delete<{
+        deletedFolders: number;
+        deletedFiles: number;
+        skippedLockedFiles: number;
+      }>("/files/trash/empty");
+      return res.data;
+    },
+    onSuccess: (payload) => {
+      queryClient.invalidateQueries({ queryKey: ["trash"] });
+      queryClient.invalidateQueries({ queryKey: ["folders"] });
+      queryClient.invalidateQueries({ queryKey: ["files"] });
+      queryClient.invalidateQueries({ queryKey: ["recent-files"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      queryClient.refetchQueries({ queryKey: ["trash"] });
+      setShowEmptyTrashConfirm(false);
+      const deletedTotal =
+        (payload?.deletedFiles ?? 0) + (payload?.deletedFolders ?? 0);
+      useToast
+        .getState()
+        .add(
+          deletedTotal > 0
+            ? `Trash emptied (${deletedTotal} item${deletedTotal !== 1 ? "s" : ""} deleted).`
+            : "Trash emptied.",
+        );
+      if (payload?.skippedLockedFiles && payload.skippedLockedFiles > 0) {
+        useToast
+          .getState()
+          .add(
+            `Trash cleared. ${payload.skippedLockedFiles} locked file(s) were skipped.`,
+            "error",
+          );
+      }
+    },
+    onError: (err: unknown) => {
+      const data = (err as { response?: { data?: { error?: string; detail?: string } } })
+        ?.response?.data;
+      const msg =
+        data?.detail ||
+        data?.error ||
+        "Failed to empty trash";
+      useToast.getState().add(msg, "error");
+    },
   });
 
   const files = data?.files ?? [];
@@ -127,7 +192,7 @@ export default function TrashPage() {
     <AppShell>
       <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-red-50 rounded-xl flex items-center justify-center">
               <Trash2 size={18} className="text-red-500" />
@@ -142,6 +207,19 @@ export default function TrashPage() {
               </p>
             </div>
           </div>
+          {canPermanentDelete && !isEmpty && (
+            <button
+              type="button"
+              onClick={() => setShowEmptyTrashConfirm(true)}
+              disabled={emptyTrash.isPending}
+              className="shrink-0 flex items-center gap-2 px-3 py-2 text-xs font-semibold
+                       text-white bg-red-600 hover:bg-red-500 rounded-lg transition-colors
+                       disabled:opacity-50 dark:bg-red-700 dark:hover:bg-red-600"
+            >
+              <Trash2 size={14} />
+              Empty trash
+            </button>
+          )}
         </div>
 
         {/* Warning banner */}
@@ -320,6 +398,16 @@ export default function TrashPage() {
             : `Permanently delete "${deleteTarget?.name}"? This cannot be undone.`
         }
         isLoading={deleteFilePermanent.isPending || deleteFolderPermanent.isPending}
+        isPermanent={true}
+      />
+
+      <DeleteModal
+        isOpen={showEmptyTrashConfirm}
+        onClose={() => setShowEmptyTrashConfirm(false)}
+        onConfirm={() => emptyTrash.mutate()}
+        title="Empty trash"
+        message={`Permanently delete all ${files.length + folders.length} item${files.length + folders.length !== 1 ? "s" : ""} in trash? This cannot be undone.`}
+        isLoading={emptyTrash.isPending}
         isPermanent={true}
       />
     </AppShell>

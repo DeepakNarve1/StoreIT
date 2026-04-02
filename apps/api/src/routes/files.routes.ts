@@ -24,6 +24,14 @@ import {
   userHasFilePermission,
   userHasResolvedFileCapability,
 } from "../services/file-access.service";
+import {
+  getAllDescendantFolderIds,
+  deleteFolderIdsLeavesFirstInTx,
+} from "../services/folder-tree.service";
+import {
+  purgeFileRecordInTx,
+  purgeAllFilesUnderFolderIdsInTx,
+} from "../services/permanent-purge.service";
 
 const router = Router();
 
@@ -880,6 +888,124 @@ router.get("/trash", verifyAuth, async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: "Failed to fetch trash" });
   }
 });
+
+// ─── DELETE /api/files/trash/empty — permanently remove all trashed items ────
+router.delete(
+  "/trash/empty",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "MANAGER", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { userId, tenantId, role } = req.user!;
+      let deletedFolderCount = 0;
+      let deletedFileCount = 0;
+      let skippedLockedFiles = 0;
+
+      for (let safety = 0; safety < 5000; safety++) {
+        const root = await prisma.folder.findFirst({
+          where: {
+            tenantId,
+            isDeleted: true,
+            OR: [
+              { parentId: null },
+              { parent: { isDeleted: false, tenantId } },
+            ],
+          },
+          select: { id: true },
+        });
+        if (!root) break;
+
+        const descendantIds = await getAllDescendantFolderIds(
+          root.id,
+          tenantId,
+        );
+        const allFolderIds = [root.id, ...descendantIds];
+
+        const filesInTree = await prisma.file.findMany({
+          where: { folderId: { in: allFolderIds }, tenantId },
+          include: { versions: { select: { storageKey: true } } },
+        });
+        const treeStorageKeys = filesInTree.flatMap((f) => [
+          f.storageKey,
+          ...f.versions.map((v) => v.storageKey),
+        ]);
+
+        await prisma.$transaction(async (tx) => {
+          await purgeAllFilesUnderFolderIdsInTx(tx, {
+            folderIds: allFolderIds,
+            tenantId,
+            actorUserId: userId,
+          });
+          await tx.permission.deleteMany({
+            where: {
+              OR: [
+                { folder: { id: { in: allFolderIds }, tenantId } },
+                { resourceType: "folder", resourceId: { in: allFolderIds } },
+              ],
+            },
+          });
+          await deleteFolderIdsLeavesFirstInTx(tx, allFolderIds, tenantId);
+        });
+        await Promise.allSettled(treeStorageKeys.map((key) => deleteFile(key)));
+        deletedFolderCount += allFolderIds.length;
+      }
+
+      const trashedFiles = await prisma.file.findMany({
+        where: { tenantId, isDeleted: true },
+        include: { versions: { select: { storageKey: true } } },
+      });
+
+      for (const file of trashedFiles) {
+        if (
+          isBlockedByLock(file as any, userId, role, "delete")
+        ) {
+          skippedLockedFiles += 1;
+          continue;
+        }
+        const allKeys = [
+          file.storageKey,
+          ...file.versions.map((v) => v.storageKey),
+        ];
+        await prisma.$transaction(async (tx) => {
+          await purgeFileRecordInTx(tx, {
+            fileId: file.id,
+            tenantId,
+            actorUserId: userId,
+          });
+        });
+        await Promise.allSettled(allKeys.map((key) => deleteFile(key)));
+        deletedFileCount += 1;
+      }
+
+      await createAuditLog({
+        action: "trash.empty",
+        userId,
+        tenantId,
+        resourceType: "tenant",
+        resourceId: tenantId,
+        resourceName: "Trash",
+        metadata: {
+          deletedFolders: deletedFolderCount,
+          deletedFiles: deletedFileCount,
+          skippedLockedFiles,
+        },
+        req,
+      });
+
+      res.json({
+        message: "Trash emptied",
+        deletedFolders: deletedFolderCount,
+        deletedFiles: deletedFileCount,
+        skippedLockedFiles,
+      });
+    } catch (err) {
+      console.error("empty trash:", err);
+      const message =
+        err instanceof Error ? err.message : "Failed to empty trash";
+      res.status(500).json({ error: "Failed to empty trash", detail: message });
+    }
+  },
+);
 
 // ─── POST /api/files/bulk-delete ─────────────────────────────────────────────
 router.post(
@@ -2069,34 +2195,21 @@ router.delete(
         return;
       }
 
-      // ── PERMISSION GUARD ──────────────────────────────────────────────────
-      if (
-        !(await userHasFilePermission(
-          file.id,
-          req.user!.userId,
-          file.uploadedById,
-          req.user!.role,
-          "delete",
-        ))
-      ) {
-        res.status(403).json({
-          error: "You don't have permission to permanently delete this file.",
-        });
-        return;
-      }
+      // requireRole already limits to ORG_ADMIN / MANAGER / SUPERADMIN; do not
+      // re-check userHasFilePermission (role profiles can omit delete_files and wrongly 403).
 
       const allKeys = [
         file.storageKey,
         ...file.versions.map((v) => v.storageKey),
       ];
+      await prisma.$transaction(async (tx) => {
+        await purgeFileRecordInTx(tx, {
+          fileId: file.id,
+          tenantId: req.user!.tenantId,
+          actorUserId: req.user!.userId,
+        });
+      });
       await Promise.allSettled(allKeys.map((key) => deleteFile(key)));
-      await prisma.$transaction([
-        prisma.fileTag.deleteMany({ where: { fileId: file.id } }),
-        prisma.permission.deleteMany({ where: { fileId: file.id } }),
-        prisma.oneTimeLink.deleteMany({ where: { fileId: file.id } }),
-        prisma.fileVersion.deleteMany({ where: { fileId: file.id } }),
-        prisma.file.delete({ where: { id: file.id } }),
-      ]);
       await createAuditLog({
         action: "file.delete.permanent",
         userId: req.user!.userId,

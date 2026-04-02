@@ -6,9 +6,14 @@ import { createAuditLog } from "../services/audit.service";
 import archiver from "archiver";
 import https from "https";
 import http from "http";
-import { getFileViewUrl } from "../services/storage.service";
+import { getFileViewUrl, deleteFile } from "../services/storage.service";
 import { userHasCapability } from "./permissions.routes";
 import { getEffectiveRoleProfileForUser } from "../services/role-profiles.service";
+import {
+  getAllDescendantFolderIds,
+  deleteFolderIdsLeavesFirstInTx,
+} from "../services/folder-tree.service";
+import { purgeAllFilesUnderFolderIdsInTx } from "../services/permanent-purge.service";
 
 const router = Router();
 
@@ -312,27 +317,6 @@ const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isValidUUID = (val: unknown): val is string =>
   typeof val === "string" && UUID_REGEX.test(val);
-
-// ─── Helper: collect all descendant folder IDs recursively ───────────────────
-// FIX #1 & #2: cascade delete/restore was only handling direct files,
-// not child folders or their files.
-async function getAllDescendantFolderIds(
-  folderId: string,
-  tenantId: string,
-): Promise<string[]> {
-  const children = await prisma.folder.findMany({
-    where: { parentId: folderId, tenantId },
-    select: { id: true },
-  });
-
-  const ids: string[] = [];
-  for (const child of children) {
-    ids.push(child.id);
-    const nested = await getAllDescendantFolderIds(child.id, tenantId);
-    ids.push(...nested);
-  }
-  return ids;
-}
 
 // ─── GET /api/folders ─────────────────────────────────────────────────────────
 router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
@@ -955,37 +939,35 @@ router.delete(
         req.user!.tenantId,
       );
       const allFolderIds = [req.params.id, ...descendantIds];
+      const tenantId = req.user!.tenantId;
 
-      // Delete all files inside these folders first, then the folders
-      await prisma.$transaction([
-        prisma.fileTag.deleteMany({
-          where: { file: { folderId: { in: allFolderIds } } },
-        }),
-        prisma.permission.deleteMany({
-          where: { folder: { id: { in: allFolderIds } } },
-        }),
-        prisma.oneTimeLink.deleteMany({
-          where: { file: { folderId: { in: allFolderIds } } },
-        }),
-        prisma.fileVersion.deleteMany({
-          where: { file: { folderId: { in: allFolderIds } } },
-        }),
-        prisma.fileMetadata.deleteMany({
-          where: { file: { folderId: { in: allFolderIds } } },
-        }),
-        prisma.fileComment.deleteMany({
-          where: { file: { folderId: { in: allFolderIds } } },
-        }),
-        prisma.file.deleteMany({
-          where: {
-            folderId: { in: allFolderIds },
-            tenantId: req.user!.tenantId,
-          },
-        }),
-        prisma.folder.deleteMany({
-          where: { id: { in: allFolderIds }, tenantId: req.user!.tenantId },
-        }),
+      const filesToPurge = await prisma.file.findMany({
+        where: { folderId: { in: allFolderIds }, tenantId },
+        include: { versions: { select: { storageKey: true } } },
+      });
+      const storageKeys = filesToPurge.flatMap((f) => [
+        f.storageKey,
+        ...f.versions.map((v) => v.storageKey),
       ]);
+
+      await prisma.$transaction(async (tx) => {
+        await purgeAllFilesUnderFolderIdsInTx(tx, {
+          folderIds: allFolderIds,
+          tenantId,
+          actorUserId: req.user!.userId,
+        });
+        await tx.permission.deleteMany({
+          where: {
+            OR: [
+              { folder: { id: { in: allFolderIds }, tenantId } },
+              { resourceType: "folder", resourceId: { in: allFolderIds } },
+            ],
+          },
+        });
+        await deleteFolderIdsLeavesFirstInTx(tx, allFolderIds, tenantId);
+      });
+
+      await Promise.allSettled(storageKeys.map((key) => deleteFile(key)));
 
       await createAuditLog({
         action: "folder.delete.permanent",

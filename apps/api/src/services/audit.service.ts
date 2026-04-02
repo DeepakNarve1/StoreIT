@@ -7,6 +7,7 @@ export type AuditAction =
   | "file.upload.version"
   | "file.delete"
   | "file.delete.permanent"
+  | "trash.empty"
   | "file.bulk_delete"
   | "file.bulk_move"
   | "file.download"
