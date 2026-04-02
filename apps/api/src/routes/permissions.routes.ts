@@ -77,6 +77,23 @@ function actionToFileCapabilities(action: string): Record<string, boolean> {
   });
 }
 
+/**
+ * Folder capability flags stored on a **file** permission row (Share panel includes
+ * both FILE and FOLDER sections). Used so "create folders" etc. apply to the file's parent folder.
+ */
+function folderCapsFromFilePermissionRow(perm: {
+  capabilities: unknown;
+}): Record<string, boolean> {
+  const caps = perm.capabilities as Record<string, boolean> | null | undefined;
+  const slice: Record<string, boolean> = {};
+  if (caps && typeof caps === "object") {
+    for (const key of FOLDER_CAPABILITIES) {
+      if (caps[key] === true) slice[key] = true;
+    }
+  }
+  return normalizeCapabilities(slice);
+}
+
 function actionToFolderCapabilities(action: string): Record<string, boolean> {
   if (action === "admin") {
     return normalizeCapabilities(
@@ -152,7 +169,32 @@ export async function userHasCapability(
     },
   });
 
-  if (!perm) return false;
+  if (!perm) {
+    if (resourceType === "folder" && FOLDER_CAPABILITIES.includes(capability as any)) {
+      const filePerms = await prisma.permission.findMany({
+        where: {
+          resourceType: "file",
+          OR: orClauses,
+          AND: [
+            { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+            {
+              file: {
+                tenantId,
+                isDeleted: false,
+                folderId: resourceId,
+              },
+            },
+          ],
+        },
+        select: { capabilities: true },
+      });
+      for (const fp of filePerms) {
+        const slice = folderCapsFromFilePermissionRow(fp);
+        if (slice[capability] === true) return true;
+      }
+    }
+    return false;
+  }
   const capabilities = (perm as any).capabilities;
   if (capabilities && typeof capabilities === "object") {
     return (capabilities as Record<string, boolean>)[capability] === true;
@@ -435,6 +477,31 @@ router.post(
           })
         : [];
 
+      // File shares can include folder-section capabilities (e.g. create_folders) on resourceType=file.
+      const filePermsInListedFolders =
+        folderIds.length > 0
+          ? await prisma.permission.findMany({
+              where: {
+                resourceType: "file",
+                OR: orClauses,
+                AND: [
+                  { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+                  {
+                    file: {
+                      tenantId: roleContext.tenantId,
+                      isDeleted: false,
+                      folderId: { in: folderIds },
+                    },
+                  },
+                ],
+              },
+              select: {
+                capabilities: true,
+                file: { select: { folderId: true } },
+              },
+            })
+          : [];
+
       const result: Record<string, Record<string, boolean>> = {};
       const baseCaps = normalizeCapabilities(roleContext.capabilities);
       for (const folderId of folderIds) {
@@ -474,7 +541,15 @@ router.post(
           roleContext.baseRole === "VIEWER" && !activePerm
             ? normalizeCapabilities({})
             : baseCaps;
-        result[folderId] = mergeCapabilities(seededCaps, sharedCaps);
+        let merged = mergeCapabilities(seededCaps, sharedCaps);
+        for (const fp of filePermsInListedFolders) {
+          if (fp.file?.folderId !== folderId) continue;
+          merged = mergeCapabilities(
+            merged,
+            folderCapsFromFilePermissionRow(fp),
+          );
+        }
+        result[folderId] = merged;
       }
 
       res.json({ capabilities: result });

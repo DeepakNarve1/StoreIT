@@ -1233,7 +1233,9 @@ export default function FileBrowserPage() {
       ? resolvedCaps?.create_folders === true ||
         (!!folderId && folderCan(folderId, "create_folders"))
       : hasResolvedCaps
-        ? resolvedCaps.create_folders === true
+        ? ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(baseRole)
+          ? resolvedCaps.create_folders !== false
+          : resolvedCaps.create_folders === true
         : ["ORG_ADMIN", "MANAGER", "EDITOR"].includes(baseRole));
   const reorderFileItems = useCallback(
     (fromId: string, toId: string) => {

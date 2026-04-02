@@ -202,6 +202,8 @@ export default function PermissionsPanel({
       queryClient.refetchQueries({
         queryKey: ["permissions", resourceType, resourceId],
       });
+      queryClient.invalidateQueries({ queryKey: ["folder-capabilities"] });
+      queryClient.invalidateQueries({ queryKey: ["file-capabilities"] });
       add(
         editingPermissionId
           ? "Permission updated successfully"
@@ -233,6 +235,8 @@ export default function PermissionsPanel({
       queryClient.refetchQueries({
         queryKey: ["permissions", resourceType, resourceId],
       });
+      queryClient.invalidateQueries({ queryKey: ["folder-capabilities"] });
+      queryClient.invalidateQueries({ queryKey: ["file-capabilities"] });
       add("Permission revoked", "success");
     },
     onError: (err: unknown) => {
