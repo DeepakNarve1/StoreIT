@@ -571,6 +571,8 @@ export default function PermissionsOverviewPage() {
           resourceId={panelResource.resourceId}
           resourceType={panelResource.resourceType}
           resourceName={panelResource.resourceName}
+          canShareAccess={true}
+          canSharePublicLink={panelResource.resourceType === "file"}
           onClose={() => {
             setPanelResource(null);
             queryClient.invalidateQueries({ queryKey: ["permissions-all"] });

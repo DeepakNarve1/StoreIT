@@ -216,7 +216,6 @@ export async function userHasFilePermission(
     (roleContext?.baseRole !== "VIEWER" &&
       ((requiredAction === "write" &&
         (roleContext?.capabilities.edit_file_attrs ||
-          roleContext?.capabilities.edit_online ||
           roleContext?.capabilities.update_versions ||
           roleContext?.capabilities.move_files ||
           roleContext?.capabilities.edit_metadata)) ||

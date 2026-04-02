@@ -2313,7 +2313,7 @@ export default function FileBrowserPage() {
                     {selectedFiles.length > 0 &&
                       selectedFolders.length === 0 && (
                         <>
-                          {fileCan(selectedFiles[0], "add_files") && (
+                          {selectedFiles.every((id) => fileCan(id, "move_files")) && (
                             <button
                               onClick={() => {
                                 setShowModifyMenu(false);
@@ -2452,78 +2452,90 @@ export default function FileBrowserPage() {
                     {selectedFolders.length > 0 &&
                       selectedFiles.length === 0 && (
                         <>
-                          <button
-                            onClick={() => {
-                              setShowModifyMenu(false);
-                              bulkFolderMove();
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                          >
-                            <FolderInput size={14} /> Move
-                          </button>
+                          {selectedFolders.every((id) => folderCan(id, "move_folders")) && (
+                            <button
+                              onClick={() => {
+                                setShowModifyMenu(false);
+                                bulkFolderMove();
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                            >
+                              <FolderInput size={14} /> Move
+                            </button>
+                          )}
 
-                          <button
-                            onClick={() => {
-                              setShowModifyMenu(false);
-                              bulkFolderDownload();
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                          >
-                            <Download size={14} /> Download ZIP
-                          </button>
+                          {selectedFolders.every((id) => folderCan(id, "download_folders")) && (
+                            <button
+                              onClick={() => {
+                                setShowModifyMenu(false);
+                                bulkFolderDownload();
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                            >
+                              <Download size={14} /> Download ZIP
+                            </button>
+                          )}
 
-                          <button
-                            onClick={() => {
-                              setShowModifyMenu(false);
-                              setShowBulkFolderDelete(true);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg"
-                          >
-                            <Trash2 size={14} /> Delete
-                          </button>
+                          {selectedFolders.every((id) => folderCan(id, "delete_folders")) && (
+                            <button
+                              onClick={() => {
+                                setShowModifyMenu(false);
+                                setShowBulkFolderDelete(true);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg"
+                            >
+                              <Trash2 size={14} /> Delete
+                            </button>
+                          )}
 
                           <div className="border-t border-gray-100 dark:border-gray-800 my-1" />
 
                           {singleSelectedFolder && (
                             <>
-                              <button
-                                onClick={() => {
-                                  setShowModifyMenu(false);
-                                  handleFolderShare(singleSelectedFolder);
-                                }}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                              >
-                                <Share2 size={14} /> Permissions
-                              </button>
+                              {folderCan(singleSelectedFolder.id, "share_folders") && (
+                                  <button
+                                    onClick={() => {
+                                      setShowModifyMenu(false);
+                                      handleFolderShare(singleSelectedFolder);
+                                    }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                                  >
+                                    <Share2 size={14} /> Permissions
+                                  </button>
+                                )}
 
-                              <button
-                                onClick={() => {
-                                  setShowModifyMenu(false);
-                                  setRenameFolder(singleSelectedFolder);
-                                  setRenameFolderName(
-                                    singleSelectedFolder.name,
-                                  );
-                                }}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                              >
-                                <SquarePen size={14} /> Rename
-                              </button>
+                                {folderCan(singleSelectedFolder.id, "edit_folders") && (
+                                  <button
+                                    onClick={() => {
+                                      setShowModifyMenu(false);
+                                      setRenameFolder(singleSelectedFolder);
+                                      setRenameFolderName(
+                                        singleSelectedFolder.name,
+                                      );
+                                    }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                                  >
+                                    <SquarePen size={14} /> Rename
+                                  </button>
+                                )}
 
-                              <button
-                                onClick={() => {
-                                  setShowModifyMenu(false);
-                                  setCategoryResource({
-                                    id: singleSelectedFolder.id,
-                                    type: "folder",
-                                    name: singleSelectedFolder.name,
-                                    currentCategoryId:
-                                      singleSelectedFolder.categoryId ?? null,
-                                  });
-                                }}
-                                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                              >
-                                <Hash size={14} /> Assign category
-                              </button>
+                                {folderCan(singleSelectedFolder.id, "edit_folders") && (
+                                  <button
+                                    onClick={() => {
+                                      setShowModifyMenu(false);
+                                      setCategoryResource({
+                                        id: singleSelectedFolder.id,
+                                        type: "folder",
+                                        name: singleSelectedFolder.name,
+                                        currentCategoryId:
+                                          singleSelectedFolder.categoryId ?? null,
+                                      });
+                                    }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                                  >
+                                    <Hash size={14} /> Assign category
+                                  </button>
+                                )}
 
                               {folderCan(
                                 singleSelectedFolder.id,
@@ -3409,29 +3421,33 @@ export default function FileBrowserPage() {
                                 className="flex items-center gap-0.5"
                                 onClick={(e) => e.stopPropagation()}
                               >
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleFolderShare(folder);
-                                  }}
-                                  className="p-1 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-gray-100
-                                       dark:hover:bg-gray-700 text-gray-400 transition-opacity"
-                                  title="Permissions"
-                                >
-                                  <Share2 size={14} />
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleFolderDownload(folder);
-                                    setFolderMenuId(null);
-                                  }}
-                                  className="p-1 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-gray-100
-                                       dark:hover:bg-gray-700 text-gray-400 transition-opacity"
-                                  title="Download folder"
-                                >
-                                  <Download size={14} />
-                                </button>
+                                {folderCan(folder.id, "share_folders") && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleFolderShare(folder);
+                                    }}
+                                    className="p-1 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-gray-100
+                                         dark:hover:bg-gray-700 text-gray-400 transition-opacity"
+                                    title="Permissions"
+                                  >
+                                    <Share2 size={14} />
+                                  </button>
+                                )}
+                                {folderCan(folder.id, "download_folders") && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleFolderDownload(folder);
+                                      setFolderMenuId(null);
+                                    }}
+                                    className="p-1 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-gray-100
+                                         dark:hover:bg-gray-700 text-gray-400 transition-opacity"
+                                    title="Download folder"
+                                  >
+                                    <Download size={14} />
+                                  </button>
+                                )}
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -3612,38 +3628,44 @@ export default function FileBrowserPage() {
                                     }}
                                     onMouseLeave={() => setFolderMenuId(null)}
                                   >
-                                    <button
-                                      onClick={() => {
-                                        handleFolderAssignCategory(folder);
-                                        setFolderMenuId(null);
-                                      }}
-                                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700
-                                             dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                                    >
-                                      <Hash size={14} /> Assign category
-                                    </button>
-
-                                    <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
+                                    {folderCan(folder.id, "edit_folders") && (
                                       <button
                                         onClick={() => {
-                                          handleFolderShare(folder);
+                                          handleFolderAssignCategory(folder);
                                           setFolderMenuId(null);
                                         }}
                                         className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700
                                                dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
                                       >
-                                        <Share2 size={14} /> Share permissions
+                                        <Hash size={14} /> Assign category
                                       </button>
-                                      <button
-                                        onClick={async () => {
-                                          await handleFolderDownload(folder);
-                                          setFolderMenuId(null);
-                                        }}
-                                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700
-                                               dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
-                                      >
-                                        <Download size={14} /> Download ZIP
-                                      </button>
+                                    )}
+
+                                    <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
+                                      {folderCan(folder.id, "share_folders") && (
+                                        <button
+                                          onClick={() => {
+                                            handleFolderShare(folder);
+                                            setFolderMenuId(null);
+                                          }}
+                                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700
+                                                 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                                        >
+                                          <Share2 size={14} /> Share permissions
+                                        </button>
+                                      )}
+                                      {folderCan(folder.id, "download_folders") && (
+                                        <button
+                                          onClick={async () => {
+                                            await handleFolderDownload(folder);
+                                            setFolderMenuId(null);
+                                          }}
+                                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700
+                                                 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                                        >
+                                          <Download size={14} /> Download ZIP
+                                        </button>
+                                      )}
                                       {folderCan(
                                         folder.id,
                                         "edit_metadata",
@@ -3660,44 +3682,46 @@ export default function FileBrowserPage() {
                                         </button>
                                       )}
                                     </div>
-                                    <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
-                                      <button
-                                        onClick={() => {
-                                          setFolderMenuId(null);
-                                          if (
-                                            confirm(
-                                              `Delete folder "${folder.name}" and all its contents?`,
-                                            )
-                                          ) {
-                                            api
-                                              .delete(`/folders/${folder.id}`)
-                                              .then(() => {
-                                                queryClient.invalidateQueries({
-                                                  queryKey: [
-                                                    "folders",
-                                                    folderId ?? "root",
-                                                  ],
-                                                });
-                                                queryClient.invalidateQueries({
-                                                  queryKey: ["folders", "root"],
-                                                });
-                                              })
-                                              .catch(() =>
-                                                useToast
-                                                  .getState()
-                                                  .add(
-                                                    "Failed to delete folder",
-                                                    "error",
-                                                  ),
-                                              );
-                                          }
-                                        }}
-                                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600
-                                               dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg"
-                                      >
-                                        <Trash2 size={14} /> Delete
-                                      </button>
-                                    </div>
+                                    {folderCan(folder.id, "delete_folders") && (
+                                      <div className="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
+                                        <button
+                                          onClick={() => {
+                                            setFolderMenuId(null);
+                                            if (
+                                              confirm(
+                                                `Delete folder "${folder.name}" and all its contents?`,
+                                              )
+                                            ) {
+                                              api
+                                                .delete(`/folders/${folder.id}`)
+                                                .then(() => {
+                                                  queryClient.invalidateQueries({
+                                                    queryKey: [
+                                                      "folders",
+                                                      folderId ?? "root",
+                                                    ],
+                                                  });
+                                                  queryClient.invalidateQueries({
+                                                    queryKey: ["folders", "root"],
+                                                  });
+                                                })
+                                                .catch(() =>
+                                                  useToast
+                                                    .getState()
+                                                    .add(
+                                                      "Failed to delete folder",
+                                                      "error",
+                                                    ),
+                                                );
+                                            }
+                                          }}
+                                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600
+                                                 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg"
+                                        >
+                                          <Trash2 size={14} /> Delete
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
                                 </>
                               )}
@@ -3875,6 +3899,16 @@ export default function FileBrowserPage() {
             resourceId={permissionsResource.id}
             resourceType={permissionsResource.type}
             resourceName={permissionsResource.name}
+            canShareAccess={
+              permissionsResource.type === "file"
+                ? fileCan(permissionsResource.id, "share_files")
+                : folderCan(permissionsResource.id, "share_folders")
+            }
+            canSharePublicLink={
+              permissionsResource.type === "file"
+                ? fileCan(permissionsResource.id, "share_public_link_file")
+                : false
+            }
             onClose={() => setPermissionsResource(null)}
           />
         )}

@@ -50,10 +50,8 @@ function actionToFileCapabilities(action: string): Record<string, boolean> {
       view_metadata: true,
       edit_metadata: true,
       update_versions: true,
-      edit_online: true,
       move_files: true,
       delete_files: true,
-      duplicate_files: true,
     });
   }
   if (action === "write") {
@@ -66,9 +64,7 @@ function actionToFileCapabilities(action: string): Record<string, boolean> {
       view_metadata: true,
       edit_metadata: true,
       update_versions: true,
-      edit_online: true,
       move_files: true,
-      duplicate_files: true,
     });
   }
   return normalizeCapabilities({
@@ -108,7 +104,6 @@ function actionToFolderCapabilities(action: string): Record<string, boolean> {
       edit_folders: true,
       move_folders: true,
       delete_folders: true,
-      duplicate_folders: true,
       view_metadata: true,
       edit_metadata: true,
     });
@@ -120,7 +115,6 @@ function actionToFolderCapabilities(action: string): Record<string, boolean> {
       download_folders: true,
       edit_folders: true,
       move_folders: true,
-      duplicate_folders: true,
       view_metadata: true,
       edit_metadata: true,
     });
@@ -408,10 +402,7 @@ router.post(
         "edit_folders",
         "move_folders",
         "delete_folders",
-        "duplicate_folders",
         "share_folders",
-        "share_public_link_folder",
-        "see_audit_trails",
         "view_metadata",
         "edit_metadata",
       ] as const;

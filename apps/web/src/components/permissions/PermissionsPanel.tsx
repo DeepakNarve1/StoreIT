@@ -25,6 +25,8 @@ interface PermissionsPanelProps {
   resourceId: string;
   resourceType: "file" | "folder";
   resourceName: string;
+  canShareAccess?: boolean;
+  canSharePublicLink?: boolean;
   onClose: () => void;
 }
 
@@ -83,11 +85,17 @@ export default function PermissionsPanel({
   resourceId,
   resourceType,
   resourceName,
+  canShareAccess = true,
+  canSharePublicLink = false,
   onClose,
 }: PermissionsPanelProps) {
   const queryClient = useQueryClient();
   const { add } = useToast();
-  const [tab, setTab] = useState<"access" | "link" | "guest">("access");
+  const [tab, setTab] = useState<"access" | "link" | "guest">(() => {
+    if (canShareAccess) return "access";
+    if (canSharePublicLink) return "link";
+    return "access";
+  });
   const [grantedTo, setGrantedTo] = useState<"all" | "user" | "department">(
     "all",
   );
@@ -359,27 +367,29 @@ export default function PermissionsPanel({
 
         {/* Tabs */}
         <div className="flex border-b border-gray-200 dark:border-gray-700 shrink-0">
-          <button
-            onClick={() => setTab("access")}
-            className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${tab === "access" ? "border-b-2 border-primary-500 text-primary-500" : "text-gray-500 hover:text-gray-700"}`}
-          >
-            ACCESS
-          </button>
-          {resourceType === "file" && (
-            <>
-              <button
-                onClick={() => setTab("link")}
-                className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${tab === "link" ? "border-b-2 border-primary-500 text-primary-500" : "text-gray-500 hover:text-gray-700"}`}
-              >
-                ONE-TIME LINK
-              </button>
-              <button
-                onClick={() => setTab("guest")}
-                className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${tab === "guest" ? "border-b-2 text-primary-600 border-primary-600 bg-primary-50" : "text-gray-500 hover:text-gray-700"}`}
-              >
-                GUEST INVITE
-              </button>
-            </>
+          {canShareAccess && (
+            <button
+              onClick={() => setTab("access")}
+              className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${tab === "access" ? "border-b-2 border-primary-500 text-primary-500" : "text-gray-500 hover:text-gray-700"}`}
+            >
+              ACCESS
+            </button>
+          )}
+          {resourceType === "file" && canSharePublicLink && (
+            <button
+              onClick={() => setTab("link")}
+              className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${tab === "link" ? "border-b-2 border-primary-500 text-primary-500" : "text-gray-500 hover:text-gray-700"}`}
+            >
+              ONE-TIME LINK
+            </button>
+          )}
+          {resourceType === "file" && canShareAccess && (
+            <button
+              onClick={() => setTab("guest")}
+              className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${tab === "guest" ? "border-b-2 text-primary-600 border-primary-600 bg-primary-50" : "text-gray-500 hover:text-gray-700"}`}
+            >
+              GUEST INVITE
+            </button>
           )}
         </div>
 

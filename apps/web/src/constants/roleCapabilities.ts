@@ -5,12 +5,9 @@ export const FOLDER_PERMISSION_OPTIONS = [
   { key: "edit_folders", label: "Edit folders" },
   { key: "move_folders", label: "Move folders" },
   { key: "delete_folders", label: "Delete folders" },
-  { key: "duplicate_folders", label: "Duplicate folders" },
   { key: "view_metadata", label: "View folder metadata" },
   { key: "edit_metadata", label: "Edit folder metadata" },
   { key: "share_folders", label: "Share folders" },
-  { key: "share_public_link_folder", label: "Share with public link" },
-  { key: "see_audit_trails", label: "See audit trails" },
 ] as const;
 
 export const FILE_PERMISSION_OPTIONS = [
@@ -22,10 +19,8 @@ export const FILE_PERMISSION_OPTIONS = [
   { key: "view_metadata", label: "View file metadata" },
   { key: "edit_metadata", label: "Edit file metadata" },
   { key: "update_versions", label: "Update file versions" },
-  { key: "edit_online", label: "Edit files online" },
   { key: "move_files", label: "Move files" },
   { key: "delete_files", label: "Delete files" },
-  { key: "duplicate_files", label: "Duplicate files" },
   { key: "share_files", label: "Share files" },
   { key: "share_public_link_file", label: "Share with public link" },
   { key: "see_audit_trails_file", label: "See audit trails" },
