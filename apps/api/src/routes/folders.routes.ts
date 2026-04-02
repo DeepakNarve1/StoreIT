@@ -737,20 +737,41 @@ router.post("/", verifyAuth, async (req: AuthRequest, res: Response) => {
       }
     }
 
-    const folder = await prisma.folder.create({
-      data: {
-        name,
-        parentId: parentId ?? null,
-        categoryId: categoryId ?? null,
-        tenantId: req.user!.tenantId,
-      },
-      select: {
-        id: true,
-        name: true,
-        parentId: true,
-        categoryId: true,
-        createdAt: true,
-      },
+    const folder = await prisma.$transaction(async (tx) => {
+      const created = await tx.folder.create({
+        data: {
+          name,
+          parentId: parentId ?? null,
+          categoryId: categoryId ?? null,
+          tenantId: req.user!.tenantId,
+        },
+        select: {
+          id: true,
+          name: true,
+          parentId: true,
+          categoryId: true,
+          createdAt: true,
+        },
+      });
+
+      // FolderIT-style: the creator must get an explicit folder grant on what they created.
+      // Otherwise GET /folders only shows folders from permission rows — a new subfolder has
+      // none, so after refresh the viewer who created it no longer sees it (admins still do).
+      if (roleContext?.baseRole === "VIEWER") {
+        await tx.permission.create({
+          data: {
+            resourceType: "folder",
+            resourceId: created.id,
+            grantedTo: "user",
+            userId,
+            action: "write",
+            folderId: created.id,
+            fileId: null,
+          },
+        });
+      }
+
+      return created;
     });
 
     await createAuditLog({
