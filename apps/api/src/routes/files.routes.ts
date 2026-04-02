@@ -550,9 +550,14 @@ router.post(
       // ── Quota check ───────────────────────────────────────────────────────
       const tenant = await prisma.tenant.findUnique({
         where: { id: req.user!.tenantId },
-        select: { plan: true },
+        select: { plan: true, planExpiresAt: true },
       });
-      const { storageBytes: limit } = getPlanLimits(tenant?.plan ?? "free");
+      // Fix 5: if grace period has expired, enforce free plan limits
+      const effectivePlan =
+        tenant?.planExpiresAt && tenant.planExpiresAt < new Date()
+          ? "free"
+          : (tenant?.plan ?? "free");
+      const { storageBytes: limit } = getPlanLimits(effectivePlan);
       const usageResult = await prisma.file.aggregate({
         where: { tenantId: req.user!.tenantId, isDeleted: false },
         _sum: { size: true },

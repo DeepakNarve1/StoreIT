@@ -168,6 +168,9 @@ export default function BillingPage() {
       const res = await api.get("/billing/status");
       return res.data as {
         plan: string;
+        planExpiresAt: string | null;
+        isInGracePeriod: boolean;
+        isOverStorageQuota: boolean;
         limits: { storageBytes: number | null; maxUsers: number | null };
         usage: { storageBytes: number; users: number };
         billing: {
@@ -318,6 +321,15 @@ export default function BillingPage() {
     !["cancelled", "completed", "expired"].includes(
       data?.billing.subscriptionStatus ?? "",
     );
+  const isOverStorageQuota = data?.isOverStorageQuota ?? false;
+  const isInGracePeriod = data?.isInGracePeriod ?? false;
+  const planExpiresAt = data?.planExpiresAt
+    ? new Date(data.planExpiresAt).toLocaleDateString("en-IN", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      })
+    : null;
 
   return (
     <AppShell>
@@ -409,6 +421,26 @@ export default function BillingPage() {
             <p className="text-sm text-amber-800">
               Changing plans will start a new Razorpay subscription and replace
               the current one after payment confirmation.
+            </p>
+          </div>
+        )}
+
+        {/* Fix 5: Grace period warning */}
+        {isInGracePeriod && planExpiresAt && (
+          <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-red-600" />
+            <p className="text-sm text-red-800">
+              Your subscription payment failed. Your account will be downgraded to the free plan on <strong>{planExpiresAt}</strong> unless you renew. Please update your payment method.
+            </p>
+          </div>
+        )}
+
+        {/* Fix 3: Over storage quota warning */}
+        {isOverStorageQuota && (
+          <div className="mb-6 flex items-start gap-3 rounded-xl border border-orange-200 bg-orange-50 p-4">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-orange-600" />
+            <p className="text-sm text-orange-800">
+              You are over your plan's storage limit. New file uploads are blocked. Upgrade your plan or delete files to continue uploading.
             </p>
           </div>
         )}

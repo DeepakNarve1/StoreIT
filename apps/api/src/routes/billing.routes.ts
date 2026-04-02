@@ -3,6 +3,7 @@ import { Router, Response, Request } from "express";
 import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import { getPlanLimits, RAZORPAY_PLAN_IDS } from "../utils/plans";
+import { sendEmail } from "../services/email.service";
 
 const router = Router();
 
@@ -144,6 +145,16 @@ async function fetchSubscription(subscriptionId: string) {
   );
 }
 
+async function cancelSubscriptionAtPeriodEnd(subscriptionId: string) {
+  return razorpayRequest<RazorpaySubscription>(
+    `/subscriptions/${subscriptionId}/cancel`,
+    {
+      method: "POST",
+      body: JSON.stringify({ cancel_at_cycle_end: 1 }),
+    },
+  );
+}
+
 async function cancelSubscriptionNow(subscriptionId: string) {
   return razorpayRequest<RazorpaySubscription>(
     `/subscriptions/${subscriptionId}/cancel`,
@@ -166,6 +177,7 @@ router.get(
           id: true,
           name: true,
           plan: true,
+          planExpiresAt: true,
           razorpayCustomerId: true,
           razorpaySubscriptionId: true,
           razorpayPlanId: true,
@@ -198,9 +210,16 @@ router.get(
 
       const limits = getPlanLimits(tenant.plan);
       const storageBytes = storageResult._sum.size ?? 0;
+      const isOverStorageQuota =
+        limits.storageBytes !== Infinity && storageBytes > limits.storageBytes;
+      const isInGracePeriod =
+        !!tenant.planExpiresAt && tenant.planExpiresAt > new Date();
 
       res.json({
         plan: tenant.plan,
+        planExpiresAt: tenant.planExpiresAt ?? null,
+        isInGracePeriod,
+        isOverStorageQuota,
         limits: {
           storageBytes:
             limits.storageBytes === Infinity ? null : limits.storageBytes,
@@ -438,9 +457,27 @@ router.post(
         where: { id: tenantId },
         select: {
           id: true,
+          plan: true,
           razorpaySubscriptionId: true,
         },
       });
+
+      // Fix 6: Block downgrade if active users exceed new plan's user limit
+      const newPlanLimits = getPlanLimits(subscriptionPlan);
+      if (newPlanLimits.maxUsers !== Infinity) {
+        const activeUsers = await prisma.user.count({
+          where: { tenantId, isActive: true },
+        });
+        if (activeUsers > newPlanLimits.maxUsers) {
+          res.status(400).json({
+            error: `Cannot downgrade to ${subscriptionPlan.toUpperCase()}: you have ${activeUsers} active users but this plan allows ${newPlanLimits.maxUsers}. Deactivate ${activeUsers - newPlanLimits.maxUsers} user(s) first.`,
+            code: "USER_LIMIT_EXCEEDED",
+            activeUsers,
+            planLimit: newPlanLimits.maxUsers,
+          });
+          return;
+        }
+      }
 
       const previousSubscriptionId =
         subscription.notes?.replacedSubscriptionId ||
@@ -536,23 +573,17 @@ router.post(
         return;
       }
 
-      const subscription = await cancelSubscriptionNow(
+      const subscription = await cancelSubscriptionAtPeriodEnd(
         tenant.razorpaySubscriptionId,
       );
 
-      await prisma.tenant.update({
-        where: { id: tenant.id },
-        data: {
-          plan: "free",
-          razorpayCustomerId: null,
-          razorpaySubscriptionId: null,
-          razorpayPlanId: null,
-        },
-      });
-
+      // Do NOT downgrade plan immediately — access continues until period end.
+      // The webhook subscription.completed / subscription.cancelled will
+      // fire at period end and downgrade to free at that point.
       res.json({
         cancelled: true,
         subscriptionId: subscription.id,
+        message: "Your subscription will be cancelled at the end of the current billing period.",
       });
     } catch (err) {
       console.error(err);
@@ -623,10 +654,12 @@ router.post("/webhook", async (req: Request, res: Response) => {
       ].includes(event.event ?? "") &&
       plan
     ) {
+      // Payment succeeded — clear any grace period and activate plan
       await prisma.tenant.update({
         where: { id: tenantId },
         data: {
           plan,
+          planExpiresAt: null,
           razorpayCustomerId: subscription.customer_id ?? null,
           razorpaySubscriptionId: subscription.id,
           razorpayPlanId:
@@ -637,14 +670,72 @@ router.post("/webhook", async (req: Request, res: Response) => {
       });
     }
 
+    // Fix 4: pending_payment = payment failed but Razorpay is still retrying.
+    // Send a warning email but do NOT downgrade yet.
+    if (event.event === "subscription.pending_payment") {
+      const tenant = await prisma.tenant.findFirst({
+        where: { id: tenantId },
+        select: { name: true, users: { where: { role: "ORG_ADMIN" }, select: { email: true, name: true }, take: 1 } },
+      });
+      const admin = tenant?.users?.[0];
+      if (admin) {
+        try {
+          await sendEmail({
+            to: admin.email,
+            subject: "Action required: Payment failed for your StoreIT subscription",
+            html: `<p>Hi ${admin.name},</p><p>We were unable to process your payment for <strong>${tenant?.name}</strong>. Razorpay will retry automatically. If payment continues to fail, your account will be downgraded to the free plan.</p><p>Please update your payment method to avoid interruption.</p>`,
+          });
+        } catch { /* non-fatal */ }
+      }
+    }
+
+    // Fix 2 & 5: halted = all retries exhausted. Start 7-day grace period instead of instant downgrade.
+    if (event.event === "subscription.halted") {
+      const graceEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      await prisma.tenant.updateMany({
+        where: { id: tenantId, razorpaySubscriptionId: subscription.id },
+        data: { planExpiresAt: graceEnd },
+      });
+
+      const tenant = await prisma.tenant.findFirst({
+        where: { id: tenantId },
+        select: { name: true, users: { where: { role: "ORG_ADMIN" }, select: { email: true, name: true }, take: 1 } },
+      });
+      const admin = tenant?.users?.[0];
+      if (admin) {
+        try {
+          await sendEmail({
+            to: admin.email,
+            subject: "Your StoreIT subscription has been halted",
+            html: `<p>Hi ${admin.name},</p><p>All payment retries for <strong>${tenant?.name}</strong> have been exhausted. Your account will be downgraded to the free plan on <strong>${graceEnd.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })}</strong> unless you renew your subscription.</p>`,
+          });
+        } catch { /* non-fatal */ }
+      }
+    }
+
     if (
       [
         "subscription.cancelled",
         "subscription.completed",
-        "subscription.halted",
         "subscription.expired",
       ].includes(event.event ?? "")
     ) {
+      // Fix 2: Send cancellation email
+      const tenant = await prisma.tenant.findFirst({
+        where: { id: tenantId, razorpaySubscriptionId: subscription.id },
+        select: { name: true, plan: true, users: { where: { role: "ORG_ADMIN" }, select: { email: true, name: true }, take: 1 } },
+      });
+      const admin = tenant?.users?.[0];
+      if (admin && tenant?.plan !== "free") {
+        try {
+          await sendEmail({
+            to: admin.email,
+            subject: "Your StoreIT subscription has ended",
+            html: `<p>Hi ${admin.name},</p><p>Your subscription for <strong>${tenant?.name}</strong> has ended and your account has been moved to the free plan. You can resubscribe at any time from the Billing page.</p>`,
+          });
+        } catch { /* non-fatal */ }
+      }
+
       await prisma.tenant.updateMany({
         where: {
           id: tenantId,
@@ -652,6 +743,7 @@ router.post("/webhook", async (req: Request, res: Response) => {
         },
         data: {
           plan: "free",
+          planExpiresAt: null,
           razorpayCustomerId: null,
           razorpaySubscriptionId: null,
           razorpayPlanId: null,

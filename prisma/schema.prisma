@@ -32,6 +32,7 @@ model Tenant {
   razorpayCustomerId   String?
   razorpaySubscriptionId String?
   razorpayPlanId       String?
+  planExpiresAt        DateTime? // set during grace period; null = no grace period active
   guestAccesses        GuestAccess[]
   metadataTemplates    MetadataTemplate[]
   metadataFolderFields FolderMetadataField[]

@@ -14,7 +14,7 @@ function assertEmailConfigured() {
 
 type SendEmailResult = { messageId?: string; statusCode?: number };
 
-async function sendEmail(msg: {
+export async function sendEmail(msg: {
   to: string;
   subject: string;
   html: string;
