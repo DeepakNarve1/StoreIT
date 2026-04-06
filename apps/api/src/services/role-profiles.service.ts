@@ -15,6 +15,7 @@ export const FILE_CAPABILITIES = [
   "delete_files",
   "share_files",
   "share_public_link_file",
+  "request_signatures",
   "see_audit_trails_file",
 ] as const;
 
@@ -37,6 +38,21 @@ export const ALL_ROLE_CAPABILITIES = [
 
 export type RoleCapabilityKey = (typeof ALL_ROLE_CAPABILITIES)[number];
 export type BaseRole = "SUPERADMIN" | "ORG_ADMIN" | "MANAGER" | "EDITOR" | "VIEWER";
+
+export function normalizeBaseRoleValue(role: string | null | undefined): BaseRole {
+  const upper = (role ?? "").toUpperCase();
+  if (upper === "ADMIN" || upper === "ORGADMIN") return "ORG_ADMIN";
+  if (
+    upper === "SUPERADMIN" ||
+    upper === "ORG_ADMIN" ||
+    upper === "MANAGER" ||
+    upper === "EDITOR" ||
+    upper === "VIEWER"
+  ) {
+    return upper;
+  }
+  return "VIEWER";
+}
 
 type RoleProfileLike = {
   id?: string;
@@ -74,6 +90,7 @@ const SYSTEM_ROLE_DEFINITIONS: Array<{
       delete_files: true,
       share_files: true,
       share_public_link_file: true,
+      request_signatures: true,
       see_audit_trails_file: true,
       create_folders: true,
       see_folders: true,
@@ -98,6 +115,7 @@ const SYSTEM_ROLE_DEFINITIONS: Array<{
       edit_metadata: true,
       update_versions: true,
       move_files: true,
+      request_signatures: true,
       create_folders: true,
       see_folders: true,
       download_folders: true,
@@ -157,8 +175,9 @@ export function mergeCapabilities(
 }
 
 export function getDefaultCapabilitiesForBaseRole(baseRole: BaseRole): CapabilityMap {
-  if (baseRole === "SUPERADMIN") return allCaps(true);
-  const systemRole = SYSTEM_ROLE_DEFINITIONS.find((role) => role.key === baseRole);
+  const normalized = normalizeBaseRoleValue(baseRole);
+  if (normalized === "SUPERADMIN") return allCaps(true);
+  const systemRole = SYSTEM_ROLE_DEFINITIONS.find((role) => role.key === normalized);
   return systemRole ? { ...systemRole.capabilities } : allCaps(false);
 }
 
@@ -316,16 +335,18 @@ export async function getEffectiveRoleProfileForUser(userId: string) {
     };
   }
 
+  const normalizedRole = normalizeBaseRoleValue(user.role);
+
   return {
     userId: user.id,
     tenantId: user.tenantId,
     departmentId: user.departmentId,
-    baseRole: user.role as BaseRole,
+    baseRole: normalizedRole,
     roleProfileId: null,
-    roleProfileName: user.role.replace("_", " "),
-    capabilities: getDefaultCapabilitiesForBaseRole(user.role as BaseRole),
+    roleProfileName: normalizedRole.replace("_", " "),
+    capabilities: getDefaultCapabilitiesForBaseRole(normalizedRole),
     isSystemRole: true,
-    isViewerScoped: user.role === "VIEWER",
+    isViewerScoped: normalizedRole === "VIEWER",
   };
 }
 

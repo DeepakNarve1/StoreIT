@@ -25,10 +25,12 @@ import {
   GripVertical,
   Lock,
   Unlock,
+  PenTool,
 } from "lucide-react";
 import { memo, useState } from "react";
 import { useAuthStore } from "../../store/authStore";
 import type { CapabilityMap } from "../../hooks/useFileCapabilities";
+import { getFileKind } from "../../utils/fileMime";
 
 interface FileItem {
   id: string;
@@ -43,6 +45,10 @@ interface FileItem {
   approvalNote?: string | null;
   approvedAt?: string | null;
   approvedBy?: { name: string } | null;
+  signatureStatus?: string | null;
+  signatureNote?: string | null;
+  signedAt?: string | null;
+  signedBy?: { name: string } | null;
   isLocked?: boolean;
   lockedById?: string | null;
   categoryId?: string | null;
@@ -70,9 +76,11 @@ interface FileListProps {
   onMetadata?: (file: FileItem) => void;
   onComments?: (file: FileItem) => void;
   onSubmitApproval?: (file: FileItem) => void;
+  onRequestSignature?: (file: FileItem) => void;
   onLock?: (file: FileItem) => void;
   onAssignCategory?: (file: FileItem) => void;
   onApprovalDetail?: (file: FileItem) => void;
+  onSignatureDetail?: (file: FileItem) => void;
   /** Per-file granular capability map from useFileCapabilities hook */
   capabilitiesMap?: CapabilityMap;
   /** @deprecated use capabilitiesMap. Kept for backwards compat */
@@ -84,6 +92,7 @@ interface FileListProps {
     modified: boolean;
     version: boolean;
     approval: boolean;
+    signature: boolean;
     retention: boolean;
     lock: boolean;
     metaNotFound: boolean;
@@ -94,17 +103,24 @@ interface FileListProps {
 }
 
 const getFileIcon = (mimeType: string) => {
-  if (mimeType.startsWith("image/"))
-    return { icon: Image, color: "text-green-500" };
-  if (mimeType.startsWith("video/"))
-    return { icon: Film, color: "text-purple-500" };
-  if (mimeType.startsWith("audio/"))
-    return { icon: Music, color: "text-pink-500" };
-  if (mimeType.includes("pdf"))
-    return { icon: FileText, color: "text-red-500" };
-  if (mimeType.includes("zip"))
-    return { icon: Archive, color: "text-yellow-500" };
-  return { icon: File, color: "text-primary-500" };
+  switch (getFileKind(mimeType)) {
+    case "image":
+      return { icon: Image, color: "text-green-500" };
+    case "video":
+      return { icon: Film, color: "text-purple-500" };
+    case "audio":
+      return { icon: Music, color: "text-pink-500" };
+    case "pdf":
+      return { icon: FileText, color: "text-red-500" };
+    case "office":
+      return { icon: FileText, color: "text-primary-500" };
+    case "archive":
+      return { icon: Archive, color: "text-yellow-500" };
+    case "text":
+      return { icon: FileText, color: "text-gray-500" };
+    default:
+      return { icon: File, color: "text-primary-500" };
+  }
 };
 
 const formatBytes = (bytes: number) => {
@@ -199,9 +215,11 @@ function FileList({
   onMetadata,
   onComments,
   onSubmitApproval,
+  onRequestSignature,
   onLock,
   onAssignCategory,
   onApprovalDetail,
+  onSignatureDetail,
   capabilitiesMap,
   canDownload,
   visibleColumns = {
@@ -210,6 +228,7 @@ function FileList({
     modified: true,
     version: false,
     approval: false,
+    signature: false,
     retention: false,
     lock: true,
     metaNotFound: true,
@@ -285,6 +304,7 @@ function FileList({
   const starSpan = hasStar ? 1 : 0;
   const versionEnabled = !!visibleColumns.version;
   const approvalEnabled = !!visibleColumns.approval;
+  const signatureEnabled = !!visibleColumns.signature;
   const retentionEnabled = !!visibleColumns.retention;
   const lockEnabled = !!visibleColumns.lock;
   const metaNotFoundEnabled = !!visibleColumns.metaNotFound;
@@ -308,6 +328,7 @@ function FileList({
   const optionalColUnits =
     (versionEnabled ? 2 : 0) +
     (approvalEnabled ? 2 : 0) +
+    (signatureEnabled ? 2 : 0) +
     (retentionEnabled ? 2 : 0) +
     (lockEnabled ? 2 : 0) +
     (metaNotFoundEnabled ? 2 : 0);
@@ -495,6 +516,11 @@ function FileList({
         {approvalEnabled && (
           <div className="col-span-2 text-xs font-medium text-gray-500 text-center whitespace-nowrap">
             Approval
+          </div>
+        )}
+        {signatureEnabled && (
+          <div className="col-span-2 text-xs font-medium text-gray-500 text-center whitespace-nowrap">
+            Signature
           </div>
         )}
         {retentionEnabled && (
@@ -692,6 +718,39 @@ function FileList({
               </div>
             )}
 
+            {signatureEnabled && (
+              <div className="col-span-2 flex items-center justify-center">
+                {file.signatureStatus && file.signatureStatus !== "draft" ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSignatureDetail?.(file);
+                    }}
+                    className={`text-xs px-1.5 py-0.5 rounded-full font-medium cursor-pointer inline-flex items-center whitespace-nowrap transition-opacity hover:opacity-80 ${
+                      file.signatureStatus === "signed"
+                        ? "bg-teal-100 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300"
+                        : file.signatureStatus === "cancelled"
+                          ? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                          : "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/50 dark:text-cyan-300"
+                    }`}
+                    title="Open signature details"
+                  >
+                    <PenTool size={11} className="mr-1" />
+                    {file.signatureStatus === "signed"
+                      ? "Signed"
+                      : file.signatureStatus === "cancelled"
+                        ? "Cancelled"
+                        : "In progress"}
+                  </button>
+                ) : (
+                  <span className="text-xs text-gray-400 dark:text-gray-500">
+                    —
+                  </span>
+                )}
+              </div>
+            )}
+
             {retentionEnabled && (
               <div className="col-span-2 flex items-center justify-center">
                 <button
@@ -877,6 +936,34 @@ function FileList({
                               <CheckCircle size={14} /> Start workflow
                             </button>
                           </div>
+                        )}
+                      {fileCan(file.id, "request_signatures") &&
+                        onRequestSignature &&
+                        file.signatureStatus !== "in_progress" && (
+                          <button
+                            onClick={() => {
+                              onRequestSignature(file);
+                              setActiveMenu(null);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                          >
+                            <PenTool size={14} />{" "}
+                            {file.signatureStatus === "signed"
+                              ? "Request signature again"
+                              : "Request signature"}
+                          </button>
+                        )}
+                      {file.signatureStatus === "in_progress" &&
+                        onSignatureDetail && (
+                          <button
+                            onClick={() => {
+                              onSignatureDetail(file);
+                              setActiveMenu(null);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                          >
+                            <PenTool size={14} /> Open signing
+                          </button>
                         )}
                       {/* Lock/Unlock is strictly for MANAGER+ or file owner (handled separately by backend, but hidden here to avoid confusion for EDITORs who don't own it) */}
                       {(isLockPrivileged || file.uploadedById === user?.id) &&

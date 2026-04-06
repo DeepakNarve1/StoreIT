@@ -53,6 +53,49 @@ function sanitizeFilename(raw: string): string {
   );
 }
 
+const HEIC_VERSION_MIME_TYPES = new Set([
+  "image/heic",
+  "image/heif",
+  "image/heic-sequence",
+  "image/heif-sequence",
+]);
+
+const EPUB_VERSION_MIME_TYPES = new Set([
+  "application/epub+zip",
+  "application/x-epub+zip",
+]);
+
+const DESIGN_VERSION_MIME_TYPES = new Set([
+  "image/vnd.adobe.photoshop",
+  "application/x-photoshop",
+  "application/photoshop",
+  "image/psd",
+  "application/psd",
+]);
+
+const CAD_VERSION_MIME_TYPES = new Set([
+  "image/vnd.dwg",
+  "image/x-dwg",
+  "application/acad",
+  "application/autocad",
+  "application/dwg",
+  "application/x-dwg",
+  "application/x-autocad",
+]);
+
+function normalizeVersionMimeType(mimeType: string): string {
+  const mime = String(mimeType || "")
+    .trim()
+    .toLowerCase()
+    .split(";")[0];
+  if (!mime) return "";
+  if (HEIC_VERSION_MIME_TYPES.has(mime)) return "image/heic-family";
+  if (EPUB_VERSION_MIME_TYPES.has(mime)) return "application/epub+zip";
+  if (DESIGN_VERSION_MIME_TYPES.has(mime)) return "application/photoshop-family";
+  if (CAD_VERSION_MIME_TYPES.has(mime)) return "application/dwg-family";
+  return mime;
+}
+
 // ─── Helper: enforce lock — returns true if the request should be blocked ────
 // Managers and above can always bypass locks.
 // The locker themselves can also bypass (so they can unlock or edit their own lock).
@@ -89,6 +132,12 @@ const fileSelect = {
   approvalNote: true,
   approvedAt: true,
   approvedBy: { select: { name: true } },
+  signatureStatus: true,
+  signatureNote: true,
+  signedAt: true,
+  signedBy: { select: { name: true } },
+  activeSignatureWorkflowId: true,
+  currentSignatureStepOrder: true,
   activeWorkflowId: true,
   currentStepOrder: true,
   tags: {
@@ -142,11 +191,13 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
                     }
                   : typeFilter === "zip"
                     ? {
-                        OR: [
+                    OR: [
                           { mimeType: { contains: "zip", mode: "insensitive" as const } },
+                          { mimeType: { contains: "epub", mode: "insensitive" as const } },
                           { name: { endsWith: ".zip", mode: "insensitive" as const } },
                           { name: { endsWith: ".rar", mode: "insensitive" as const } },
                           { name: { endsWith: ".7z", mode: "insensitive" as const } },
+                          { name: { endsWith: ".epub", mode: "insensitive" as const } },
                         ],
                       }
                     : {};
@@ -625,12 +676,8 @@ router.post(
         // Version safety guard: keep file type consistent across versions.
         // Prevents cases like uploading a PDF over an existing PNG file name.
         if (existingFile) {
-          const currentMime = String(existingFile.mimeType || "")
-            .toLowerCase()
-            .split(";")[0];
-          const incomingMime = String(file.mimetype || "")
-            .toLowerCase()
-            .split(";")[0];
+          const currentMime = normalizeVersionMimeType(existingFile.mimeType || "");
+          const incomingMime = normalizeVersionMimeType(file.mimetype || "");
           if (currentMime && incomingMime && currentMime !== incomingMime) {
             res.status(400).json({
               error: `Version type mismatch for "${safeName}". Existing type is ${currentMime}, incoming is ${incomingMime}.`,
@@ -1850,6 +1897,23 @@ router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
     const { userId, tenantId, role } = req.user!;
     const file = await prisma.file.findFirst({
       where: { id: req.params.id, tenantId, isDeleted: false },
+      select: {
+        id: true,
+        name: true,
+        mimeType: true,
+        size: true,
+        version: true,
+        storageKey: true,
+        createdAt: true,
+        uploadedById: true,
+        folderId: true,
+        signatureStatus: true,
+        signatureNote: true,
+        signedAt: true,
+        signedBy: { select: { id: true, name: true } },
+        activeSignatureWorkflowId: true,
+        currentSignatureStepOrder: true,
+      },
     });
     if (!file) {
       res.status(404).json({ error: "File not found" });
@@ -1911,6 +1975,12 @@ router.get("/:id", verifyAuth, async (req: AuthRequest, res: Response) => {
         storageKey: file.storageKey,
         createdAt: file.createdAt,
         viewUrl,
+        signatureStatus: file.signatureStatus,
+        signatureNote: file.signatureNote,
+        signedAt: file.signedAt,
+        signedBy: file.signedBy ? { name: file.signedBy.name } : null,
+        activeSignatureWorkflowId: file.activeSignatureWorkflowId,
+        currentSignatureStepOrder: file.currentSignatureStepOrder,
       },
     });
   } catch (err) {

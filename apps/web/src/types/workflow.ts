@@ -65,9 +65,44 @@ export type FileWorkflowEnvelope = {
 export type WorkflowListItem = {
   id: string;
   status: string;
+  createdAt?: string;
   updatedAt?: string;
   file?: { id: string; name: string } | null;
   owner?: { name?: string } | null;
   currentStep?: { approver?: { name?: string } | null } | null;
+  steps?: unknown[];
+};
+
+export type SignatureWorkflowListItem = {
+  id: string;
+  status: string;
+  createdAt?: string;
+  updatedAt?: string;
+  file?: { id: string; name: string } | null;
+  owner?: { name?: string } | null;
+  currentStep?:
+    | {
+        signerUser?: { name?: string | null } | null;
+        signerName?: string | null;
+      }
+    | null;
+  steps?: unknown[];
+};
+
+export type WorkflowCenterItem = {
+  kind: "approval" | "signature";
+  id: string;
+  status: string;
+  createdAt?: string;
+  updatedAt?: string;
+  file?: { id: string; name: string } | null;
+  owner?: { name?: string } | null;
+  currentStep?:
+    | {
+        approver?: { name?: string | null } | null;
+        signerUser?: { name?: string | null } | null;
+        signerName?: string | null;
+      }
+    | null;
   steps?: unknown[];
 };

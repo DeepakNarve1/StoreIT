@@ -1,7 +1,11 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { prisma } from "../utils/prisma";
-import { serializeRoleProfile, getDefaultCapabilitiesForBaseRole } from "./role-profiles.service";
+import {
+  serializeRoleProfile,
+  getDefaultCapabilitiesForBaseRole,
+  normalizeBaseRoleValue,
+} from "./role-profiles.service";
 
 // ─── TOKEN GENERATION ─────────────────────────────────────────────────────────
 export const generateTokens = (payload: {
@@ -99,7 +103,7 @@ export const loginUser = async (email: string, password: string) => {
             baseRole: user.roleProfile.baseRole as any,
             capabilities: user.roleProfile.capabilities,
           })?.capabilities ?? {}
-        : getDefaultCapabilitiesForBaseRole(user.role as any),
+        : getDefaultCapabilitiesForBaseRole(normalizeBaseRoleValue(user.role)),
     },
     ...tokens,
   };

@@ -11,7 +11,11 @@ import { verifyAuth, AuthRequest, verifyCsrf } from "../middleware/auth";
 import { createAuditLog } from "../services/audit.service";
 import { sendPasswordResetEmail } from "../services/email.service";
 import { v4 as uuid } from "uuid";
-import { serializeRoleProfile, getDefaultCapabilitiesForBaseRole } from "../services/role-profiles.service";
+import {
+  serializeRoleProfile,
+  getDefaultCapabilitiesForBaseRole,
+  normalizeBaseRoleValue,
+} from "../services/role-profiles.service";
 import { getPlanLimits } from "../utils/plans";
 
 const router = Router();
@@ -149,7 +153,7 @@ router.get("/me", verifyAuth, async (req: AuthRequest, res: Response) => {
               baseRole: user.roleProfile.baseRole as any,
               capabilities: user.roleProfile.capabilities,
             })?.capabilities ?? {}
-          : getDefaultCapabilitiesForBaseRole(user.role as any),
+          : getDefaultCapabilitiesForBaseRole(normalizeBaseRoleValue(user.role)),
       },
     });
   } catch (err) {

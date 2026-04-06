@@ -23,7 +23,9 @@ import guestRoutes from "./routes/guest.routes";
 import templatesRoutes from "./routes/templates.routes";
 import preferencesRoutes from "./routes/preferences.routes";
 import workflowRoutes from "./routes/workflow.routes";
+import signingRoutes from "./routes/signatures.routes";
 import roleRoutes from "./routes/roles.routes";
+import notificationRoutes from "./routes/notifications.routes";
 import { globalErrorHandler } from "./middleware/errorHandler";
 import { prisma, pool } from "./utils/prisma";
 
@@ -108,7 +110,9 @@ app.use("/api/guest", guestRoutes);
 app.use("/api/templates", templatesRoutes);
 app.use("/api/preferences", preferencesRoutes);
 app.use("/api/workflow", workflowRoutes);
+app.use("/api/signing", signingRoutes);
 app.use("/api/roles", roleRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // ─── 404 HANDLER ─────────────────────────────────────────────────────────────
 app.use("*", (_req: Request, res: Response) => {

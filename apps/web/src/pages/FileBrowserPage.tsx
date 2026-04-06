@@ -31,6 +31,7 @@ import {
   Tag,
   Info,
   GripVertical,
+  PenTool,
   Workflow,
 } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
@@ -52,11 +53,14 @@ import type {
 } from "../types/workflow";
 
 type ViewMode = "grid" | "list";
+type SignatureFileHandle = Pick<BrowserFileItem, "id" | "name"> &
+  Partial<Omit<BrowserFileItem, "id" | "name">>;
 
 const UploadZone = lazy(() => import("../components/files/UploadZone"));
 const FileDocumentPreviewModal = lazy(
   () => import("../components/files/FileDocumentPreviewModal"),
 );
+const FilePreviewModal = lazy(() => import("../components/files/FilePreviewModal"));
 const FileDetailsView = lazy(
   () => import("../components/files/FileDetailsView"),
 );
@@ -92,6 +96,12 @@ const ApprovalWorkflowComposerModal = lazy(
 );
 const ApprovalWorkflowCenterPanel = lazy(
   () => import("../components/files/ApprovalWorkflowCenterPanel"),
+);
+const DigitalSignatureComposerModal = lazy(
+  () => import("../components/files/DigitalSignatureComposerModal"),
+);
+const DigitalSignaturePanel = lazy(
+  () => import("../components/files/DigitalSignaturePanel"),
 );
 
 interface StoreItem {
@@ -167,6 +177,8 @@ export default function FileBrowserPage() {
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [previewFile, setPreviewFile] = useState<BrowserFileItem | null>(null);
+  const [signatureDetailsFile, setSignatureDetailsFile] =
+    useState<BrowserFileItem | null>(null);
   const [detailFile, setDetailFile] = useState<BrowserFileItem | null>(null);
   const versionFileInputRef = useRef<HTMLInputElement | null>(null);
   const [versionUploadTarget, setVersionUploadTarget] =
@@ -227,6 +239,10 @@ export default function FileBrowserPage() {
   const [approvalNote, setApprovalNote] = useState("");
   const [approvalDetailFile, setApprovalDetailFile] =
     useState<BrowserFileItem | null>(null);
+  const [signaturePanelFile, setSignaturePanelFile] =
+    useState<SignatureFileHandle | null>(null);
+  const [signatureComposerFile, setSignatureComposerFile] =
+    useState<SignatureFileHandle | null>(null);
   const [workflowPanelFile, setWorkflowPanelFile] = useState<{
     id: string;
     name: string;
@@ -236,6 +252,8 @@ export default function FileBrowserPage() {
     name: string;
   } | null>(null);
   const [showWorkflowCenter, setShowWorkflowCenter] = useState(false);
+  const [workflowCenterInitialFilter, setWorkflowCenterInitialFilter] =
+    useState<"all" | "approval" | "signature">("all");
   const [workflowTemplateApproverIds, setWorkflowTemplateApproverIds] =
     useState<string[]>([]);
   const [showBulkMetadataModal, setShowBulkMetadataModal] = useState(false);
@@ -290,6 +308,7 @@ export default function FileBrowserPage() {
     modified: true,
     version: false,
     approval: false,
+    signature: false,
     retention: false,
     lock: true,
     metaNotFound: true,
@@ -326,6 +345,18 @@ export default function FileBrowserPage() {
       }
       if (workflowPanelFile) {
         setWorkflowPanelFile(null);
+        return;
+      }
+      if (signatureDetailsFile) {
+        setSignatureDetailsFile(null);
+        return;
+      }
+      if (signaturePanelFile) {
+        setSignaturePanelFile(null);
+        return;
+      }
+      if (signatureComposerFile) {
+        setSignatureComposerFile(null);
         return;
       }
       if (workflowComposerFile) {
@@ -398,6 +429,9 @@ export default function FileBrowserPage() {
   }, [
     approvalFile,
     approvalDetailFile,
+    signaturePanelFile,
+    signatureDetailsFile,
+    signatureComposerFile,
     workflowPanelFile,
     workflowComposerFile,
     showWorkflowCenter,
@@ -1096,6 +1130,75 @@ export default function FileBrowserPage() {
   const isFilteredEmpty = files.length === 0 && typeFilter !== "all";
   const isEmpty = allFiles.length === 0 && folders.length === 0;
 
+  useEffect(() => {
+    const signFileId = searchParams.get("signFileId");
+    if (!signFileId) return;
+
+    let cancelled = false;
+
+    const clearQuery = () => {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete("signFileId");
+      navigate(
+        {
+          pathname: "/browse",
+          search: nextParams.toString() ? `?${nextParams.toString()}` : "",
+        },
+        { replace: true },
+      );
+    };
+
+    const openFromNotification = async () => {
+      const existing = allFiles.find((file) => file.id === signFileId);
+      if (existing) {
+        if (cancelled) return;
+        setDetailFile(existing);
+        setSignaturePanelFile({ id: existing.id, name: existing.name });
+        clearQuery();
+        return;
+      }
+
+      try {
+        const res = await api.get(`/files/${signFileId}`);
+        const row = res.data?.file as Partial<BrowserFileItem> | undefined;
+        if (!row?.id || !row?.name || !row?.mimeType) return;
+        if (cancelled) return;
+
+        const hydratedFile: BrowserFileItem = {
+          id: row.id,
+          name: row.name,
+          mimeType: row.mimeType,
+          size: Number(row.size ?? 0),
+          createdAt: row.createdAt ?? new Date().toISOString(),
+          viewUrl: row.viewUrl ?? null,
+          signatureStatus: row.signatureStatus ?? null,
+          signatureNote: row.signatureNote ?? null,
+          signedAt: row.signedAt ?? null,
+          signedBy: row.signedBy ?? null,
+          activeSignatureWorkflowId: row.activeSignatureWorkflowId ?? null,
+          currentSignatureStepOrder: row.currentSignatureStepOrder ?? null,
+          approvalStatus: row.approvalStatus ?? null,
+          approvalNote: row.approvalNote ?? null,
+          activeWorkflowId: row.activeWorkflowId ?? null,
+          currentStepOrder: row.currentStepOrder ?? null,
+        };
+
+        setDetailFile(hydratedFile);
+        setSignaturePanelFile({ id: hydratedFile.id, name: hydratedFile.name });
+      } finally {
+        if (!cancelled) {
+          clearQuery();
+        }
+      }
+    };
+
+    void openFromNotification();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [allFiles, navigate, searchParams]);
+
   const handleUploadComplete = () => {
     if (uploadRefreshTimerRef.current) {
       window.clearTimeout(uploadRefreshTimerRef.current);
@@ -1294,7 +1397,7 @@ export default function FileBrowserPage() {
       ? files.find((f) => f.id === selectedFiles[0])
       : null;
   const workflowInboxItems = workflowInboxData?.items ?? [];
-  const workflowToolbarFile = detailFile ?? singleSelectedFile ?? null;
+  const signatureToolbarFile = detailFile ?? singleSelectedFile ?? null;
 
   const openWorkflowComposer = useCallback(
     (file: { id: string; name: string }, initialApproverIds: string[] = []) => {
@@ -1303,6 +1406,10 @@ export default function FileBrowserPage() {
     },
     [],
   );
+
+  const openSignatureComposer = useCallback((file: { id: string; name: string }) => {
+    setSignatureComposerFile({ id: file.id, name: file.name });
+  }, []);
 
   const patchDetailWorkflowState = (
     workflow: StartedApprovalWorkflow | WorkflowWithFile,
@@ -1319,6 +1426,45 @@ export default function FileBrowserPage() {
             activeWorkflowId: wf.status === "in_review" ? workflow.id : null,
             currentStepOrder:
               workflow.file?.currentStepOrder ??
+              workflow.currentStepOrder ??
+              null,
+          }
+        : prev,
+    );
+  };
+
+  const patchDetailSignatureState = (workflow: {
+    id: string;
+    fileId?: string;
+    status?: string;
+    currentStepOrder?: number | null;
+    file?: {
+      id?: string;
+      signatureStatus?: string | null;
+      signatureNote?: string | null;
+      signedAt?: string | null;
+      signedBy?: { name?: string | null } | null;
+      currentSignatureStepOrder?: number | null;
+    } | null;
+  }) => {
+    const targetId = workflow.fileId ?? workflow.file?.id;
+    if (!targetId) return;
+    setDetailFile((prev) =>
+      prev && prev.id === targetId
+        ? {
+            ...prev,
+            signatureStatus:
+              workflow.file?.signatureStatus ?? workflow.status ?? prev.signatureStatus,
+            signatureNote:
+              workflow.file?.signatureNote ?? prev.signatureNote ?? null,
+            signedAt: workflow.file?.signedAt ?? prev.signedAt ?? null,
+            signedBy: workflow.file?.signedBy?.name
+              ? { name: workflow.file.signedBy.name }
+              : prev.signedBy ?? null,
+            activeSignatureWorkflowId:
+              workflow.status === "in_progress" ? workflow.id : null,
+            currentSignatureStepOrder:
+              workflow.file?.currentSignatureStepOrder ??
               workflow.currentStepOrder ??
               null,
           }
@@ -1467,6 +1613,18 @@ export default function FileBrowserPage() {
 
   const handleApprovalDetailOpen = useCallback((file: BrowserFileItem) => {
     setWorkflowPanelFile({ id: file.id, name: file.name });
+  }, []);
+
+  const handleSignatureActionOpen = useCallback((file: BrowserFileItem) => {
+    if (file.signatureStatus === "in_progress") {
+      setSignaturePanelFile(file);
+      return;
+    }
+    setSignatureComposerFile(file);
+  }, []);
+
+  const handleSignatureDetailOpen = useCallback((file: BrowserFileItem) => {
+    setSignaturePanelFile(file);
   }, []);
 
   const openFolderMetadataPage = (folder: { id: string; name: string }) => {
@@ -2233,19 +2391,53 @@ export default function FileBrowserPage() {
             )}
             <button
               onClick={() => {
-                if (!workflowToolbarFile) {
-                  setShowWorkflowCenter(true);
-                  return;
-                }
-                setWorkflowPanelFile({
-                  id: workflowToolbarFile.id,
-                  name: workflowToolbarFile.name,
-                });
+                setWorkflowCenterInitialFilter("all");
+                setShowWorkflowCenter(true);
               }}
               className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-primary-600 transition-colors"
             >
               <Workflow size={16} />
               <span className="text-[10px] font-medium">Workflow</span>
+            </button>
+            <button
+              onClick={() => {
+                if (!signatureToolbarFile) {
+                  useToast
+                    .getState()
+                    .add("Select or open a file to use signatures");
+                  return;
+                }
+
+                if (
+                  signatureToolbarFile.activeSignatureWorkflowId ||
+                  (signatureToolbarFile.signatureStatus &&
+                    signatureToolbarFile.signatureStatus !== "draft")
+                ) {
+                  setSignaturePanelFile({
+                    id: signatureToolbarFile.id,
+                    name: signatureToolbarFile.name,
+                  });
+                  return;
+                }
+
+                openSignatureComposer({
+                  id: signatureToolbarFile.id,
+                  name: signatureToolbarFile.name,
+                });
+              }}
+              className={clsx(
+                "flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors",
+                signatureToolbarFile
+                  ? "hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-primary-600"
+                  : "text-gray-300 dark:text-gray-600",
+              )}
+            >
+              <PenTool size={16} />
+              <span className="text-[10px] font-medium">
+                {signatureToolbarFile?.signatureStatus === "in_progress"
+                  ? "Signing"
+                  : "Signature"}
+              </span>
             </button>
             <div className="relative">
               <button
@@ -2709,6 +2901,20 @@ export default function FileBrowserPage() {
                     <label className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg cursor-pointer">
                       <input
                         type="checkbox"
+                        checked={visibleColumns.signature}
+                        onChange={(e) =>
+                          setVisibleColumns((v) => ({
+                            ...v,
+                            signature: e.target.checked,
+                          }))
+                        }
+                        className="w-3.5 h-3.5 rounded border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-primary-500 cursor-pointer"
+                      />
+                      Signature
+                    </label>
+                    <label className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg cursor-pointer">
+                      <input
+                        type="checkbox"
                         checked={visibleColumns.retention}
                         onChange={(e) =>
                           setVisibleColumns((v) => ({
@@ -3110,7 +3316,7 @@ export default function FileBrowserPage() {
               <FileDetailsView
                 file={detailFile}
                 onBack={() => setDetailFile(null)}
-                onOpenPreview={(file) => setPreviewFile(file)}
+                onOpenPreview={(file) => setPreviewFile(file as BrowserFileItem)}
                 breadcrumbItems={[
                   { id: "root", label: "All Files", clickable: true },
                   ...ancestors.map((a) => ({
@@ -3139,9 +3345,21 @@ export default function FileBrowserPage() {
                   if (job.applyAt === null) return "Infinite";
                   return new Date(job.applyAt).toLocaleString();
                 })()}
-                onOpenRetention={(file) => openRetentionDetails(file)}
+                onOpenRetention={(file) =>
+                  openRetentionDetails(file as BrowserFileItem)
+                }
                 onOpenWorkflow={(file) =>
                   setWorkflowPanelFile({ id: file.id, name: file.name })
+                }
+                onOpenSignature={(file) => {
+                  if (file.signatureStatus === "in_progress") {
+                    setSignaturePanelFile(file as SignatureFileHandle);
+                    return;
+                  }
+                  setSignatureComposerFile(file as SignatureFileHandle);
+                }}
+                onOpenSignatureDetails={(file) =>
+                  setSignatureDetailsFile(file as BrowserFileItem)
                 }
                 onToggleLock={(file) => {
                   const previous = !!file.isLocked;
@@ -3163,8 +3381,12 @@ export default function FileBrowserPage() {
                     },
                   );
                 }}
-                onUploadNewVersion={(file) => handleOpenVersionUpload(file)}
-                onOpenVersionHistory={(file) => setVersionsFile(file)}
+                onUploadNewVersion={(file) =>
+                  handleOpenVersionUpload(file as BrowserFileItem)
+                }
+                onOpenVersionHistory={(file) =>
+                  setVersionsFile(file as BrowserFileItem)
+                }
                 canViewMetadata={fileCan(detailFile.id, "view_metadata")}
                 canEditMetadata={fileCan(detailFile.id, "edit_metadata")}
                 canToggleLock={fileCan(detailFile.id, "edit_file_attrs")}
@@ -3173,12 +3395,18 @@ export default function FileBrowserPage() {
                 canManageRetention={fileCan(detailFile.id, "delete_files")}
                 canManageShare={fileCan(detailFile.id, "share_files")}
                 canManageReminders={fileCan(detailFile.id, "edit_file_attrs")}
+                canOpenSignature={fileCan(detailFile.id, "request_signatures")}
                 isLocking={lockMutation.isPending}
                 isUploadingVersion={uploadNewVersionMutation.isPending}
                 workflowButtonLabel={
                   detailFile.approvalStatus === "in_review"
                     ? "Open workflow"
                     : "Approval workflow"
+                }
+                signatureButtonLabel={
+                  detailFile.signatureStatus === "in_progress"
+                    ? "Open signing"
+                    : "Request signature"
                 }
               />
             </Suspense>
@@ -3771,10 +3999,12 @@ export default function FileBrowserPage() {
                       onMetadata={openFileMetadataPage}
                       onComments={handleCommentsOpen}
                       onSubmitApproval={handleSubmitApprovalOpen}
+                      onRequestSignature={handleSignatureActionOpen}
                       onLock={handleLockFile}
                       onAssignCategory={handleAssignCategoryFile}
                       onAssignTag={handleAssignTagFile}
                       onApprovalDetail={handleApprovalDetailOpen}
+                      onSignatureDetail={handleSignatureDetailOpen}
                       capabilitiesMap={capMap}
                       visibleColumns={visibleColumns}
                       onRetentionClick={openRetentionDetails}
@@ -3882,6 +4112,12 @@ export default function FileBrowserPage() {
           <FileDocumentPreviewModal
             file={previewFile}
             onClose={() => setPreviewFile(null)}
+          />
+        )}
+        {signatureDetailsFile && (
+          <FilePreviewModal
+            file={signatureDetailsFile}
+            onClose={() => setSignatureDetailsFile(null)}
           />
         )}
         <input
@@ -4023,13 +4259,88 @@ export default function FileBrowserPage() {
           />
         )}
 
+        {signatureComposerFile && (
+          <DigitalSignatureComposerModal
+            file={signatureComposerFile}
+            onClose={() => setSignatureComposerFile(null)}
+            onSuccess={(workflow) => {
+              patchDetailSignatureState(workflow);
+              const targetFile =
+                workflow.file?.id === signatureComposerFile.id
+                  ? signatureComposerFile
+                  : {
+                      id: workflow.fileId ?? signatureComposerFile.id,
+                      name: signatureComposerFile.name,
+                    };
+              setSignaturePanelFile(targetFile);
+            }}
+          />
+        )}
+
         {showWorkflowCenter && (
           <ApprovalWorkflowCenterPanel
             onClose={() => setShowWorkflowCenter(false)}
-            onOpenWorkflow={(file) => {
+            initialTypeFilter={workflowCenterInitialFilter}
+            onOpenApprovalWorkflow={(file) => {
               setShowWorkflowCenter(false);
               setWorkflowPanelFile(file);
             }}
+            onOpenSignatureWorkflow={(file) => {
+              setShowWorkflowCenter(false);
+              setSignaturePanelFile(file);
+            }}
+          />
+        )}
+
+        {signaturePanelFile && (
+          <DigitalSignaturePanel
+            file={signaturePanelFile}
+            onClose={() => setSignaturePanelFile(null)}
+            onOpenFile={async (file) => {
+              try {
+                const existing = allFiles.find((f) => f.id === file.id);
+                if (existing) {
+                  setPreviewFile(existing);
+                  return;
+                }
+                const res = await api.get(`/files/${file.id}`);
+                const row = res.data?.file as Partial<BrowserFileItem> | undefined;
+                if (!row?.id || !row?.name || !row?.mimeType) {
+                  throw new Error("File details unavailable");
+                }
+                setPreviewFile({
+                  id: row.id,
+                  name: row.name,
+                  mimeType: row.mimeType,
+                  size: Number(row.size ?? 0),
+                  createdAt: row.createdAt ?? new Date().toISOString(),
+                  viewUrl: row.viewUrl ?? null,
+                  signatureStatus: row.signatureStatus ?? null,
+                  signatureNote: row.signatureNote ?? null,
+                  signedAt: row.signedAt ?? null,
+                  signedBy: row.signedBy ?? null,
+                  activeSignatureWorkflowId:
+                    row.activeSignatureWorkflowId ?? null,
+                  currentSignatureStepOrder:
+                    row.currentSignatureStepOrder ?? null,
+                });
+              } catch {
+                useToast
+                  .getState()
+                  .add(
+                    "Unable to open file preview for this signing item.",
+                    "error",
+                  );
+              }
+            }}
+            onStartSignature={(file) => {
+              setSignaturePanelFile(null);
+              openSignatureComposer(file);
+            }}
+            onWorkflowChanged={(workflow) => {
+              patchDetailSignatureState(workflow);
+            }}
+            canStartSignature={fileCan(signaturePanelFile.id, "request_signatures")}
           />
         )}
 

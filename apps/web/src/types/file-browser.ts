@@ -12,6 +12,10 @@ export type BrowserFileItem = {
   approvalNote?: string | null;
   approvedAt?: string | null;
   approvedBy?: { name: string } | null;
+  signatureStatus?: string | null;
+  signatureNote?: string | null;
+  signedAt?: string | null;
+  signedBy?: { name: string } | null;
   isLocked?: boolean;
   lockedById?: string | null;
   categoryId?: string | null;
@@ -19,6 +23,8 @@ export type BrowserFileItem = {
   viewUrl?: string | null;
   activeWorkflowId?: string | null;
   currentStepOrder?: number | null;
+  activeSignatureWorkflowId?: string | null;
+  currentSignatureStepOrder?: number | null;
 };
 
 export type CategoryOption = {

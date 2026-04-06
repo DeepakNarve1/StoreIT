@@ -6,6 +6,7 @@ import {
   Image,
   Film,
   Music,
+  Archive,
   File,
   Eye,
   Lock,
@@ -14,10 +15,12 @@ import {
   Bell,
   Share2,
   ShieldCheck,
+  PenTool,
 } from "lucide-react";
 import api from "../../api/axios";
 import { getAuditActionLabel } from "../../utils/auditAction";
 import { useToast } from "../ui/toastStore";
+import { getFileKind } from "../../utils/fileMime";
 
 interface FileItem {
   id: string;
@@ -29,6 +32,15 @@ interface FileItem {
   isLocked?: boolean;
   viewUrl?: string | null;
   approvalStatus?: string | null;
+  approvalNote?: string | null;
+  approvedAt?: string | null;
+  approvedBy?: { name?: string | null } | null;
+  signatureStatus?: string | null;
+  signatureNote?: string | null;
+  signedAt?: string | null;
+  signedBy?: { name?: string | null } | null;
+  activeSignatureWorkflowId?: string | null;
+  currentSignatureStepOrder?: number | null;
 }
 
 interface Props {
@@ -47,6 +59,8 @@ interface Props {
   onUploadNewVersion?: (file: FileItem) => void;
   onOpenVersionHistory?: (file: FileItem) => void;
   onOpenWorkflow?: (file: FileItem) => void;
+  onOpenSignature?: (file: FileItem) => void;
+  onOpenSignatureDetails?: (file: FileItem) => void;
   canViewMetadata?: boolean;
   canEditMetadata?: boolean;
   isLocking?: boolean;
@@ -58,6 +72,8 @@ interface Props {
   canManageRetention?: boolean;
   canManageShare?: boolean;
   canManageReminders?: boolean;
+  canOpenSignature?: boolean;
+  signatureButtonLabel?: string;
 }
 
 const formatBytes = (bytes: number) => {
@@ -156,15 +172,22 @@ function FileTypeGlyph({
   size: number;
   className?: string;
 }) {
-  if (mimeType.startsWith("image/"))
-    return <Image size={size} className={className} />;
-  if (mimeType.startsWith("video/"))
-    return <Film size={size} className={className} />;
-  if (mimeType.startsWith("audio/"))
-    return <Music size={size} className={className} />;
-  if (mimeType.includes("pdf"))
-    return <FileText size={size} className={className} />;
-  return <File size={size} className={className} />;
+  switch (getFileKind(mimeType)) {
+    case "image":
+      return <Image size={size} className={className} />;
+    case "video":
+      return <Film size={size} className={className} />;
+    case "audio":
+      return <Music size={size} className={className} />;
+    case "pdf":
+    case "office":
+    case "text":
+      return <FileText size={size} className={className} />;
+    case "archive":
+      return <Archive size={size} className={className} />;
+    default:
+      return <File size={size} className={className} />;
+  }
 }
 
 export default function FileDetailsView({
@@ -179,6 +202,8 @@ export default function FileDetailsView({
   onUploadNewVersion,
   onOpenVersionHistory,
   onOpenWorkflow,
+  onOpenSignature,
+  onOpenSignatureDetails,
   canViewMetadata = true,
   canEditMetadata = false,
   isLocking = false,
@@ -190,6 +215,8 @@ export default function FileDetailsView({
   canManageRetention = true,
   canManageShare = true,
   canManageReminders = true,
+  canOpenSignature = true,
+  signatureButtonLabel = "Request signature",
 }: Props) {
   const queryClient = useQueryClient();
   const { add } = useToast();
@@ -545,6 +572,120 @@ export default function FileDetailsView({
         </div>
 
         <div className="xl:col-span-3 space-y-3">
+          {(canOpenWorkflow || canOpenSignature) && (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/90 p-3 space-y-4">
+              <div>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 inline-flex items-center gap-1">
+                  <Workflow size={14} /> Workflows
+                </p>
+
+                {canOpenWorkflow && (
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-800/60 p-3">
+                    <p className="text-xs font-medium text-gray-900 dark:text-gray-100 inline-flex items-center gap-1">
+                      <Workflow size={12} /> Approval workflow
+                    </p>
+                    {file.approvalStatus && file.approvalStatus !== "draft" ? (
+                      <div className="mt-2 space-y-1.5 text-xs text-gray-600 dark:text-gray-300">
+                        <p>
+                          Status:{" "}
+                          <span className="font-semibold text-gray-900 dark:text-gray-100">
+                            {file.approvalStatus === "in_review"
+                              ? "In review"
+                              : file.approvalStatus === "approved"
+                                ? "Approved"
+                                : file.approvalStatus === "rejected"
+                                  ? "Rejected"
+                                  : file.approvalStatus === "cancelled"
+                                    ? "Cancelled"
+                                    : file.approvalStatus}
+                          </span>
+                        </p>
+                        {file.approvedAt && (
+                          <p>Completed: {new Date(file.approvedAt).toLocaleString()}</p>
+                        )}
+                        {file.approvedBy?.name && <p>By: {file.approvedBy.name}</p>}
+                        {file.approvalNote && (
+                          <p className="whitespace-pre-wrap">Note: {file.approvalNote}</p>
+                        )}
+                        <button
+                          onClick={() => onOpenWorkflow?.(file)}
+                          className="mt-1 text-xs text-gray-700 dark:text-gray-300 hover:underline"
+                        >
+                          Open approval details
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="mt-2 space-y-2">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Start or review an approval workflow for this file.
+                        </p>
+                        <button
+                          onClick={() => onOpenWorkflow?.(file)}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs rounded bg-primary-600 text-white hover:bg-primary-500"
+                        >
+                          <Workflow size={13} /> {workflowButtonLabel}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {canOpenWorkflow && canOpenSignature && (
+                  <div className="my-3 h-px bg-gray-200 dark:bg-gray-700" />
+                )}
+
+                {canOpenSignature && (
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-800/60 p-3">
+                    <p className="text-xs font-medium text-gray-900 dark:text-gray-100 inline-flex items-center gap-1">
+                      <PenTool size={12} /> Digital signature
+                    </p>
+                    {file.signatureStatus && file.signatureStatus !== "draft" ? (
+                      <div className="mt-2 space-y-1.5 text-xs text-gray-600 dark:text-gray-300">
+                        <p>
+                          Status:{" "}
+                          <span className="font-semibold text-gray-900 dark:text-gray-100">
+                            {file.signatureStatus === "in_progress"
+                              ? "In progress"
+                              : file.signatureStatus === "signed"
+                                ? "Signed"
+                                : file.signatureStatus === "cancelled"
+                                  ? "Cancelled"
+                                  : file.signatureStatus}
+                          </span>
+                        </p>
+                        {file.signedAt && (
+                          <p>Completed: {new Date(file.signedAt).toLocaleString()}</p>
+                        )}
+                        {file.signedBy?.name && <p>By: {file.signedBy.name}</p>}
+                        {file.signatureNote && (
+                          <p className="whitespace-pre-wrap">Note: {file.signatureNote}</p>
+                        )}
+                        <button
+                          onClick={() => onOpenSignatureDetails?.(file)}
+                          className="mt-1 text-xs text-gray-700 dark:text-gray-300 hover:underline"
+                        >
+                          Open signing details
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="mt-2 space-y-2">
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Request a signature workflow for this file.
+                        </p>
+                        <button
+                          onClick={() => onOpenSignature?.(file)}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs rounded bg-primary-600 text-white hover:bg-primary-500"
+                        >
+                          <PenTool size={13} /> {signatureButtonLabel}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {canManageReminders && (
             <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/90 p-3">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2 inline-flex items-center gap-1">

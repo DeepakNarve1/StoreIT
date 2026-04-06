@@ -7,12 +7,15 @@ import {
   Image,
   Film,
   Music,
+  Archive,
   File,
   ExternalLink,
+  PenTool,
 } from "lucide-react";
 import type { AxiosError } from "axios";
 import api from "../../api/axios";
 import { getAuditActionLabel } from "../../utils/auditAction";
+import { canPreviewImageMimeType, getFileKind } from "../../utils/fileMime";
 
 interface FileItem {
   id: string;
@@ -31,6 +34,12 @@ interface FileItem {
   approvalNote?: string | null;
   approvedAt?: string | null;
   approvedBy?: { name: string } | null;
+  signatureStatus?: string | null;
+  signatureNote?: string | null;
+  signedAt?: string | null;
+  signedBy?: { name: string } | null;
+  activeSignatureWorkflowId?: string | null;
+  currentSignatureStepOrder?: number | null;
   tags?: { tag: { id: string; name: string; color: string } }[];
 }
 
@@ -52,6 +61,28 @@ type AuditLogEntry = {
   user?: { name?: string; email?: string } | null;
 };
 
+type SignatureStepRow = {
+  id: string;
+  stepOrder: number;
+  status: string;
+  signatureName?: string | null;
+  signatureMethod?: string | null;
+  signatureData?: Record<string, unknown> | null;
+  actedAt?: string | null;
+  signerUser?: { name?: string | null; email?: string | null } | null;
+  signerName?: string | null;
+  signerEmail?: string | null;
+};
+
+type SigningWorkflowEnvelope = {
+  file: FileItem;
+  workflow: {
+    id: string;
+    status: string;
+    steps: SignatureStepRow[];
+  } | null;
+};
+
 function getAxiosStatus(err: unknown): number | undefined {
   return (err as AxiosError | undefined)?.response?.status;
 }
@@ -65,17 +96,7 @@ const formatBytes = (bytes: number) => {
 };
 
 const getFileType = (mimeType: string) => {
-  if (mimeType.startsWith("image/")) return "image";
-  if (mimeType.startsWith("video/")) return "video";
-  if (mimeType.startsWith("audio/")) return "audio";
-  if (mimeType === "application/pdf") return "pdf";
-  if (mimeType.includes("word") || mimeType.includes("document"))
-    return "office";
-  if (mimeType.includes("sheet") || mimeType.includes("excel")) return "office";
-  if (mimeType.includes("presentation") || mimeType.includes("powerpoint"))
-    return "office";
-  if (mimeType.startsWith("text/")) return "text";
-  return "other";
+  return getFileKind(mimeType);
 };
 
 const getOfficeViewerUrl = (fileUrl: string) => {
@@ -114,6 +135,12 @@ const getFileIcon = (mimeType: string) => {
         icon: FileText,
         color: "text-primary-500",
         bg: "bg-primary-50 dark:bg-primary-900/30",
+      };
+    case "archive":
+      return {
+        icon: Archive,
+        color: "text-yellow-500",
+        bg: "bg-yellow-50 dark:bg-yellow-900/30",
       };
     case "text":
       return {
@@ -169,9 +196,42 @@ function FilePreviewModalInner({
   });
 
   const metadataRows = metadataData?.metadata ?? [];
+  const hasSignatureDetails =
+    (!!file.signatureStatus && file.signatureStatus !== "draft") ||
+    !!file.signedAt ||
+    !!file.signedBy?.name ||
+    !!file.signatureNote;
+  const { data: signingData, isLoading: signingLoading } = useQuery({
+    queryKey: ["signing-file-preview", file.id],
+    enabled: hasSignatureDetails,
+    queryFn: async () => {
+      const res = await api.get(`/signing/files/${file.id}`);
+      return res.data as SigningWorkflowEnvelope;
+    },
+  });
+  const signingWorkflow = signingData?.workflow ?? null;
   const metadataStatus = getAxiosStatus(metadataError);
   const metadataDenied =
     metadataStatus === 403 || metadataStatus === 401;
+  const signatureSteps = signingWorkflow?.steps ?? [];
+  const latestSignedStep =
+    [...signatureSteps]
+      .reverse()
+      .find(
+        (step) =>
+          step.status === "signed" &&
+          step.signatureData &&
+          typeof step.signatureData === "object",
+      ) ?? null;
+  const signatureData = latestSignedStep?.signatureData ?? null;
+  const signatureImageUrl =
+    signatureData && typeof signatureData.dataUrl === "string"
+      ? signatureData.dataUrl
+      : null;
+  const signatureText =
+    signatureData && typeof signatureData.typedName === "string"
+      ? signatureData.typedName
+      : latestSignedStep?.signatureName ?? file.signedBy?.name ?? null;
 
   const formatDetailedDateTime = (dateStr: string) =>
     new Date(dateStr).toLocaleString("en-US", {
@@ -226,6 +286,34 @@ function FilePreviewModalInner({
 
     // IMAGE
     if (fileType === "image") {
+      if (!canPreviewImageMimeType(file.mimeType)) {
+        return (
+          <div className="flex flex-col items-center justify-center h-full py-20 text-center">
+            <div
+              className={`w-20 h-20 ${bg} rounded-2xl flex items-center justify-center mb-4`}
+            >
+              <Icon size={36} className={color} />
+            </div>
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-100 mb-1">
+              {file.name}
+            </p>
+            <p className="text-xs text-gray-400 mb-6">{formatBytes(file.size)}</p>
+            <p className="text-xs text-gray-500 mb-4">
+              This image format is not previewable in the browser. Download the
+              file to view it.
+            </p>
+            <a
+              href={viewUrl}
+              download={file.name}
+              className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white
+                         text-sm font-medium rounded-lg hover:bg-primary-700 transition-colors"
+            >
+              <Download size={15} />
+              Download file
+            </a>
+          </div>
+        );
+      }
       return (
         <div className="flex items-center justify-center h-full p-4">
           <img
@@ -508,6 +596,116 @@ function FilePreviewModalInner({
               )}
             </div>
           </div>
+
+          {(file.signatureStatus && file.signatureStatus !== "draft") ||
+          file.signedAt ||
+          file.signedBy?.name ||
+          file.signatureNote ? (
+            <div className="px-4 pt-4">
+              <div className="rounded-xl border border-cyan-200 dark:border-cyan-900/50 bg-cyan-50/60 dark:bg-cyan-900/15 overflow-hidden">
+                <div className="px-4 py-3 border-b border-cyan-100 dark:border-cyan-900/40">
+                  <p className="text-sm font-semibold text-cyan-900 dark:text-cyan-100">
+                    Signature details
+                  </p>
+                  <p className="text-xs text-cyan-700/80 dark:text-cyan-200/80 mt-0.5">
+                    Signed workflow information for this file
+                  </p>
+                </div>
+                <div className="px-4 py-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <p className="text-cyan-700 dark:text-cyan-200 font-medium mb-1">
+                      Status
+                    </p>
+                    <p className="text-cyan-950 dark:text-cyan-50">
+                      {file.signatureStatus === "in_progress"
+                        ? "In progress"
+                        : file.signatureStatus === "signed"
+                          ? "Signed"
+                          : file.signatureStatus === "cancelled"
+                            ? "Cancelled"
+                            : file.signatureStatus ?? "Unknown"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-cyan-700 dark:text-cyan-200 font-medium mb-1">
+                      Completed
+                    </p>
+                    <p className="text-cyan-950 dark:text-cyan-50">
+                      {file.signedAt
+                        ? formatDetailedDateTime(file.signedAt)
+                        : "Not completed yet"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-cyan-700 dark:text-cyan-200 font-medium mb-1">
+                      Signed by
+                    </p>
+                    <p className="text-cyan-950 dark:text-cyan-50">
+                      {file.signedBy?.name ?? "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-cyan-700 dark:text-cyan-200 font-medium mb-1">
+                      Note
+                    </p>
+                    <p className="text-cyan-950 dark:text-cyan-50 whitespace-pre-wrap">
+                      {file.signatureNote ?? "—"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {hasSignatureDetails ? (
+            <div className="px-4 pt-4">
+              <div className="rounded-xl border border-cyan-200 dark:border-cyan-900/50 bg-cyan-50/60 dark:bg-cyan-900/15 overflow-hidden">
+                <div className="px-4 py-3 border-b border-cyan-100 dark:border-cyan-900/40 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-cyan-900 dark:text-cyan-100 inline-flex items-center gap-2">
+                      <PenTool size={14} /> Signature preview
+                    </p>
+                    <p className="text-xs text-cyan-700/80 dark:text-cyan-200/80 mt-0.5">
+                      The signature captured when this workflow was completed
+                    </p>
+                  </div>
+                  {signatureImageUrl && (
+                    <a
+                      href={signatureImageUrl}
+                      download={`${file.name}-signature.png`}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-200 dark:border-cyan-900/50 bg-white/80 dark:bg-gray-900 px-3 py-1.5 text-xs font-medium text-cyan-900 dark:text-cyan-100 hover:bg-white dark:hover:bg-gray-800"
+                    >
+                      <Download size={13} />
+                      Download signature
+                    </a>
+                  )}
+                </div>
+                <div className="px-4 py-4">
+                  {signingLoading ? (
+                    <div className="rounded-lg border border-dashed border-cyan-200 dark:border-cyan-800 px-4 py-6 text-sm text-cyan-700 dark:text-cyan-200">
+                      Loading signature preview...
+                    </div>
+                  ) : signatureImageUrl ? (
+                    <img
+                      src={signatureImageUrl}
+                      alt="Signed signature"
+                      className="max-h-48 w-full object-contain rounded-lg bg-white dark:bg-gray-950 border border-cyan-100 dark:border-cyan-800"
+                    />
+                  ) : signatureText ? (
+                    <div className="rounded-lg border border-cyan-100 dark:border-cyan-800 bg-cyan-50/70 dark:bg-cyan-950/30 px-4 py-5">
+                      <p className="text-2xl italic font-semibold text-cyan-950 dark:text-cyan-50">
+                        {signatureText}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-cyan-200 dark:border-cyan-800 px-4 py-6 text-sm text-cyan-700 dark:text-cyan-200">
+                      No stored signature image is available for this file.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           {/* Document details + audit log */}
           <div className="px-4 pb-5 pt-4">

@@ -15,11 +15,22 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
 import { useThemeStore } from "../../store/themeStore";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import api from "../../api/axios";
 
 interface TopBarProps {
   onToggleSidebar: () => void;
   sidebarOpen: boolean;
+}
+
+interface NotificationItem {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  link?: string | null;
+  isRead: boolean;
+  createdAt: string;
 }
 
 export default function TopBar({ onToggleSidebar }: TopBarProps) {
@@ -34,6 +45,39 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
   const { isDark, toggle } = useThemeStore();
   const [searchQuery, setSearchQuery] = useState("");
   const queryClient = useQueryClient();
+  const { data: notificationsData } = useQuery({
+    queryKey: ["notifications"],
+    queryFn: async () => {
+      const res = await api.get("/notifications");
+      return res.data as {
+        items: NotificationItem[];
+        unreadCount: number;
+      };
+    },
+    refetchInterval: 15000,
+    staleTime: 5000,
+  });
+
+  const markNotificationRead = useMutation({
+    mutationFn: async (id: string) => {
+      await api.post(`/notifications/${id}/read`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    },
+  });
+
+  const markAllNotificationsRead = useMutation({
+    mutationFn: async () => {
+      await api.post("/notifications/read-all");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    },
+  });
+
+  const notifications = notificationsData?.items ?? [];
+  const unreadCount = notificationsData?.unreadCount ?? 0;
 
   const handleLogout = async () => {
     logout();
@@ -142,6 +186,11 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
                        p-1.5 rounded-lg transition-colors"
           >
             <Bell size={18} />
+            {unreadCount > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 min-w-[16px] rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
+            )}
           </button>
 
           {showNotifications && (
@@ -158,25 +207,80 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
                   <p className="text-sm font-semibold text-gray-900 dark:text-white">
                     Notifications
                   </p>
-                  <button
-                    onClick={() => setShowNotifications(false)}
-                    className="text-gray-400 hover:text-gray-600"
-                  >
-                    <X size={14} />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={() => markAllNotificationsRead.mutate()}
+                        className="text-[11px] font-medium text-primary-600 hover:text-primary-500"
+                      >
+                        Mark all read
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setShowNotifications(false)}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
                 </div>
-                <div className="py-8 flex flex-col items-center justify-center text-center px-4">
-                  <Bell
-                    size={24}
-                    className="text-gray-300 dark:text-gray-600 mb-2"
-                  />
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    No notifications yet
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    You're all caught up!
-                  </p>
-                </div>
+                {notifications.length === 0 ? (
+                  <div className="py-8 flex flex-col items-center justify-center text-center px-4">
+                    <Bell
+                      size={24}
+                      className="text-gray-300 dark:text-gray-600 mb-2"
+                    />
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      No notifications yet
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      You're all caught up!
+                    </p>
+                  </div>
+                ) : (
+                  <div className="max-h-96 overflow-y-auto p-2">
+                    {notifications.map((notification) => (
+                      <button
+                        key={notification.id}
+                        onClick={() => {
+                          if (!notification.isRead) {
+                            markNotificationRead.mutate(notification.id);
+                          }
+                          setShowNotifications(false);
+                          if (notification.link) {
+                            navigate(notification.link);
+                          }
+                        }}
+                        className={`w-full rounded-xl px-3 py-3 text-left transition-colors ${
+                          notification.isRead
+                            ? "hover:bg-gray-50 dark:hover:bg-gray-800/70"
+                            : "bg-primary-50/80 hover:bg-primary-50 dark:bg-primary-900/20 dark:hover:bg-primary-900/30"
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div
+                            className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${
+                              notification.isRead
+                                ? "bg-gray-300 dark:bg-gray-600"
+                                : "bg-primary-500"
+                            }`}
+                          />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-900 dark:text-white">
+                              {notification.title}
+                            </p>
+                            <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-gray-400">
+                              {notification.message}
+                            </p>
+                            <p className="mt-1 text-[11px] text-gray-400">
+                              {new Date(notification.createdAt).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </>
           )}

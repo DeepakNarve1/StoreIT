@@ -18,22 +18,30 @@ import { useState } from "react";
 import { useAuthStore } from "../store/authStore";
 import DeleteModal from "../components/common/DeleteModal";
 import { useToast } from "../components/ui/toastStore";
+import { getFileKind } from "../utils/fileMime";
 
 type TrashFolderRow = { id: string; name: string; updatedAt: string };
 type TrashFileRow = { id: string; name: string; mimeType: string; updatedAt: string };
 
 const getFileIcon = (mimeType: string) => {
-  if (mimeType.startsWith("image/"))
-    return { icon: Image, color: "text-green-500" };
-  if (mimeType.startsWith("video/"))
-    return { icon: Film, color: "text-purple-500" };
-  if (mimeType.startsWith("audio/"))
-    return { icon: Music, color: "text-pink-500" };
-  if (mimeType.includes("pdf"))
-    return { icon: FileText, color: "text-red-500" };
-  if (mimeType.includes("zip"))
-    return { icon: Archive, color: "text-yellow-500" };
-  return { icon: File, color: "text-primary-500" };
+  switch (getFileKind(mimeType)) {
+    case "image":
+      return { icon: Image, color: "text-green-500" };
+    case "video":
+      return { icon: Film, color: "text-purple-500" };
+    case "audio":
+      return { icon: Music, color: "text-pink-500" };
+    case "pdf":
+      return { icon: FileText, color: "text-red-500" };
+    case "office":
+      return { icon: FileText, color: "text-primary-500" };
+    case "archive":
+      return { icon: Archive, color: "text-yellow-500" };
+    case "text":
+      return { icon: FileText, color: "text-gray-500" };
+    default:
+      return { icon: File, color: "text-primary-500" };
+  }
 };
 
 const timeAgo = (dateStr: string) => {

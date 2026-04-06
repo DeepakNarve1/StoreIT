@@ -258,3 +258,62 @@ export const sendGuestAccessEmail = async ({
   });
 };
 
+export const sendSignatureRequestEmail = async ({
+  email,
+  signerName,
+  fileName,
+  tenantName,
+  signUrl,
+  mode,
+}: {
+  email: string;
+  signerName: string;
+  fileName: string;
+  tenantName: string;
+  signUrl: string;
+  mode: "sequential" | "parallel";
+}) => {
+  const modeLabel = mode === "parallel" ? "Parallel" : "Sequential";
+
+  await sendEmail({
+    to: email,
+    subject: `${tenantName} requested your signature: ${fileName}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+      <body style="margin:0;padding:0;background:#f9fafb;font-family:system-ui,sans-serif;">
+        <div style="max-width:560px;margin:40px auto;background:white;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden;">
+          <div style="background:#0f766e;padding:24px 32px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="width:32px;height:32px;background:white;border-radius:8px;display:flex;align-items:center;justify-content:center;">
+                <span style="color:#0f766e;font-weight:700;font-size:16px;">S</span>
+              </div>
+              <span style="color:white;font-weight:600;font-size:16px;">${tenantName}</span>
+            </div>
+          </div>
+          <div style="padding:32px;">
+            <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#111827;">Signature request</h1>
+            <p style="margin:0 0 18px;font-size:14px;color:#6b7280;line-height:1.6;">
+              Hi <strong>${signerName}</strong>, ${tenantName} requested your signature on <strong>${fileName}</strong>.
+            </p>
+            <div style="background:#ecfeff;border:1px solid #a5f3fc;padding:12px 16px;border-radius:8px;margin:16px 0;">
+              <p style="margin:0;font-size:13px;color:#155e75;"><strong>Signing mode:</strong> ${modeLabel}</p>
+              <p style="margin:6px 0 0;font-size:13px;color:#155e75;">You can type your name or draw a signature before submitting.</p>
+            </div>
+            <a href="${signUrl}"
+               style="display:inline-block;background:#0f766e;color:white;font-size:14px;font-weight:600;
+                      padding:12px 24px;border-radius:8px;text-decoration:none;margin-bottom:24px;">
+              Review and sign →
+            </a>
+            <p style="margin:0 0 8px;font-size:13px;color:#9ca3af;">Or copy this link:</p>
+            <p style="margin:0;font-size:12px;color:#6b7280;word-break:break-all;background:#f9fafb;padding:10px 12px;border-radius:6px;border:1px solid #e5e7eb;">
+              ${signUrl}
+            </p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `,
+  });
+};

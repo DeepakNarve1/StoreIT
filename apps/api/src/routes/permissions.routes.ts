@@ -52,6 +52,7 @@ function actionToFileCapabilities(action: string): Record<string, boolean> {
       update_versions: true,
       move_files: true,
       delete_files: true,
+      request_signatures: true,
     });
   }
   if (action === "write") {
@@ -65,6 +66,7 @@ function actionToFileCapabilities(action: string): Record<string, boolean> {
       edit_metadata: true,
       update_versions: true,
       move_files: true,
+      request_signatures: true,
     });
   }
   return normalizeCapabilities({

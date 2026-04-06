@@ -40,6 +40,10 @@ model Tenant {
   approvalWorkflows    ApprovalWorkflow[]
   approvalWorkflowSteps ApprovalStep[]
   approvalWorkflowLogs ApprovalActionLog[]
+  signatureWorkflows   SignatureWorkflow[]
+  signatureWorkflowSteps SignatureStep[]
+  signatureWorkflowLogs SignatureActionLog[]
+  notifications        Notification[]
 }
 
 // ─── USER ────────────────────────────────────────────────────────────────────
@@ -62,6 +66,7 @@ model User {
 
   lockedFiles  File[]    @relation("LockedBy")
   approvedFiles   File[]   @relation("ApprovedBy")
+  signedFiles     File[]   @relation("SignedBy")
 
   comments FileComment[]
   permissions  Permission[]
@@ -73,6 +78,10 @@ model User {
   ownedApprovalWorkflows ApprovalWorkflow[] @relation("ApprovalWorkflowOwner")
   approvalSteps ApprovalStep[] @relation("ApprovalStepApprover")
   approvalWorkflowLogs ApprovalActionLog[] @relation("ApprovalLogActor")
+  ownedSignatureWorkflows SignatureWorkflow[] @relation("SignatureWorkflowOwner")
+  signatureSteps SignatureStep[] @relation("SignatureStepSigner")
+  signatureWorkflowLogs SignatureActionLog[] @relation("SignatureLogActor")
+  notifications Notification[]
 
   @@index([tenantId])
   @@index([email])
@@ -92,6 +101,28 @@ model UserPreference {
   @@unique([userId, key])
   @@index([tenantId, userId])
   @@map("user_preferences")
+}
+
+model Notification {
+  id           String   @id @default(uuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type         String
+  title        String
+  message      String
+  resourceType String?
+  resourceId   String?
+  link         String?
+  isRead       Boolean  @default(false)
+  readAt       DateTime?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@index([tenantId, userId, isRead, createdAt])
+  @@index([userId, createdAt])
+  @@map("notifications")
 }
 
 model Department {
@@ -213,18 +244,27 @@ model File {
   tags         FileTag[]         
 
   isLocked     Boolean   @default(false)
-lockedById   String?
-lockedBy     User?     @relation("LockedBy", fields: [lockedById], references: [id])
-lockedAt     DateTime?
+  lockedById   String?
+  lockedBy     User?     @relation("LockedBy", fields: [lockedById], references: [id])
+  lockedAt     DateTime?
 
   approvalStatus  String?  // null | pending | approved | rejected
-approvalNote    String?  // reviewer's note
-approvedById    String?
-approvedBy      User?    @relation("ApprovedBy", fields: [approvedById], references: [id])
-approvedAt      DateTime?  
+  approvalNote    String?  // reviewer's note
+  approvedById    String?
+  approvedBy      User?    @relation("ApprovedBy", fields: [approvedById], references: [id])
+  approvedAt      DateTime?  
   activeWorkflowId String? @unique
   activeWorkflow   ApprovalWorkflow? @relation("ActiveFileWorkflow", fields: [activeWorkflowId], references: [id])
   currentStepOrder Int?
+
+  signatureStatus  String?  // null | draft | in_progress | signed | cancelled
+  signatureNote    String?
+  signedById       String?
+  signedBy         User?    @relation("SignedBy", fields: [signedById], references: [id])
+  signedAt         DateTime?
+  activeSignatureWorkflowId String? @unique
+  activeSignatureWorkflow   SignatureWorkflow? @relation("ActiveFileSignatureWorkflow", fields: [activeSignatureWorkflowId], references: [id])
+  currentSignatureStepOrder Int?
 
   uploadedById String?
   uploadedBy   User?     @relation("UploadedBy", fields: [uploadedById], references: [id])
@@ -235,11 +275,13 @@ comments FileComment[]
   oneTimeLinks OneTimeLink[]
   guestFiles   GuestAccess[]  @relation("GuestAccessFile")
   workflows    ApprovalWorkflow[] @relation("FileWorkflows")
+  signatureWorkflows SignatureWorkflow[] @relation("FileSignatureWorkflows")
 
   @@index([tenantId])
   @@index([tenantId, folderId])
   @@index([tenantId, categoryId])
   @@index([tenantId, approvalStatus])
+  @@index([tenantId, signatureStatus])
   // Browse + trash filters: tenant + deleted flag + folder / uploader
   @@index([tenantId, isDeleted, folderId])
   @@index([tenantId, isDeleted, uploadedById])
@@ -463,6 +505,79 @@ model ApprovalActionLog {
   @@index([tenantId, workflowId, createdAt])
   @@index([tenantId, userId, createdAt])
   @@map("approval_action_logs")
+}
+
+model SignatureWorkflow {
+  id               String   @id @default(uuid())
+  tenantId         String
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fileId           String
+  file             File     @relation("FileSignatureWorkflows", fields: [fileId], references: [id], onDelete: Cascade)
+  ownerId          String
+  owner            User     @relation("SignatureWorkflowOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  status           String   @default("draft")
+  mode             String   @default("sequential")
+  currentStepOrder Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  startedAt        DateTime?
+  completedAt      DateTime?
+  cancelledAt      DateTime?
+  steps            SignatureStep[]
+  actionLogs       SignatureActionLog[]
+  activeFile       File?    @relation("ActiveFileSignatureWorkflow")
+
+  @@index([tenantId, fileId, createdAt])
+  @@index([tenantId, status, createdAt])
+  @@map("signature_workflows")
+}
+
+model SignatureStep {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workflowId      String
+  workflow        SignatureWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  stepOrder       Int
+  signerUserId    String?
+  signerUser      User?    @relation("SignatureStepSigner", fields: [signerUserId], references: [id], onDelete: SetNull)
+  signerName      String
+  signerEmail     String
+  status          String   @default("queued")
+  note            String?
+  signatureName   String?
+  signatureMethod String?
+  signatureData   Json?
+  accessToken     String   @unique @default(uuid())
+  actedAt         DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  actionLogs      SignatureActionLog[]
+
+  @@unique([workflowId, stepOrder])
+  @@index([tenantId, signerUserId, status])
+  @@index([workflowId, status])
+  @@map("signature_steps")
+}
+
+model SignatureActionLog {
+  id         String   @id @default(uuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workflowId String
+  workflow   SignatureWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  stepId     String?
+  step       SignatureStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  userId     String?
+  user       User?    @relation("SignatureLogActor", fields: [userId], references: [id], onDelete: SetNull)
+  action     String
+  note       String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, workflowId, createdAt])
+  @@index([tenantId, userId, createdAt])
+  @@map("signature_action_logs")
 }
 
 model AuditLog {

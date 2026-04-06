@@ -13,43 +13,59 @@ import AppShell from "../components/layout/AppShell";
 import FilePreviewModal from "../components/files/FilePreviewModal";
 import api from "../api/axios";
 import type { BrowserFileItem } from "../types/file-browser";
+import { getFileKind } from "../utils/fileMime";
 
 const getFileIcon = (mimeType: string) => {
-  if (mimeType.startsWith("image/"))
-    return {
-      icon: Image,
-      color: "text-green-500 dark:text-green-400",
-      bg: "bg-green-50 dark:bg-green-900/20",
-    };
-  if (mimeType.startsWith("video/"))
-    return {
-      icon: Film,
-      color: "text-purple-500 dark:text-purple-400",
-      bg: "bg-purple-50 dark:bg-purple-900/20",
-    };
-  if (mimeType.startsWith("audio/"))
-    return {
-      icon: Music,
-      color: "text-pink-500 dark:text-pink-400",
-      bg: "bg-pink-50 dark:bg-pink-900/20",
-    };
-  if (mimeType.includes("pdf"))
-    return {
-      icon: FileText,
-      color: "text-red-500 dark:text-red-400",
-      bg: "bg-red-50 dark:bg-red-900/20",
-    };
-  if (mimeType.includes("zip"))
-    return {
-      icon: Archive,
-      color: "text-yellow-500 dark:text-yellow-400",
-      bg: "bg-yellow-50 dark:bg-yellow-900/20",
-    };
-  return {
-    icon: File,
-    color: "text-primary-500 dark:text-primary-400",
-    bg: "bg-primary-50 dark:bg-primary-900/20",
-  };
+  switch (getFileKind(mimeType)) {
+    case "image":
+      return {
+        icon: Image,
+        color: "text-green-500 dark:text-green-400",
+        bg: "bg-green-50 dark:bg-green-900/20",
+      };
+    case "video":
+      return {
+        icon: Film,
+        color: "text-purple-500 dark:text-purple-400",
+        bg: "bg-purple-50 dark:bg-purple-900/20",
+      };
+    case "audio":
+      return {
+        icon: Music,
+        color: "text-pink-500 dark:text-pink-400",
+        bg: "bg-pink-50 dark:bg-pink-900/20",
+      };
+    case "pdf":
+      return {
+        icon: FileText,
+        color: "text-red-500 dark:text-red-400",
+        bg: "bg-red-50 dark:bg-red-900/20",
+      };
+    case "office":
+      return {
+        icon: FileText,
+        color: "text-primary-500 dark:text-primary-400",
+        bg: "bg-primary-50 dark:bg-primary-900/20",
+      };
+    case "archive":
+      return {
+        icon: Archive,
+        color: "text-yellow-500 dark:text-yellow-400",
+        bg: "bg-yellow-50 dark:bg-yellow-900/20",
+      };
+    case "text":
+      return {
+        icon: FileText,
+        color: "text-gray-500 dark:text-gray-400",
+        bg: "bg-gray-50 dark:bg-gray-800",
+      };
+    default:
+      return {
+        icon: File,
+        color: "text-primary-500 dark:text-primary-400",
+        bg: "bg-primary-50 dark:bg-primary-900/20",
+      };
+  }
 };
 
 const formatBytes = (bytes: number) => {

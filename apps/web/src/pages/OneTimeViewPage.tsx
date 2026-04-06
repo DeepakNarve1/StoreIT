@@ -8,6 +8,7 @@ import {
   Loader,
   Shield,
 } from "lucide-react";
+import { canPreviewImageMimeType, getFileKind } from "../utils/fileMime";
 
 const formatBytes = (bytes: number) => {
   if (bytes === 0) return "0 B";
@@ -18,17 +19,7 @@ const formatBytes = (bytes: number) => {
 };
 
 const getFileType = (mimeType: string) => {
-  if (mimeType.startsWith("image/")) return "image";
-  if (mimeType.startsWith("video/")) return "video";
-  if (mimeType.startsWith("audio/")) return "audio";
-  if (mimeType === "application/pdf") return "pdf";
-  if (
-    mimeType.includes("word") ||
-    mimeType.includes("sheet") ||
-    mimeType.includes("presentation")
-  )
-    return "office";
-  return "other";
+  return getFileKind(mimeType);
 };
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
@@ -67,6 +58,26 @@ export default function OneTimeViewPage() {
     if (!file) return null;
 
     if (fileType === "image") {
+      if (!canPreviewImageMimeType(file.mimeType)) {
+        return (
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div className="w-20 h-20 bg-gray-100 rounded-2xl flex items-center justify-center">
+              <File size={36} className="text-gray-400" />
+            </div>
+            <p className="text-sm text-gray-500">
+              This image format cannot be previewed in the browser.
+            </p>
+            <a
+              href={file.viewUrl}
+              download={file.name}
+              className="px-4 py-2 bg-primary-600 text-white text-sm font-medium
+                         rounded-lg hover:bg-primary-700 transition-colors"
+            >
+              Download file
+            </a>
+          </div>
+        );
+      }
       return (
         <img
           src={file.viewUrl}
@@ -111,6 +122,16 @@ export default function OneTimeViewPage() {
         <iframe
           src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(file.viewUrl)}`}
           className="w-full border-0 rounded-xl"
+          style={{ height: "75vh" }}
+          title={file.name}
+        />
+      );
+    }
+    if (fileType === "text") {
+      return (
+        <iframe
+          src={file.viewUrl}
+          className="w-full border-0 rounded-xl bg-white dark:bg-gray-900"
           style={{ height: "75vh" }}
           title={file.name}
         />

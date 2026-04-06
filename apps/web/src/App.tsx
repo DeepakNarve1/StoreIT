@@ -28,6 +28,7 @@ const PermissionsOverviewPage = lazy(
 );
 const GuestAccessPage = lazy(() => import("./pages/GuestAccessPage"));
 const MetadataPage = lazy(() => import("./pages/MetadataPage"));
+const SignDocumentPage = lazy(() => import("./pages/SignDocumentPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -211,6 +212,7 @@ export default function App() {
             />
             <Route path="/view/:token" element={<OneTimeViewPage />} />
             <Route path="/guest/:token" element={<GuestAccessPage />} />
+            <Route path="/sign/:token" element={<SignDocumentPage />} />
             <Route
               path="/search"
               element={

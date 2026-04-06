@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { memo } from "react";
+import { getFileKind } from "../../utils/fileMime";
 
 interface FileItem {
   id: string;
@@ -30,41 +31,57 @@ interface FileGridProps {
 }
 
 const getFileIcon = (mimeType: string) => {
-  if (mimeType.startsWith("image/"))
-    return {
-      icon: Image,
-      color: "text-green-500",
-      bg: "bg-green-50 dark:bg-green-900/30",
-    };
-  if (mimeType.startsWith("video/"))
-    return {
-      icon: Film,
-      color: "text-purple-500",
-      bg: "bg-purple-50 dark:bg-purple-900/30",
-    };
-  if (mimeType.startsWith("audio/"))
-    return {
-      icon: Music,
-      color: "text-pink-500",
-      bg: "bg-pink-50 dark:bg-pink-900/30",
-    };
-  if (mimeType.includes("pdf"))
-    return {
-      icon: FileText,
-      color: "text-red-500",
-      bg: "bg-red-50 dark:bg-red-900/30",
-    };
-  if (mimeType.includes("zip") || mimeType.includes("rar"))
-    return {
-      icon: Archive,
-      color: "text-yellow-500",
-      bg: "bg-yellow-50 dark:bg-yellow-900/30",
-    };
-  return {
-    icon: File,
-    color: "text-primary-500",
-    bg: "bg-pink-50 dark:bg-pink-900/40",
-  };
+  const kind = getFileKind(mimeType);
+  switch (kind) {
+    case "image":
+      return {
+        icon: Image,
+        color: "text-green-500",
+        bg: "bg-green-50 dark:bg-green-900/30",
+      };
+    case "video":
+      return {
+        icon: Film,
+        color: "text-purple-500",
+        bg: "bg-purple-50 dark:bg-purple-900/30",
+      };
+    case "audio":
+      return {
+        icon: Music,
+        color: "text-pink-500",
+        bg: "bg-pink-50 dark:bg-pink-900/30",
+      };
+    case "pdf":
+      return {
+        icon: FileText,
+        color: "text-red-500",
+        bg: "bg-red-50 dark:bg-red-900/30",
+      };
+    case "office":
+      return {
+        icon: FileText,
+        color: "text-primary-500",
+        bg: "bg-primary-50 dark:bg-primary-900/30",
+      };
+    case "archive":
+      return {
+        icon: Archive,
+        color: "text-yellow-500",
+        bg: "bg-yellow-50 dark:bg-yellow-900/30",
+      };
+    case "text":
+      return {
+        icon: FileText,
+        color: "text-gray-500",
+        bg: "bg-gray-50 dark:bg-gray-800",
+      };
+    default:
+      return {
+        icon: File,
+        color: "text-primary-500",
+        bg: "bg-pink-50 dark:bg-pink-900/40",
+      };
+  }
 };
 
 const formatBytes = (bytes: number) => {

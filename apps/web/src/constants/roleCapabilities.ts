@@ -23,6 +23,7 @@ export const FILE_PERMISSION_OPTIONS = [
   { key: "delete_files", label: "Delete files" },
   { key: "share_files", label: "Share files" },
   { key: "share_public_link_file", label: "Share with public link" },
+  { key: "request_signatures", label: "Request signatures" },
   { key: "see_audit_trails_file", label: "See audit trails" },
 ] as const;
 

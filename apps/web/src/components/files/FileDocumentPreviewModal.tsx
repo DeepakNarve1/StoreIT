@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X, Download, ExternalLink } from "lucide-react";
 import api from "../../api/axios";
+import { canPreviewImageMimeType, getFileKind } from "../../utils/fileMime";
 
 interface FileItem {
   id: string;
@@ -16,16 +17,7 @@ interface Props {
 }
 
 const getFileType = (mimeType: string) => {
-  if (mimeType.startsWith("image/")) return "image";
-  if (mimeType.startsWith("video/")) return "video";
-  if (mimeType.startsWith("audio/")) return "audio";
-  if (mimeType === "application/pdf") return "pdf";
-  if (mimeType.includes("word") || mimeType.includes("document")) return "office";
-  if (mimeType.includes("sheet") || mimeType.includes("excel")) return "office";
-  if (mimeType.includes("presentation") || mimeType.includes("powerpoint"))
-    return "office";
-  if (mimeType.startsWith("text/")) return "text";
-  return "other";
+  return getFileKind(mimeType);
 };
 
 const getOfficeViewerUrl = (fileUrl: string) =>
@@ -77,9 +69,22 @@ function FileDocumentPreviewModalInner({
       );
     }
     if (fileType === "image")
-      return (
+      return canPreviewImageMimeType(file.mimeType) ? (
         <div className="h-full flex items-center justify-center p-4">
           <img src={viewUrl} alt={file.name} className="max-w-full max-h-full object-contain rounded-lg" />
+        </div>
+      ) : (
+        <div className="h-full flex flex-col items-center justify-center gap-3 text-center px-6">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            This image format is not previewable in the browser.
+          </p>
+          <a
+            href={viewUrl}
+            download={file.name}
+            className="px-4 py-2 rounded-lg bg-primary-600 text-white text-sm hover:bg-primary-700"
+          >
+            Download file
+          </a>
         </div>
       );
     if (fileType === "video")

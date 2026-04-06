@@ -12,6 +12,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import api from "../api/axios";
+import { getFileKind } from "../utils/fileMime";
 
 /** Recent file row from GET /dashboard/stats */
 type DashboardRecentFile = {
@@ -64,26 +65,42 @@ function RecentFileGlyph({
   let Icon: LucideIcon = File;
   let bg = "bg-gray-100 dark:bg-gray-800";
   let color = "text-gray-500";
-  if (mimeType.startsWith("image/")) {
-    Icon = Image;
-    bg = "bg-pink-100 dark:bg-pink-900/40";
-    color = "text-pink-500";
-  } else if (mimeType.startsWith("video/")) {
-    Icon = Film;
-    bg = "bg-green-100 dark:bg-green-900/40";
-    color = "text-green-500";
-  } else if (mimeType.startsWith("audio/")) {
-    Icon = Music;
-    bg = "bg-green-100 dark:bg-green-900/40";
-    color = "text-green-500";
-  } else if (mimeType.includes("pdf")) {
-    Icon = FileText;
-    bg = "bg-red-100 dark:bg-red-900/40";
-    color = "text-red-500";
-  } else if (mimeType.includes("zip")) {
-    Icon = Archive;
-    bg = "bg-yellow-100 dark:bg-yellow-900/40";
-    color = "text-yellow-500";
+  switch (getFileKind(mimeType)) {
+    case "image":
+      Icon = Image;
+      bg = "bg-pink-100 dark:bg-pink-900/40";
+      color = "text-pink-500";
+      break;
+    case "video":
+      Icon = Film;
+      bg = "bg-green-100 dark:bg-green-900/40";
+      color = "text-green-500";
+      break;
+    case "audio":
+      Icon = Music;
+      bg = "bg-green-100 dark:bg-green-900/40";
+      color = "text-green-500";
+      break;
+    case "pdf":
+      Icon = FileText;
+      bg = "bg-red-100 dark:bg-red-900/40";
+      color = "text-red-500";
+      break;
+    case "office":
+      Icon = FileText;
+      bg = "bg-blue-100 dark:bg-blue-900/40";
+      color = "text-blue-500";
+      break;
+    case "archive":
+      Icon = Archive;
+      bg = "bg-yellow-100 dark:bg-yellow-900/40";
+      color = "text-yellow-500";
+      break;
+    case "text":
+      Icon = FileText;
+      bg = "bg-gray-100 dark:bg-gray-800";
+      color = "text-gray-500";
+      break;
   }
   return (
     <div
