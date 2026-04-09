@@ -549,6 +549,7 @@ model SignatureStep {
   signatureMethod String?
   signatureData   Json?
   accessToken     String   @unique @default(uuid())
+  expiresAt       DateTime
   actedAt         DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

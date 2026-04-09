@@ -36,18 +36,28 @@ app.set("trust proxy", 1);
 
 const PORT = process.env.PORT || 5000;
 
+function parseAllowedOrigins(raw: string | undefined): string[] {
+  return (raw ?? "http://localhost:5173")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+    .map((origin) => (origin.endsWith("/") ? origin.slice(0, -1) : origin));
+}
+
 // ─── SECURITY MIDDLEWARE ─────────────────────────────────────────────────────
 app.use(helmet());
 
-// Make CORS robust against trailing slashes in env vars
-let allowedOrigin = process.env.FRONTEND_URL || "http://localhost:5173";
-if (allowedOrigin.endsWith("/")) {
-  allowedOrigin = allowedOrigin.slice(0, -1);
-}
+const allowedOrigins = parseAllowedOrigins(process.env.FRONTEND_URL);
 
 app.use(
   cors({
-    origin: allowedOrigin,
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error("CORS origin not allowed"));
+    },
     credentials: true,
   }),
 );
@@ -67,6 +77,18 @@ const generalLimiter = rateLimit({
   skip: (req) => req.path.startsWith("/files/upload"),
 });
 
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 25,
+  message: { error: "Too many login attempts, please try again later." },
+});
+
+const publicSigningLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+  message: { error: "Too many signing attempts, please try again later." },
+});
+
 const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 500,
@@ -75,6 +97,8 @@ const uploadLimiter = rateLimit({
 
 app.use("/api/", generalLimiter);
 app.use("/api/files/upload", uploadLimiter);
+app.use("/api/auth/login", authLimiter);
+app.use("/api/signing/public", publicSigningLimiter);
 
 // ─── HEALTH CHECK ────────────────────────────────────────────────────────────
 app.get("/health", async (_req: Request, res: Response) => {

@@ -1,6 +1,26 @@
 import { prisma } from "../utils/prisma";
 import { getEffectiveRoleProfileForUser } from "./role-profiles.service";
 
+function permissionPriority(grantedTo: string): number {
+  if (grantedTo === "user") return 3;
+  if (grantedTo === "department") return 2;
+  if (grantedTo === "all") return 1;
+  return 0;
+}
+
+function pickHighestPriorityPermission<T extends { grantedTo: string }>(
+  permissions: T[],
+): T | null {
+  if (permissions.length === 0) return null;
+  return permissions.reduce((best, current) => {
+    if (!best) return current;
+    const bestPriority = permissionPriority(best.grantedTo);
+    const currentPriority = permissionPriority(current.grantedTo);
+    if (currentPriority > bestPriority) return current;
+    return best;
+  }, permissions[0] as T | null);
+}
+
 async function getAncestorChainForFolder(
   tenantId: string,
   startFolderId: string,
@@ -159,7 +179,7 @@ export async function userHasResolvedFileCapability(opts: {
   };
 
   // 1) Direct file permission grant
-  const filePerm = await prisma.permission.findFirst({
+  const filePermCandidates = await prisma.permission.findMany({
     where: {
       resourceType: "file",
       resourceId: fileId,
@@ -167,7 +187,9 @@ export async function userHasResolvedFileCapability(opts: {
       AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
     },
     select: { action: true, capabilities: true },
+    orderBy: { createdAt: "desc" },
   });
+  const filePerm = pickHighestPriorityPermission(filePermCandidates as any[]);
   if (filePerm) {
     const explicit = hasCapInRow(filePerm);
     return explicit ?? readByAction(filePerm.action);
@@ -247,14 +269,16 @@ export async function userHasFilePermission(
     });
   }
 
-  const perm = await prisma.permission.findFirst({
+  const permCandidates = await prisma.permission.findMany({
     where: {
       resourceType: "file",
       resourceId: fileId,
       OR: permOrClauses,
       AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
     },
+    orderBy: { createdAt: "desc" },
   });
+  const perm = pickHighestPriorityPermission(permCandidates as any[]);
 
   if (!perm) return false;
   return (actionRank[perm.action] ?? 0) >= required;

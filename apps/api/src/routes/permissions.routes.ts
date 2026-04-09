@@ -126,6 +126,26 @@ function actionToFolderCapabilities(action: string): Record<string, boolean> {
   });
 }
 
+function permissionPriority(grantedTo: string): number {
+  if (grantedTo === "user") return 3;
+  if (grantedTo === "department") return 2;
+  if (grantedTo === "all") return 1;
+  return 0;
+}
+
+function pickHighestPriorityPermission<T extends { grantedTo: string }>(
+  permissions: T[],
+): T | null {
+  if (permissions.length === 0) return null;
+  return permissions.reduce((best, current) => {
+    if (!best) return current;
+    const bestPriority = permissionPriority(best.grantedTo);
+    const currentPriority = permissionPriority(current.grantedTo);
+    if (currentPriority > bestPriority) return current;
+    return best;
+  }, permissions[0] as T | null);
+}
+
 // ─── Helper: check a specific granular capability ─────────────────────────────
 export async function userHasCapability(
   userId: string,
@@ -156,14 +176,16 @@ export async function userHasCapability(
     });
   }
 
-  const perm = await prisma.permission.findFirst({
+  const perms = await prisma.permission.findMany({
     where: {
       resourceType,
       resourceId,
       OR: orClauses,
       AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
     },
+    orderBy: { createdAt: "desc" },
   });
+  const perm = pickHighestPriorityPermission(perms);
 
   if (!perm) {
     if (resourceType === "folder" && FOLDER_CAPABILITIES.includes(capability as any)) {

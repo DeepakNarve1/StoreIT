@@ -97,7 +97,12 @@ router.post("/refresh", verifyCsrf, async (req: Request, res: Response) => {
 
 // ─── POST /api/auth/logout ────────────────────────────────────────────────────
 router.post("/logout", (req: Request, res: Response) => {
-  res.clearCookie("refresh_token");
+  const isProd = process.env.NODE_ENV === "production";
+  res.clearCookie("refresh_token", {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
+  });
   res.json({ message: "Logged out successfully" });
 });
 

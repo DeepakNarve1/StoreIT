@@ -63,6 +63,17 @@ function getAppBaseUrl() {
   return raw.endsWith("/") ? raw.slice(0, -1) : raw;
 }
 
+function getSignatureLinkExpiryDate(from = new Date()): Date {
+  const raw = Number(process.env.SIGNING_LINK_TTL_HOURS ?? 168);
+  const hours = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 24 * 30) : 168;
+  return new Date(from.getTime() + hours * 60 * 60 * 1000);
+}
+
+function readStepExpiresAt(step: unknown): Date | null {
+  const expiresAt = (step as { expiresAt?: unknown } | null)?.expiresAt;
+  return expiresAt instanceof Date ? expiresAt : null;
+}
+
 async function canStartSignatureWorkflow(
   req: AuthRequest,
   file: { id: string; uploadedById: string | null },
@@ -527,6 +538,7 @@ router.post(
                 signerUserId: signer.signerUserId,
                 signerName: signer.signerName,
                 signerEmail: signer.signerEmail,
+                expiresAt: getSignatureLinkExpiryDate(),
                 stepOrder: index + 1,
                 status:
                   mode === "parallel"
@@ -766,8 +778,14 @@ async function handleSignatureAction(
         throw new HttpError(409, "The active signing step is stale");
       }
 
+      if (!currentStep.signerUserId) {
+        throw new HttpError(
+          403,
+          "This signer step must be completed using the secure signing link",
+        );
+      }
+
       if (
-        currentStep.signerUserId &&
         currentStep.signerUserId !== req.user!.userId
       ) {
         throw new HttpError(403, "Only the current signer can act");
@@ -1132,6 +1150,12 @@ router.get("/public/:token", async (req: Request, res: Response) => {
       return;
     }
 
+    const stepExpiresAt = readStepExpiresAt(step);
+    if (!stepExpiresAt || stepExpiresAt < new Date()) {
+      res.status(403).json({ error: "This signing link has expired" });
+      return;
+    }
+
     if (step.workflow.status !== "in_progress" || step.status !== "pending") {
       res.status(403).json({ error: "This signing link is no longer active" });
       return;
@@ -1147,6 +1171,7 @@ router.get("/public/:token", async (req: Request, res: Response) => {
         signerEmail: step.signerEmail,
         status: step.status,
         workflowId: step.workflowId,
+        expiresAt: stepExpiresAt,
       },
       file: {
         id: step.workflow.file.id,
@@ -1200,6 +1225,12 @@ router.post("/public/:token/sign", async (req: Request, res: Response) => {
       return;
     }
 
+    const stepExpiresAt = readStepExpiresAt(step);
+    if (!stepExpiresAt || stepExpiresAt < new Date()) {
+      res.status(403).json({ error: "This signing link has expired" });
+      return;
+    }
+
     if (step.status !== "pending" || step.workflow.status !== "in_progress") {
       res.status(403).json({ error: "This signing link is no longer active" });
       return;
@@ -1213,6 +1244,7 @@ router.post("/public/:token/sign", async (req: Request, res: Response) => {
         where: {
           id: step.id,
           status: "pending",
+          expiresAt: { gt: new Date() },
         },
         select: {
           id: true,
