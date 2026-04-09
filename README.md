@@ -87,7 +87,7 @@ Because the project is structured with Turnborepo, simply run:
 ```bash
 npm run dev
 ```
-This single command spins up the Vite Frontend on `http://localhost:5173` and the Express Backend on `http://localhost:5000` simultaneously.
+This single command spins up the Vite frontend on `http://localhost:5173` and the Express backend on `http://localhost:5000` simultaneously.
 
 ---
 
@@ -101,6 +101,7 @@ StoreIT is configured to be deployed strictly on Edge/Containerized hosting to m
     *   Build Command: `npm install && npx prisma generate && npm run build --workspace=apps/api`
     *   Start Command: `cd apps/api && npm start`
     *   *Note: Ensure `FRONTEND_URL` is set strictly to your Vercel URL with no trailing slash.*
+    *   *Note: If you run without R2 in production, set `API_PUBLIC_URL` to the public API origin so local-file fallback links resolve correctly.*
 3.  **React Frontend (Vercel):**
     *   Connect your GitHub repository.
     *   Framework Preset: `Vite`

@@ -29,6 +29,19 @@ const getR2Client = () =>
 
 const LOCAL_UPLOAD_DIR = path.join(process.cwd(), "uploads");
 
+function getLocalFileBaseUrl(): string {
+  const apiPublicUrl = process.env.API_PUBLIC_URL?.replace(/\/$/, "");
+  if (apiPublicUrl) return apiPublicUrl;
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "API_PUBLIC_URL is required when storage is not configured in production",
+    );
+  }
+
+  return `http://localhost:${process.env.PORT || 5000}`;
+}
+
 // ─── UPLOAD ───────────────────────────────────────────────────────────────────
 export const uploadFile = async (
   key: string,
@@ -67,7 +80,7 @@ export const getFileViewUrl = async (
       expiresIn: expiresInSeconds,
     });
   } else {
-    return `http://localhost:${process.env.PORT || 5000}/uploads/${key}`;
+    return `${getLocalFileBaseUrl()}/uploads/${key}`;
   }
 };
 
