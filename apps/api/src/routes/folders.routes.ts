@@ -195,7 +195,7 @@ router.get(
           role,
           "folder",
           folder.id,
-          "view_metadata",
+          "view_folder_metadata",
         );
         if (!canViewMetadata) {
           const canSeeFolder = await userHasCapability(
@@ -291,7 +291,7 @@ router.put(
           req.user!.role,
           "folder",
           folder.id,
-          "edit_metadata",
+          "edit_folder_metadata",
         );
         if (!canEditMetadata) {
           const canEditFolder = await userHasCapability(
@@ -391,6 +391,17 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
           ? folders
           : []
         : folders.filter((f) => visibleSet.has(f.id));
+
+    if (!hasTenantWideFolderAccess) {
+      res.json({
+        folders: filtered.map((f) => ({
+          ...f,
+          _count: { files: 0, children: 0 },
+        })),
+        showCounts: false,
+      });
+      return;
+    }
 
     // Recursive file count (include descendant folders).
     const allTenantFolders = await prisma.folder.findMany({
@@ -540,7 +551,7 @@ router.get("/", verifyAuth, async (req: AuthRequest, res: Response) => {
       totalMissingMeta: computeTotalMissingMeta(f.id),
     }));
 
-    res.json({ folders: withRecursiveCounts });
+    res.json({ folders: withRecursiveCounts, showCounts: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch folders" });
@@ -681,7 +692,18 @@ router.get("/all", verifyAuth, async (req: AuthRequest, res: Response) => {
           ? folders
           : []
         : folders.filter((f) => visibleSet.has(f.id));
-    res.json({ folders: filtered });
+
+    if (!hasTenantWideFolderAccess) {
+      res.json({
+        folders: filtered.map((f) => ({
+          ...f,
+          _count: { files: 0, children: 0 },
+        })),
+        showCounts: false,
+      });
+      return;
+    }
+    res.json({ folders: filtered, showCounts: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch folders" });

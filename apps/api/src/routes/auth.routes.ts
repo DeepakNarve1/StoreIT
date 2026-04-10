@@ -7,10 +7,10 @@ import {
   hashPassword,
   validateInviteToken,
 } from "../services/auth.service";
+import { createPasswordResetToken } from "../services/password-reset.service";
 import { verifyAuth, AuthRequest, verifyCsrf } from "../middleware/auth";
 import { createAuditLog } from "../services/audit.service";
 import { sendPasswordResetEmail } from "../services/email.service";
-import { v4 as uuid } from "uuid";
 import {
   serializeRoleProfile,
   getDefaultCapabilitiesForBaseRole,
@@ -264,23 +264,7 @@ router.post("/forgot-password", async (req: Request, res: Response) => {
     // Always return 200 — never reveal if email exists (security)
     const user = await prisma.user.findUnique({ where: { email } });
     if (user && user.isActive) {
-      // Invalidate any existing unused tokens for this email
-      await prisma.passwordResetToken.updateMany({
-        where: { email, isUsed: false },
-        data: { isUsed: true },
-      });
-
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-
-      // FIX: PasswordResetToken has no User relation — email is a plain String field
-      const record = await prisma.passwordResetToken.create({
-        data: {
-          token: uuid(),
-          email,
-          expiresAt,
-        },
-      });
-
+      const record = await createPasswordResetToken(email);
       await sendPasswordResetEmail({
         email,
         token: record.token,

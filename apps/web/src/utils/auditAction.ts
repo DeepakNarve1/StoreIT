@@ -34,6 +34,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "link.generate": "Share link created",
   "link.access": "Link accessed",
   "user.invite": "User invited",
+  "user.password_reset_link": "Password reset link sent",
   "guest.share": "Guest share created",
   "user.login": "User logged in",
   "user.logout": "User logged out",
@@ -43,6 +44,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "superadmin.org.update": "Organisation updated",
   "superadmin.org.suspend": "Organisation suspended",
   "superadmin.impersonate": "Impersonation started",
+  "superadmin.user.password_reset_link": "Password reset link sent",
 };
 
 function titleCaseWords(value: string) {

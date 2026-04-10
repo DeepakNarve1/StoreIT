@@ -47,8 +47,8 @@ function actionToFileCapabilities(action: string): Record<string, boolean> {
       preview_files: true,
       download_files: true,
       edit_file_attrs: true,
-      view_metadata: true,
-      edit_metadata: true,
+      view_file_metadata: true,
+      edit_file_metadata: true,
       update_versions: true,
       move_files: true,
       delete_files: true,
@@ -62,8 +62,8 @@ function actionToFileCapabilities(action: string): Record<string, boolean> {
       preview_files: true,
       download_files: true,
       edit_file_attrs: true,
-      view_metadata: true,
-      edit_metadata: true,
+      view_file_metadata: true,
+      edit_file_metadata: true,
       update_versions: true,
       move_files: true,
       request_signatures: true,
@@ -82,12 +82,12 @@ function actionToFileCapabilities(action: string): Record<string, boolean> {
 function folderCapsFromFilePermissionRow(perm: {
   capabilities: unknown;
 }): Record<string, boolean> {
-  const caps = perm.capabilities as Record<string, boolean> | null | undefined;
+  const caps = normalizeCapabilities(
+    perm.capabilities as Record<string, boolean> | null | undefined,
+  );
   const slice: Record<string, boolean> = {};
-  if (caps && typeof caps === "object") {
-    for (const key of FOLDER_CAPABILITIES) {
-      if (caps[key] === true) slice[key] = true;
-    }
+  for (const key of FOLDER_CAPABILITIES) {
+    if (caps[key] === true) slice[key] = true;
   }
   return normalizeCapabilities(slice);
 }
@@ -106,8 +106,8 @@ function actionToFolderCapabilities(action: string): Record<string, boolean> {
       edit_folders: true,
       move_folders: true,
       delete_folders: true,
-      view_metadata: true,
-      edit_metadata: true,
+      view_folder_metadata: true,
+      edit_folder_metadata: true,
     });
   }
   if (action === "write") {
@@ -117,8 +117,8 @@ function actionToFolderCapabilities(action: string): Record<string, boolean> {
       download_folders: true,
       edit_folders: true,
       move_folders: true,
-      view_metadata: true,
-      edit_metadata: true,
+      view_folder_metadata: true,
+      edit_folder_metadata: true,
     });
   }
   return normalizeCapabilities({
@@ -146,6 +146,29 @@ function pickHighestPriorityPermission<T extends { grantedTo: string }>(
   }, permissions[0] as T | null);
 }
 
+async function getAncestorChainForFolder(
+  tenantId: string,
+  startFolderId: string,
+  maxDepth = 80,
+): Promise<string[]> {
+  const rows = await prisma.folder.findMany({
+    where: { tenantId, isDeleted: false },
+    select: { id: true, parentId: true },
+  });
+  const parentById = new Map<string, string | null>(
+    rows.map((row) => [row.id, row.parentId]),
+  );
+  const chain: string[] = [];
+  let current: string | null = startFolderId;
+  let depth = 0;
+  while (current && depth < maxDepth) {
+    chain.push(current);
+    current = parentById.get(current) ?? null;
+    depth++;
+  }
+  return chain;
+}
+
 // ─── Helper: check a specific granular capability ─────────────────────────────
 export async function userHasCapability(
   userId: string,
@@ -160,7 +183,7 @@ export async function userHasCapability(
 
   if (
     roleContext.baseRole !== "VIEWER" &&
-    roleContext.capabilities[capability] === true
+    normalizeCapabilities(roleContext.capabilities)[capability] === true
   ) {
     return true;
   }
@@ -211,11 +234,51 @@ export async function userHasCapability(
         if (slice[capability] === true) return true;
       }
     }
+    if (resourceType === "file" && FILE_CAPABILITIES.includes(capability as any)) {
+      const file = await prisma.file.findFirst({
+        where: { id: resourceId, tenantId, isDeleted: false },
+        select: { folderId: true },
+      });
+      if (!file?.folderId) return false;
+
+      const chain = await getAncestorChainForFolder(tenantId, file.folderId, 80);
+      const folderPerms = await prisma.permission.findMany({
+        where: {
+          resourceType: "folder",
+          resourceId: { in: chain },
+          OR: orClauses,
+          AND: [
+            { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+            { folder: { tenantId } },
+          ],
+        },
+        select: { resourceId: true, capabilities: true, action: true },
+      });
+
+      for (const p of folderPerms) {
+        const isSelf = p.resourceId === file.folderId;
+        const caps = (p as any).capabilities as Record<string, boolean> | null;
+        const canInherit = isSelf || caps?.apply_subfolders === true;
+        if (!canInherit) continue;
+
+        const hasExplicitCaps =
+          !!caps && typeof caps === "object" && Object.keys(caps).length > 0;
+        const fileCaps = hasExplicitCaps
+          ? normalizeCapabilities(caps as Record<string, boolean>)
+          : actionToFileCapabilities(p.action);
+        if (fileCaps[capability] === true) return true;
+      }
+    }
     return false;
   }
-  const capabilities = (perm as any).capabilities;
-  if (capabilities && typeof capabilities === "object") {
-    return (capabilities as Record<string, boolean>)[capability] === true;
+  const rawCaps = (perm as { capabilities?: unknown; action: string })
+    .capabilities as Record<string, boolean> | null | undefined;
+  const hasExplicitCaps =
+    !!rawCaps &&
+    typeof rawCaps === "object" &&
+    Object.keys(rawCaps).length > 0;
+  if (hasExplicitCaps) {
+    return normalizeCapabilities(rawCaps)[capability] === true;
   }
   const coarseCaps =
     resourceType === "file"
@@ -383,8 +446,8 @@ router.post(
           result[fileId]["preview_files"] = true;
           result[fileId]["download_files"] = true;
           result[fileId]["edit_file_attrs"] = true;
-          result[fileId]["view_metadata"] = true;
-          result[fileId]["edit_metadata"] = true;
+          result[fileId]["view_file_metadata"] = true;
+          result[fileId]["edit_file_metadata"] = true;
           result[fileId]["delete_files"] = true;
           result[fileId]["update_versions"] = true;
         }
@@ -427,8 +490,8 @@ router.post(
         "move_folders",
         "delete_folders",
         "share_folders",
-        "view_metadata",
-        "edit_metadata",
+        "view_folder_metadata",
+        "edit_folder_metadata",
       ] as const;
 
       if (false) {

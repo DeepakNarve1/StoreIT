@@ -10,6 +10,7 @@ import {
   Shield,
   Link,
   LogIn,
+  Mail,
   Filter,
   ChevronLeft,
   ChevronRight,
@@ -114,11 +115,23 @@ const ACTION_CONFIG: Record<
     color: "text-blue-600 dark:text-blue-400",
     bg: "bg-blue-50 dark:bg-blue-900/20",
   },
+  "user.password_reset_link": {
+    label: "Password reset link sent",
+    icon: Mail,
+    color: "text-indigo-600 dark:text-indigo-400",
+    bg: "bg-indigo-50 dark:bg-indigo-900/20",
+  },
   "category.create": {
     label: "Category created",
     icon: FolderPlus,
     color: "text-teal-600 dark:text-teal-400",
     bg: "bg-teal-50 dark:bg-teal-900/20",
+  },
+  "superadmin.user.password_reset_link": {
+    label: "Password reset link sent",
+    icon: Mail,
+    color: "text-indigo-600 dark:text-indigo-400",
+    bg: "bg-indigo-50 dark:bg-indigo-900/20",
   },
 };
 

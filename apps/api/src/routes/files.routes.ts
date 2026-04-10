@@ -2393,7 +2393,7 @@ router.get(
           role,
           "file",
           file.id,
-          "view_metadata",
+          "view_file_metadata",
         );
         if (!canViewMetadata) {
           res.status(403).json({ error: "Permission denied" });
@@ -2459,7 +2459,7 @@ router.get(
           role,
           "file",
           file.id,
-          "view_metadata",
+          "view_file_metadata",
         );
         if (!canViewMetadata) {
           res.status(403).json({ error: "Permission denied" });
@@ -2533,7 +2533,7 @@ router.get(
           role,
           "file",
           file.id,
-          "view_metadata",
+          "view_file_metadata",
         );
         if (!canViewMetadata) {
           res.status(403).json({ error: "Permission denied" });
@@ -2666,7 +2666,7 @@ router.put(
           req.user!.role,
           "file",
           file.id,
-          "edit_metadata",
+          "edit_file_metadata",
         );
         if (!canEditMetadata) {
           const hasCoarseWrite = await userHasFilePermission(
@@ -2799,7 +2799,7 @@ router.post(
             role,
             "file",
             id,
-            "edit_metadata",
+            "edit_file_metadata",
           );
           if (!canEditMetadata) {
             const hasCoarseWrite = await userHasFilePermission(

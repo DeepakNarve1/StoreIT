@@ -77,7 +77,7 @@ type OrgUserOption = {
 };
 
 // All checkbox keys that count as "something selected" — deduplicated because
-// view_metadata / edit_metadata appear in both folder and file option lists.
+// folder and file permission groups.
 const ALL_PERM_KEYS = Array.from(
   new Set([...FOLDER_PERMS.map((p) => p.key), ...FILE_PERMS.map((p) => p.key)]),
 );

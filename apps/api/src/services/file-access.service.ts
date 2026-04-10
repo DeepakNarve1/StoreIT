@@ -240,7 +240,7 @@ export async function userHasFilePermission(
         (roleContext?.capabilities.edit_file_attrs ||
           roleContext?.capabilities.update_versions ||
           roleContext?.capabilities.move_files ||
-          roleContext?.capabilities.edit_metadata)) ||
+          roleContext?.capabilities.edit_file_metadata)) ||
         (requiredAction === "delete" && roleContext?.capabilities.delete_files) ||
         (requiredAction === "admin" &&
           (roleContext?.capabilities.share_files ||

@@ -22,6 +22,7 @@ import AppShell from "../../components/layout/AppShell";
 import api from "../../api/axios";
 import { apiErrorMessage } from "../../utils/apiError";
 import { useAuthStore } from "../../store/authStore";
+import { useToast } from "../../components/ui/toastStore";
 import RoleEditorModal, {
   type RoleEditorValue,
 } from "../../components/admin/RoleEditorModal";
@@ -171,6 +172,7 @@ export default function UsersPage() {
   const [roleModalOpen, setRoleModalOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<RoleProfile | null>(null);
   const [showRoleHelp, setShowRoleHelp] = useState(false);
+  const [resettingUserId, setResettingUserId] = useState<string | null>(null);
 
   const {
     data: usersData,
@@ -445,6 +447,32 @@ export default function UsersPage() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
       queryClient.invalidateQueries({ queryKey: ["billing-status"] });
+    },
+  });
+
+  const sendPasswordResetLink = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await api.post(`/users/${id}/reset-password-link`);
+      return res.data as { message: string };
+    },
+    onMutate: async (id) => {
+      setResettingUserId(id);
+    },
+    onSuccess: (_data, id) => {
+      const user = users.find((u) => u.id === id);
+      useToast.getState().add(
+        `Password reset link sent${user?.email ? ` to ${user.email}` : ""}`,
+        "success",
+      );
+    },
+    onError: (err) => {
+      useToast.getState().add(
+        apiErrorMessage(err, "Failed to send reset link"),
+        "error",
+      );
+    },
+    onSettled: () => {
+      setResettingUserId(null);
     },
   });
 
@@ -1012,6 +1040,28 @@ export default function UsersPage() {
                                 size={18}
                                 className="dark:text-gray-500"
                               />
+                            )}
+                          </button>
+                          <button
+                            onClick={() =>
+                              sendPasswordResetLink.mutate(user.id)
+                            }
+                            disabled={
+                              user.role === "SUPERADMIN" ||
+                              sendPasswordResetLink.isPending ||
+                              resettingUserId === user.id
+                            }
+                            className="text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                            title={
+                              user.role === "SUPERADMIN"
+                                ? "SUPERADMIN accounts use the platform reset flow"
+                                : "Send password reset link"
+                            }
+                          >
+                            {resettingUserId === user.id ? (
+                              <Loader size={16} className="animate-spin" />
+                            ) : (
+                              <Mail size={16} />
                             )}
                           </button>
                           <button

@@ -214,24 +214,49 @@ function FilePreviewModalInner({
   const metadataDenied =
     metadataStatus === 403 || metadataStatus === 401;
   const signatureSteps = signingWorkflow?.steps ?? [];
-  const latestSignedStep =
-    [...signatureSteps]
-      .reverse()
-      .find(
-        (step) =>
-          step.status === "signed" &&
-          step.signatureData &&
-          typeof step.signatureData === "object",
-      ) ?? null;
-  const signatureData = latestSignedStep?.signatureData ?? null;
-  const signatureImageUrl =
-    signatureData && typeof signatureData.dataUrl === "string"
-      ? signatureData.dataUrl
-      : null;
-  const signatureText =
-    signatureData && typeof signatureData.typedName === "string"
-      ? signatureData.typedName
-      : latestSignedStep?.signatureName ?? file.signedBy?.name ?? null;
+  const signedStepsForPreview = [...signatureSteps]
+    .filter(
+      (step) =>
+        step.status === "signed" &&
+        ((step.signatureData && typeof step.signatureData === "object") ||
+          !!step.signatureName?.trim()),
+    )
+    .sort((a, b) => a.stepOrder - b.stepOrder);
+
+  type StepDisplay = {
+    stepId: string;
+    displayName: string;
+    actedAt: string | null;
+    imageUrl: string | null;
+    typedText: string | null;
+  };
+
+  const signaturePreviewItems: StepDisplay[] = signedStepsForPreview.map(
+    (step) => {
+      const raw = step.signatureData;
+      const data =
+        raw && typeof raw === "object"
+          ? (raw as Record<string, unknown>)
+          : null;
+      const imageUrl =
+        data && typeof data.dataUrl === "string" ? data.dataUrl : null;
+      const typedFromData =
+        data && typeof data.typedName === "string" ? data.typedName : null;
+      const typedText =
+        typedFromData ?? step.signatureName?.trim() ?? null;
+      const displayName =
+        step.signerName?.trim() ||
+        step.signerUser?.name?.trim() ||
+        "Signer";
+      return {
+        stepId: step.id,
+        displayName,
+        actedAt: step.actedAt ?? null,
+        imageUrl,
+        typedText,
+      };
+    },
+  );
 
   const formatDetailedDateTime = (dateStr: string) =>
     new Date(dateStr).toLocaleString("en-US", {
@@ -660,46 +685,81 @@ function FilePreviewModalInner({
           {hasSignatureDetails ? (
             <div className="px-4 pt-4">
               <div className="rounded-xl border border-cyan-200 dark:border-cyan-900/50 bg-cyan-50/60 dark:bg-cyan-900/15 overflow-hidden">
-                <div className="px-4 py-3 border-b border-cyan-100 dark:border-cyan-900/40 flex items-center justify-between gap-3">
+                <div className="px-4 py-3 border-b border-cyan-100 dark:border-cyan-900/40">
                   <div>
                     <p className="text-sm font-semibold text-cyan-900 dark:text-cyan-100 inline-flex items-center gap-2">
                       <PenTool size={14} /> Signature preview
                     </p>
                     <p className="text-xs text-cyan-700/80 dark:text-cyan-200/80 mt-0.5">
-                      The signature captured when this workflow was completed
+                      Each signer&apos;s captured signature from this workflow
+                      {signaturePreviewItems.length > 1
+                        ? ` (${signaturePreviewItems.length} signers)`
+                        : ""}
                     </p>
                   </div>
-                  {signatureImageUrl && (
-                    <a
-                      href={signatureImageUrl}
-                      download={`${file.name}-signature.png`}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-200 dark:border-cyan-900/50 bg-white/80 dark:bg-gray-900 px-3 py-1.5 text-xs font-medium text-cyan-900 dark:text-cyan-100 hover:bg-white dark:hover:bg-gray-800"
-                    >
-                      <Download size={13} />
-                      Download signature
-                    </a>
-                  )}
                 </div>
-                <div className="px-4 py-4">
+                <div className="px-4 py-4 space-y-4">
                   {signingLoading ? (
                     <div className="rounded-lg border border-dashed border-cyan-200 dark:border-cyan-800 px-4 py-6 text-sm text-cyan-700 dark:text-cyan-200">
                       Loading signature preview...
                     </div>
-                  ) : signatureImageUrl ? (
-                    <img
-                      src={signatureImageUrl}
-                      alt="Signed signature"
-                      className="max-h-48 w-full object-contain rounded-lg bg-white dark:bg-gray-950 border border-cyan-100 dark:border-cyan-800"
-                    />
-                  ) : signatureText ? (
-                    <div className="rounded-lg border border-cyan-100 dark:border-cyan-800 bg-cyan-50/70 dark:bg-cyan-950/30 px-4 py-5">
-                      <p className="text-2xl italic font-semibold text-cyan-950 dark:text-cyan-50">
-                        {signatureText}
-                      </p>
-                    </div>
+                  ) : signaturePreviewItems.length > 0 ? (
+                    signaturePreviewItems.map((item, idx) => (
+                      <div
+                        key={item.stepId}
+                        className="rounded-lg border border-cyan-100 dark:border-cyan-800 bg-white/60 dark:bg-gray-950/40 overflow-hidden"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-cyan-100/80 dark:border-cyan-900/50 bg-cyan-50/50 dark:bg-cyan-950/20">
+                          <div>
+                            <p className="text-xs font-semibold text-cyan-950 dark:text-cyan-50">
+                              {item.displayName}
+                            </p>
+                            {item.actedAt ? (
+                              <p className="text-[11px] text-cyan-700/85 dark:text-cyan-300/80">
+                                {formatDetailedDateTime(item.actedAt)}
+                              </p>
+                            ) : null}
+                          </div>
+                          {item.imageUrl ? (
+                            <a
+                              href={item.imageUrl}
+                              download={`${file.name}-signature-${idx + 1}.png`}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-200 dark:border-cyan-900/50 bg-white/90 dark:bg-gray-900 px-2.5 py-1 text-[11px] font-medium text-cyan-900 dark:text-cyan-100 hover:bg-white dark:hover:bg-gray-800"
+                            >
+                              <Download size={12} />
+                              Download
+                            </a>
+                          ) : null}
+                        </div>
+                        <div className="p-3">
+                          {item.imageUrl ? (
+                            <img
+                              src={item.imageUrl}
+                              alt={`Signature of ${item.displayName}`}
+                              className="max-h-48 w-full object-contain rounded-md bg-white dark:bg-gray-950 border border-cyan-100/80 dark:border-cyan-800"
+                            />
+                          ) : item.typedText ? (
+                            <div className="rounded-md border border-cyan-100 dark:border-cyan-800 bg-cyan-50/70 dark:bg-cyan-950/30 px-4 py-4">
+                              <p className="text-2xl italic font-semibold text-cyan-950 dark:text-cyan-50">
+                                {item.typedText}
+                              </p>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-cyan-700 dark:text-cyan-300">
+                              No image or typed name stored for this step.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))
                   ) : (
                     <div className="rounded-lg border border-dashed border-cyan-200 dark:border-cyan-800 px-4 py-6 text-sm text-cyan-700 dark:text-cyan-200">
-                      No stored signature image is available for this file.
+                      No stored signature captures are available for this file.
+                      {file.signedBy?.name ? (
+                        <span className="block mt-2 text-xs text-cyan-600 dark:text-cyan-400">
+                          Final completion recorded for: {file.signedBy.name}
+                        </span>
+                      ) : null}
                     </div>
                   )}
                 </div>

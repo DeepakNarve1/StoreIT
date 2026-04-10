@@ -17,12 +17,14 @@ import {
   EyeOff,
   AlertTriangle,
   CreditCard,
+  Mail,
 } from "lucide-react";
 import AppShell from "../../components/layout/AppShell";
 import { useAuthStore } from "../../store/authStore";
 import api from "../../api/axios";
 import { apiErrorMessage } from "../../utils/apiError";
 import clsx from "clsx";
+import { useToast } from "../../components/ui/toastStore";
 
 interface OrgCount {
   users: number;
@@ -96,6 +98,7 @@ export default function OrgsPage() {
   });
   const [formError, setFormError] = useState("");
   const [showOrgUsers, setShowOrgUsers] = useState(false);
+  const [resettingUserId, setResettingUserId] = useState<string | null>(null);
 
   // Fetch all orgs
   const {
@@ -151,6 +154,34 @@ export default function OrgsPage() {
               }
             : cur,
       );
+    },
+  });
+
+  const sendPasswordResetLink = useMutation({
+    mutationFn: async (vars: { orgId: string; userId: string }) => {
+      const res = await api.post(
+        `/superadmin/orgs/${vars.orgId}/users/${vars.userId}/reset-password-link`,
+      );
+      return res.data as { message: string };
+    },
+    onMutate: async (vars) => {
+      setResettingUserId(vars.userId);
+    },
+    onSuccess: (_data, vars) => {
+      const user = orgUsersData?.users.find((u) => u.id === vars.userId);
+      useToast.getState().add(
+        `Password reset link sent${user?.email ? ` to ${user.email}` : ""}`,
+        "success",
+      );
+    },
+    onError: (err) => {
+      useToast.getState().add(
+        apiErrorMessage(err, "Failed to send reset link"),
+        "error",
+      );
+    },
+    onSettled: () => {
+      setResettingUserId(null);
     },
   });
 
@@ -481,7 +512,7 @@ export default function OrgsPage() {
 
           {/* Org detail panel */}
           {selectedOrg && (
-            <div className="w-72 shrink-0">
+            <div className="w-80 xl:w-96 shrink-0">
               <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
                 {/* Panel header */}
                 <div
@@ -651,10 +682,13 @@ export default function OrgsPage() {
                             {(orgUsersData?.users ?? []).slice(0, 25).map((u) => (
                               <div
                                 key={u.id}
-                                className="flex items-center gap-2 justify-between"
+                                className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"
                               >
                                 <div className="min-w-0">
                                   <p className="text-xs font-medium text-gray-800 dark:text-gray-100 truncate">
+                                    {u.name}
+                                  </p>
+                                  <p className="text-xs font-medium text-gray-800 dark:text-gray-100 break-all">
                                     {u.email}
                                   </p>
                                   <p className="text-[11px] text-gray-500 dark:text-gray-400">
@@ -670,25 +704,50 @@ export default function OrgsPage() {
                                     Protected
                                   </span>
                                 ) : (
-                                  <button
-                                    onClick={() =>
-                                      setOrgUserActive.mutate({
-                                        orgId: selectedOrg.id,
-                                        userId: u.id,
-                                        isActive: !u.isActive,
-                                      })
-                                    }
-                                    disabled={setOrgUserActive.isPending}
-                                    className={clsx(
-                                      "shrink-0 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border transition-colors",
-                                      u.isActive
-                                        ? "border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
-                                        : "border-green-200 dark:border-green-900 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20",
-                                    )}
-                                    title={u.isActive ? "Disable user" : "Enable user"}
-                                  >
-                                    {u.isActive ? "Disable" : "Enable"}
-                                  </button>
+                                  <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+                                    <button
+                                      onClick={() =>
+                                        sendPasswordResetLink.mutate({
+                                          orgId: selectedOrg.id,
+                                          userId: u.id,
+                                        })
+                                      }
+                                      disabled={
+                                        sendPasswordResetLink.isPending ||
+                                        resettingUserId === u.id
+                                      }
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border
+                                                 border-blue-200 dark:border-blue-900 text-blue-600 dark:text-blue-400
+                                                 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                                      title="Send password reset link"
+                                    >
+                                      {resettingUserId === u.id ? (
+                                        <Loader size={11} className="animate-spin" />
+                                      ) : (
+                                        <Mail size={11} />
+                                      )}
+                                      Reset
+                                    </button>
+                                    <button
+                                      onClick={() =>
+                                        setOrgUserActive.mutate({
+                                          orgId: selectedOrg.id,
+                                          userId: u.id,
+                                          isActive: !u.isActive,
+                                        })
+                                      }
+                                      disabled={setOrgUserActive.isPending}
+                                      className={clsx(
+                                        "shrink-0 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border transition-colors",
+                                        u.isActive
+                                          ? "border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                          : "border-green-200 dark:border-green-900 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20",
+                                      )}
+                                      title={u.isActive ? "Disable user" : "Enable user"}
+                                    >
+                                      {u.isActive ? "Disable" : "Enable"}
+                                    </button>
+                                  </div>
                                 )}
                               </div>
                             ))}

@@ -114,6 +114,11 @@ interface StoreItem {
   categoryId?: string | null;
 }
 
+interface FolderListResponse {
+  folders: StoreItem[];
+  showCounts: boolean;
+}
+
 const RETENTION_QUEUE_KEY = "storeit_retention_queue_v1";
 
 type RetentionJob = {
@@ -503,7 +508,7 @@ export default function FileBrowserPage() {
       const res = await api.get("/folders", {
         params: { parentId: folderId ?? null },
       });
-      return res.data as { folders: StoreItem[] };
+      return res.data as FolderListResponse;
     },
   });
 
@@ -1118,6 +1123,7 @@ export default function FileBrowserPage() {
   const allFiles = filesData?.files ?? [];
   const files = applyManualOrder(allFiles, manualOrder.files);
   const foldersRaw = foldersData?.folders ?? [];
+  const showFolderCounts = foldersData?.showCounts ?? false;
   const folders =
     typeFilter === "all"
       ? applyManualOrder(foldersRaw, manualOrder.folders)
@@ -1397,7 +1403,17 @@ export default function FileBrowserPage() {
       ? files.find((f) => f.id === selectedFiles[0])
       : null;
   const workflowInboxItems = workflowInboxData?.items ?? [];
+  const canStartSignatureOnFile = useCallback(
+    (file: { id: string }) =>
+      fileCan(file.id, "request_signatures") ||
+      fileCan(file.id, "edit_file_attrs"),
+    [fileCan],
+  );
   const signatureToolbarFile = detailFile ?? singleSelectedFile ?? null;
+  const canUseSignatureToolbar =
+    signatureToolbarFile !== null &&
+    (signatureToolbarFile.signatureStatus === "in_progress" ||
+      canStartSignatureOnFile(signatureToolbarFile));
 
   const openWorkflowComposer = useCallback(
     (file: { id: string; name: string }, initialApproverIds: string[] = []) => {
@@ -1478,21 +1494,21 @@ export default function FileBrowserPage() {
       : null;
 
   const canUseMetaToolbar = (() => {
-    // Bulk file metadata edit requires edit_metadata on all selected files.
+    // Bulk file metadata edit requires edit_file_metadata on all selected files.
     if (selectedFiles.length > 1 && selectedFolders.length === 0) {
-      return selectedFiles.every((id) => fileCan(id, "edit_metadata"));
+      return selectedFiles.every((id) => fileCan(id, "edit_file_metadata"));
     }
     // Single file selection.
     if (selectedFiles.length === 1 && singleSelectedFile) {
-      return fileCan(singleSelectedFile.id, "edit_metadata");
+      return fileCan(singleSelectedFile.id, "edit_file_metadata");
     }
     // Single folder selection.
     if (selectedFolders.length === 1 && singleSelectedFolder) {
-      return folderCan(singleSelectedFolder.id, "edit_metadata");
+      return folderCan(singleSelectedFolder.id, "edit_folder_metadata");
     }
     // Folder context shortcut (no selection, browsing inside a folder).
     if (!selectedFiles.length && !selectedFolders.length && folderId) {
-      return folderCan(folderId, "edit_metadata");
+      return folderCan(folderId, "edit_folder_metadata");
     }
     return false;
   })();
@@ -1616,19 +1632,25 @@ export default function FileBrowserPage() {
   }, []);
 
   const handleSignatureActionOpen = useCallback((file: BrowserFileItem) => {
+    if (!canStartSignatureOnFile(file)) {
+      useToast
+        .getState()
+        .add("You don't have permission to request a signature on this file", "error");
+      return;
+    }
     if (file.signatureStatus === "in_progress") {
       setSignaturePanelFile(file);
       return;
     }
     setSignatureComposerFile(file);
-  }, []);
+  }, [canStartSignatureOnFile]);
 
   const handleSignatureDetailOpen = useCallback((file: BrowserFileItem) => {
     setSignaturePanelFile(file);
   }, []);
 
   const openFolderMetadataPage = (folder: { id: string; name: string }) => {
-    if (!folderCan(folder.id, "edit_metadata")) {
+    if (!folderCan(folder.id, "edit_folder_metadata")) {
       useToast
         .getState()
         .add("You don't have permission to edit folder metadata", "error");
@@ -1644,7 +1666,7 @@ export default function FileBrowserPage() {
 
   const openBulkMetadataModal = () => {
     if (selectedFiles.length <= 1 || selectedFolders.length > 0) return;
-    if (!selectedFiles.every((id) => fileCan(id, "edit_metadata"))) {
+    if (!selectedFiles.every((id) => fileCan(id, "edit_file_metadata"))) {
       useToast
         .getState()
         .add(
@@ -1666,7 +1688,7 @@ export default function FileBrowserPage() {
     }
 
     if (selectedFiles.length === 1 && singleSelectedFile) {
-      if (!fileCan(singleSelectedFile.id, "edit_metadata")) {
+      if (!fileCan(singleSelectedFile.id, "edit_file_metadata")) {
         useToast
           .getState()
           .add("You don't have permission to edit metadata", "error");
@@ -1689,7 +1711,7 @@ export default function FileBrowserPage() {
           .add("Select exactly one folder to edit metadata", "error");
         return;
       }
-      if (!folderCan(singleSelectedFolder.id, "edit_metadata")) {
+      if (!folderCan(singleSelectedFolder.id, "edit_folder_metadata")) {
         useToast
           .getState()
           .add("You don't have permission to edit folder metadata", "error");
@@ -1704,7 +1726,7 @@ export default function FileBrowserPage() {
     // Folder context shortcut:
     // when browsing inside a folder with no current selection, edit current folder metadata.
     if (!selectedFiles.length && !selectedFolders.length && folderId) {
-      if (!folderCan(folderId, "edit_metadata")) {
+      if (!folderCan(folderId, "edit_folder_metadata")) {
         useToast
           .getState()
           .add("You don't have permission to edit folder metadata", "error");
@@ -2407,6 +2429,15 @@ export default function FileBrowserPage() {
                     .add("Select or open a file to use signatures");
                   return;
                 }
+                if (
+                  signatureToolbarFile.signatureStatus !== "in_progress" &&
+                  !canStartSignatureOnFile(signatureToolbarFile)
+                ) {
+                  useToast
+                    .getState()
+                    .add("You don't have permission to request a signature on this file", "error");
+                  return;
+                }
 
                 if (
                   signatureToolbarFile.activeSignatureWorkflowId ||
@@ -2427,10 +2458,11 @@ export default function FileBrowserPage() {
               }}
               className={clsx(
                 "flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-colors",
-                signatureToolbarFile
+                canUseSignatureToolbar
                   ? "hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-primary-600"
                   : "text-gray-300 dark:text-gray-600",
               )}
+              disabled={!canUseSignatureToolbar}
             >
               <PenTool size={16} />
               <span className="text-[10px] font-medium">
@@ -2547,7 +2579,7 @@ export default function FileBrowserPage() {
 
                           {selectedFiles.length > 1 &&
                             selectedFiles.every((id) =>
-                              fileCan(id, "edit_metadata"),
+                              fileCan(id, "edit_file_metadata"),
                             ) && (
                               <button
                                 onClick={() => {
@@ -2619,7 +2651,7 @@ export default function FileBrowserPage() {
                             )}
 
                           {singleSelectedFile &&
-                            fileCan(singleSelectedFile.id, "edit_metadata") && (
+                            fileCan(singleSelectedFile.id, "edit_file_metadata") && (
                               <button
                                 onClick={() => {
                                   setShowModifyMenu(false);
@@ -2731,7 +2763,7 @@ export default function FileBrowserPage() {
 
                               {folderCan(
                                 singleSelectedFolder.id,
-                                "edit_metadata",
+                                "edit_folder_metadata",
                               ) && (
                                 <button
                                   onClick={() => {
@@ -3387,8 +3419,8 @@ export default function FileBrowserPage() {
                 onOpenVersionHistory={(file) =>
                   setVersionsFile(file as BrowserFileItem)
                 }
-                canViewMetadata={fileCan(detailFile.id, "view_metadata")}
-                canEditMetadata={fileCan(detailFile.id, "edit_metadata")}
+                canViewMetadata={fileCan(detailFile.id, "view_file_metadata")}
+                canEditMetadata={fileCan(detailFile.id, "edit_file_metadata")}
                 canToggleLock={fileCan(detailFile.id, "edit_file_attrs")}
                 canUploadVersion={fileCan(detailFile.id, "update_versions")}
                 canOpenWorkflow={fileCan(detailFile.id, "edit_file_attrs")}
@@ -3606,7 +3638,7 @@ export default function FileBrowserPage() {
                                 </div>
                                 <div
                                   className={
-                                    missingMetaCount > 0
+                                    showFolderCounts && missingMetaCount > 0
                                       ? "flex-1 min-w-0 pr-2 grid grid-cols-[1fr_auto] items-start gap-x-2"
                                       : "flex-1 min-w-0 pr-2 flex items-center justify-between gap-2"
                                   }
@@ -3614,26 +3646,28 @@ export default function FileBrowserPage() {
                                   <span className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">
                                     {folder.name}
                                   </span>
-                                  <span
-                                    className={`text-xs text-gray-400 shrink-0 ml-3 ${missingMetaCount > 0 ? "row-span-2 self-center" : ""}`}
-                                  >
-                                    {folder.totalFiles ?? folder._count.files}{" "}
-                                    file
-                                    {(folder.totalFiles ??
-                                      folder._count.files) !== 1
-                                      ? "s"
-                                      : ""}
-                                    {folder._count.children > 0 && (
-                                      <>
-                                        {" · "}
-                                        {folder._count.children} folder
-                                        {folder._count.children !== 1
-                                          ? "s"
-                                          : ""}
-                                      </>
-                                    )}
-                                  </span>
-                                  {missingMetaCount > 0 && (
+                                  {showFolderCounts && (
+                                    <span
+                                      className={`text-xs text-gray-400 shrink-0 ml-3 ${missingMetaCount > 0 ? "row-span-2 self-center" : ""}`}
+                                    >
+                                      {folder.totalFiles ?? folder._count.files}{" "}
+                                      file
+                                      {(folder.totalFiles ??
+                                        folder._count.files) !== 1
+                                        ? "s"
+                                        : ""}
+                                      {folder._count.children > 0 && (
+                                        <>
+                                          {" · "}
+                                          {folder._count.children} folder
+                                          {folder._count.children !== 1
+                                            ? "s"
+                                            : ""}
+                                        </>
+                                      )}
+                                    </span>
+                                  )}
+                                  {showFolderCounts && missingMetaCount > 0 && (
                                     <span
                                       className="inline-flex w-fit max-w-full mt-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/70"
                                       title={`${missingMetaCount} file${missingMetaCount !== 1 ? "s are" : " is"} missing metadata`}
@@ -3745,22 +3779,24 @@ export default function FileBrowserPage() {
                                 <span className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate w-full text-center block">
                                   {folder.name}
                                 </span>
-                                <span className="text-xs text-gray-400 shrink-0 mt-1 block">
-                                  {folder.totalFiles ?? folder._count.files}{" "}
-                                  file
-                                  {(folder.totalFiles ??
-                                    folder._count.files) !== 1
-                                    ? "s"
-                                    : ""}
-                                  {folder._count.children > 0 && (
-                                    <>
-                                      {" · "}
-                                      {folder._count.children} folder
-                                      {folder._count.children !== 1 ? "s" : ""}
-                                    </>
-                                  )}
-                                </span>
-                                {missingMetaCount > 0 && (
+                                {showFolderCounts && (
+                                  <span className="text-xs text-gray-400 shrink-0 mt-1 block">
+                                    {folder.totalFiles ?? folder._count.files}{" "}
+                                    file
+                                    {(folder.totalFiles ??
+                                      folder._count.files) !== 1
+                                      ? "s"
+                                      : ""}
+                                    {folder._count.children > 0 && (
+                                      <>
+                                        {" · "}
+                                        {folder._count.children} folder
+                                        {folder._count.children !== 1 ? "s" : ""}
+                                      </>
+                                    )}
+                                  </span>
+                                )}
+                                {showFolderCounts && missingMetaCount > 0 && (
                                   <span
                                     className="inline-flex w-fit max-w-full mt-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/70"
                                     title={`${missingMetaCount} file${missingMetaCount !== 1 ? "s are" : " is"} missing metadata`}
@@ -3768,7 +3804,7 @@ export default function FileBrowserPage() {
                                     {missingMetaCount} missing metadata
                                   </span>
                                 )}
-                                {missingMetaCount === 0 && (
+                                {showFolderCounts && missingMetaCount === 0 && (
                                   <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full border border-transparent invisible">
                                     0 missing metadata
                                   </span>
@@ -3896,7 +3932,7 @@ export default function FileBrowserPage() {
                                       )}
                                       {folderCan(
                                         folder.id,
-                                        "edit_metadata",
+                                        "edit_folder_metadata",
                                       ) && (
                                         <button
                                           onClick={() => {

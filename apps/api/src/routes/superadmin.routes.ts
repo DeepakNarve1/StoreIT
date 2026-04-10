@@ -3,6 +3,8 @@ import { z } from "zod";
 import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import { hashPassword } from "../services/auth.service";
+import { createPasswordResetToken } from "../services/password-reset.service";
+import { sendPasswordResetEmail } from "../services/email.service";
 import { createAuditLog } from "../services/audit.service";
 import jwt from "jsonwebtoken";
 
@@ -389,6 +391,70 @@ router.get("/orgs/:id/users", async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: "Failed to fetch organisation users" });
   }
 });
+
+// ─── POST /api/superadmin/orgs/:id/users/:userId/reset-password-link ────────
+router.post(
+  "/orgs/:id/users/:userId/reset-password-link",
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: req.params.id },
+        select: { id: true, name: true, slug: true },
+      });
+      if (!tenant) {
+        res.status(404).json({ error: "Organisation not found" });
+        return;
+      }
+
+      const user = await prisma.user.findFirst({
+        where: { id: req.params.userId, tenantId: req.params.id },
+        select: { id: true, name: true, email: true, role: true, isActive: true },
+      });
+      if (!user) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+      if (user.role === "SUPERADMIN") {
+        res.status(403).json({ error: "Cannot reset a Superadmin account" });
+        return;
+      }
+      if (!user.isActive) {
+        res.status(400).json({ error: "User account is disabled. Enable the user first." });
+        return;
+      }
+
+      const record = await createPasswordResetToken(user.email);
+      await sendPasswordResetEmail({
+        email: user.email,
+        token: record.token,
+        name: user.name,
+      });
+
+      await createAuditLog({
+        action: "superadmin.user.password_reset_link",
+        userId: req.user!.userId,
+        tenantId: req.user!.tenantId,
+        resourceType: "user",
+        resourceId: user.id,
+        resourceName: user.email,
+        metadata: {
+          targetTenantId: tenant.id,
+          targetTenantSlug: tenant.slug,
+        },
+        req,
+      });
+
+      res.json({ message: `Password reset link sent to ${user.email}` });
+    } catch (err: any) {
+      if (err.name === "ZodError") {
+        res.status(400).json({ error: "Invalid input" });
+        return;
+      }
+      console.error("Reset password link error:", err);
+      res.status(500).json({ error: err?.message || "Failed to send reset link" });
+    }
+  },
+);
 
 // ─── PATCH /api/superadmin/orgs/:id/users/:userId — enable/disable user ───────
 router.patch("/orgs/:id/users/:userId", async (req: AuthRequest, res: Response) => {

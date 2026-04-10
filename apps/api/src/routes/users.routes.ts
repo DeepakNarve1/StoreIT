@@ -3,13 +3,15 @@ import { z } from "zod";
 import { v4 as uuid } from "uuid";
 import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
-import { sendInviteEmail } from "../services/email.service";
+import { sendInviteEmail, sendPasswordResetEmail } from "../services/email.service";
 import bcrypt from "bcryptjs";
 import { getPlanLimits } from "../utils/plans";
 import {
   getRoleProfileByIdForTenant,
   serializeRoleProfile,
 } from "../services/role-profiles.service";
+import { createPasswordResetToken } from "../services/password-reset.service";
+import { createAuditLog } from "../services/audit.service";
 
 const router = Router();
 
@@ -403,6 +405,59 @@ router.patch(
         return;
       }
       res.status(500).json({ error: "Failed to update password" });
+    }
+  },
+);
+
+// ─── POST /api/users/:id/reset-password-link ─────────────────────────────────
+router.post(
+  "/:id/reset-password-link",
+  verifyAuth,
+  requireRole("ORG_ADMIN", "SUPERADMIN"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!isValidUUID(req.params.id)) {
+        res.status(400).json({ error: "Invalid ID" });
+        return;
+      }
+
+      const user = await prisma.user.findFirst({
+        where: { id: req.params.id, tenantId: req.user!.tenantId },
+        select: { id: true, name: true, email: true, role: true, isActive: true },
+      });
+      if (!user) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+      if (user.role === "SUPERADMIN") {
+        res.status(403).json({ error: "Cannot reset a Superadmin account" });
+        return;
+      }
+      if (!user.isActive) {
+        res.status(400).json({ error: "User account is disabled. Enable the user first." });
+        return;
+      }
+
+      const record = await createPasswordResetToken(user.email);
+      await sendPasswordResetEmail({
+        email: user.email,
+        token: record.token,
+        name: user.name,
+      });
+
+      await createAuditLog({
+        action: "user.password_reset_link",
+        userId: req.user!.userId,
+        tenantId: req.user!.tenantId,
+        resourceType: "user",
+        resourceId: user.id,
+        resourceName: user.email,
+        req,
+      });
+
+      res.json({ message: `Password reset link sent to ${user.email}` });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || "Failed to send reset link" });
     }
   },
 );

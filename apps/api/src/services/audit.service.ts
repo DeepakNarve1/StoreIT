@@ -37,6 +37,7 @@ export type AuditAction =
   | "link.generate"
   | "link.access"
   | "user.invite"
+  | "user.password_reset_link"
   | "guest.share"
   | "user.login"
   | "user.logout"
@@ -46,6 +47,7 @@ export type AuditAction =
   | "superadmin.org.update"
   | "superadmin.org.suspend"
   | "superadmin.impersonate"
+  | "superadmin.user.password_reset_link"
   | "superadmin.user.update";
 
 interface LogParams {

@@ -5,8 +5,8 @@ export const FOLDER_PERMISSION_OPTIONS = [
   { key: "edit_folders", label: "Edit folders" },
   { key: "move_folders", label: "Move folders" },
   { key: "delete_folders", label: "Delete folders" },
-  { key: "view_metadata", label: "View folder metadata" },
-  { key: "edit_metadata", label: "Edit folder metadata" },
+  { key: "view_folder_metadata", label: "View folder metadata" },
+  { key: "edit_folder_metadata", label: "Edit folder metadata" },
   { key: "share_folders", label: "Share folders" },
 ] as const;
 
@@ -16,8 +16,8 @@ export const FILE_PERMISSION_OPTIONS = [
   { key: "preview_files", label: "Preview files" },
   { key: "download_files", label: "Download files" },
   { key: "edit_file_attrs", label: "Edit file attributes" },
-  { key: "view_metadata", label: "View file metadata" },
-  { key: "edit_metadata", label: "Edit file metadata" },
+  { key: "view_file_metadata", label: "View file metadata" },
+  { key: "edit_file_metadata", label: "Edit file metadata" },
   { key: "update_versions", label: "Update file versions" },
   { key: "move_files", label: "Move files" },
   { key: "delete_files", label: "Delete files" },

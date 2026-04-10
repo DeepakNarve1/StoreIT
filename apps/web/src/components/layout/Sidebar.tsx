@@ -39,6 +39,11 @@ interface StoreITem {
   _count: { files: number; children: number };
 }
 
+interface FolderListResponse {
+  folders: StoreITem[];
+  showCounts: boolean;
+}
+
 interface CategoryItem {
   id: string;
   name: string;
@@ -74,10 +79,12 @@ function mergeNavWithDefaults(order: string[]): string[] {
 function FolderNode({
   folder,
   allFolders,
+  showCounts,
   depth = 0,
 }: {
   folder: StoreITem;
   allFolders: StoreITem[];
+  showCounts: boolean;
   depth?: number;
 }) {
   const navigate = useNavigate();
@@ -124,7 +131,7 @@ function FolderNode({
             />
           )}
           <span className="truncate">{folder.name}</span>
-          {folder._count.files > 0 && (
+          {showCounts && folder._count.files > 0 && (
             <span className="ml-auto text-xs text-gray-400 shrink-0">
               {folder._count.files}
             </span>
@@ -138,6 +145,7 @@ function FolderNode({
               key={child.id}
               folder={child}
               allFolders={allFolders}
+              showCounts={showCounts}
               depth={depth + 1}
             />
           ))}
@@ -161,7 +169,6 @@ function CategoryNode({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const [expanded, setExpanded] = useState(false);
   const isActive = location.pathname === `/category/${category.id}`;
   const totalItems = category._count.folders + category._count.files;
 
@@ -176,21 +183,8 @@ function CategoryNode({
         )}
       >
         <button
-          onClick={() => setExpanded((e) => !e)}
-          className={clsx(
-            "p-0.5 rounded shrink-0 ml-3",
-            totalItems > 0 ? "opacity-100" : "opacity-0 pointer-events-none",
-          )}
-        >
-          {expanded ? (
-            <ChevronDown size={12} className="text-gray-400" />
-          ) : (
-            <ChevronRight size={12} className="text-gray-400" />
-          )}
-        </button>
-        <button
           onClick={() => navigate(`/category/${category.id}`)}
-          className="flex items-center gap-1.5 flex-1 py-1 text-left min-w-0 text-xs"
+          className="flex items-center gap-1.5 flex-1 py-1 text-left min-w-0 text-xs ml-3"
         >
           <Hash
             size={13}
@@ -227,9 +221,6 @@ function CategoryNode({
           </button>
         )}
       </div>
-      {expanded && category._count.children > 0 && (
-        <div>{/* render child categories here when API supports it */}</div>
-      )}
     </div>
   );
 }
@@ -335,7 +326,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
     queryKey: ["folders", "all"],
     queryFn: async () => {
       const res = await api.get("/folders/all");
-      return res.data as { folders: StoreITem[] };
+      return res.data as FolderListResponse;
     },
     staleTime: 10 * 1000,
   });
@@ -403,6 +394,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
   const stats = statsData?.stats;
 
   const folders = foldersData?.folders ?? [];
+  const showFolderCounts = foldersData?.showCounts ?? false;
   const categories = categoriesData?.categories ?? [];
   const rootFolders = folders.filter((f) => f.parentId === null);
   const rootCategories = categories.filter((c) => c.parentId === null);
@@ -660,12 +652,13 @@ export default function Sidebar({ isOpen }: SidebarProps) {
             </div>
           ) : (
             rootFolders.map((folder) => (
-              <FolderNode
-                key={folder.id}
-                folder={folder}
-                allFolders={folders}
-              />
-            ))
+            <FolderNode
+              key={folder.id}
+              folder={folder}
+              allFolders={folders}
+              showCounts={showFolderCounts}
+            />
+          ))
           )}
         </div>
       </div>

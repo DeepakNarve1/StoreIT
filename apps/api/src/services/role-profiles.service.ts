@@ -8,8 +8,8 @@ export const FILE_CAPABILITIES = [
   "preview_files",
   "download_files",
   "edit_file_attrs",
-  "view_metadata",
-  "edit_metadata",
+  "view_file_metadata",
+  "edit_file_metadata",
   "update_versions",
   "move_files",
   "delete_files",
@@ -26,8 +26,8 @@ export const FOLDER_CAPABILITIES = [
   "edit_folders",
   "move_folders",
   "delete_folders",
-  "view_metadata",
-  "edit_metadata",
+  "view_folder_metadata",
+  "edit_folder_metadata",
   "share_folders",
 ] as const;
 
@@ -61,6 +61,11 @@ type RoleProfileLike = {
   capabilities?: unknown;
 };
 
+const LEGACY_CAPABILITY_ALIASES: Record<string, readonly string[]> = {
+  view_metadata: ["view_file_metadata", "view_folder_metadata"],
+  edit_metadata: ["edit_file_metadata", "edit_folder_metadata"],
+};
+
 const SYSTEM_ROLE_DEFINITIONS: Array<{
   key: Exclude<BaseRole, "SUPERADMIN">;
   name: string;
@@ -83,8 +88,8 @@ const SYSTEM_ROLE_DEFINITIONS: Array<{
       preview_files: true,
       download_files: true,
       edit_file_attrs: true,
-      view_metadata: true,
-      edit_metadata: true,
+      view_file_metadata: true,
+      edit_file_metadata: true,
       update_versions: true,
       move_files: true,
       delete_files: true,
@@ -98,6 +103,8 @@ const SYSTEM_ROLE_DEFINITIONS: Array<{
       edit_folders: true,
       move_folders: true,
       delete_folders: true,
+      view_folder_metadata: true,
+      edit_folder_metadata: true,
       share_folders: true,
     }),
   },
@@ -111,8 +118,8 @@ const SYSTEM_ROLE_DEFINITIONS: Array<{
       preview_files: true,
       download_files: true,
       edit_file_attrs: true,
-      view_metadata: true,
-      edit_metadata: true,
+      view_file_metadata: true,
+      edit_file_metadata: true,
       update_versions: true,
       move_files: true,
       request_signatures: true,
@@ -121,6 +128,8 @@ const SYSTEM_ROLE_DEFINITIONS: Array<{
       download_folders: true,
       edit_folders: true,
       move_folders: true,
+      view_folder_metadata: true,
+      edit_folder_metadata: true,
     }),
   },
   {
@@ -131,7 +140,8 @@ const SYSTEM_ROLE_DEFINITIONS: Array<{
       see_files: true,
       see_folders: true,
       preview_files: true,
-      view_metadata: true,
+      view_file_metadata: true,
+      view_folder_metadata: true,
     }),
   },
 ];
@@ -152,13 +162,22 @@ export function normalizeCapabilities(input?: unknown): CapabilityMap {
       ? (input as Record<string, unknown>)
       : {};
 
-  return ALL_ROLE_CAPABILITIES.reduce(
+  const normalized = ALL_ROLE_CAPABILITIES.reduce(
     (acc, key) => {
       acc[key] = source[key] === true;
       return acc;
     },
     {} as CapabilityMap,
   );
+
+  for (const [legacyKey, expandedKeys] of Object.entries(LEGACY_CAPABILITY_ALIASES)) {
+    if (source[legacyKey] !== true) continue;
+    for (const key of expandedKeys) {
+      normalized[key] = true;
+    }
+  }
+
+  return normalized;
 }
 
 export function mergeCapabilities(

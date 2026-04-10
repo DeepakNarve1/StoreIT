@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { Router, Response, Request } from "express";
-import { z } from "zod";
+import { z, ZodError } from "zod";
 import { verifyAuth, AuthRequest } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import { userHasCapability } from "./permissions.routes";
@@ -486,8 +486,8 @@ router.post(
           preview_files: true,
           download_files: false,
           edit_file_attrs: false,
-          view_metadata: false,
-          edit_metadata: false,
+          view_file_metadata: false,
+          edit_file_metadata: false,
           update_versions: false,
           move_files: false,
           delete_files: false,
@@ -693,12 +693,16 @@ router.post(
         }),
         signerLinks,
       });
-    } catch (err: any) {
-      if (err.name === "ZodError") {
+    } catch (err: unknown) {
+      if (err instanceof ZodError) {
         res.status(400).json({ error: "Invalid signing input" });
         return;
       }
-
+      if (err instanceof HttpError) {
+        res.status(err.status).json({ error: err.message });
+        return;
+      }
+      console.error("POST /signing/files/:fileId/start:", err);
       res.status(500).json({ error: "Failed to start signing workflow" });
     }
   },

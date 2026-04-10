@@ -798,7 +798,7 @@ function FileList({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (fileCan(file.id, "edit_metadata")) onMetadata?.(file);
+                      if (fileCan(file.id, "edit_file_metadata")) onMetadata?.(file);
                     }}
                     className="inline-flex w-full max-w-full items-center justify-center gap-1 px-2 py-1 text-xs font-medium rounded-full border transition-colors whitespace-nowrap
                                bg-white dark:bg-gray-800 text-red-600 dark:text-red-300 border-red-200 dark:border-red-800/70
@@ -1001,7 +1001,7 @@ function FileList({
                             <Hash size={14} /> Assign category
                           </button>
                         )}
-                      {fileCan(file.id, "edit_metadata") && onMetadata && (
+                      {fileCan(file.id, "edit_file_metadata") && onMetadata && (
                         <button
                           onClick={() => {
                             onMetadata(file);
