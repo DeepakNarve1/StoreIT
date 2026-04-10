@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "postinstall": "prisma generate --schema prisma/schema.prisma",
+    "postinstall": "node -e \"const fs=require('fs'); const cp=require('child_process'); const prismaBin=process.platform==='win32'?'node_modules/.bin/prisma.cmd':'node_modules/.bin/prisma'; if(fs.existsSync(prismaBin)){ cp.execSync('prisma generate --schema prisma/schema.prisma',{stdio:'inherit',shell:true}); } else { console.log('Skipping prisma generate: Prisma CLI not installed in this environment.'); }\"",
     "dev": "node ./scripts/dev.mjs",
     "dev:api": "npm run dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
