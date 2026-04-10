@@ -12,7 +12,7 @@ import {
 } from "../services/storage.service";
 import { createAuditLog } from "../services/audit.service";
 import { cancelActiveWorkflowForFile } from "../services/workflow.service";
-import { getPlanLimits } from "../utils/plans";
+import { getTenantPlanSnapshot } from "../services/tenant-plan-policy.service";
 import { getEffectiveRoleProfileForUser } from "../services/role-profiles.service";
 import archiver from "archiver";
 import https from "https";
@@ -599,22 +599,10 @@ router.post(
 
       const savedFiles = [];
 
-      // ── Quota check ───────────────────────────────────────────────────────
-      const tenant = await prisma.tenant.findUnique({
-        where: { id: req.user!.tenantId },
-        select: { plan: true, planExpiresAt: true },
-      });
-      // Fix 5: if grace period has expired, enforce free plan limits
-      const effectivePlan =
-        tenant?.planExpiresAt && tenant.planExpiresAt < new Date()
-          ? "free"
-          : (tenant?.plan ?? "free");
-      const { storageBytes: limit } = getPlanLimits(effectivePlan);
-      const usageResult = await prisma.file.aggregate({
-        where: { tenantId: req.user!.tenantId, isDeleted: false },
-        _sum: { size: true },
-      });
-      const usedBytes = usageResult._sum.size ?? 0;
+      // ── Quota check (effective plan aware, including grace-period fallback) ──
+      const snapshot = await getTenantPlanSnapshot(req.user!.tenantId);
+      const limit = snapshot.limits.storageBytes;
+      const usedBytes = snapshot.usedBytes;
       const incomingBytes = (req.files as Express.Multer.File[]).reduce(
         (s, f) => s + f.size,
         0,
@@ -624,6 +612,10 @@ router.post(
         res.status(400).json({
           error: "Storage quota exceeded. Please upgrade your plan.",
           code: "QUOTA_EXCEEDED",
+          effectivePlan: snapshot.effectivePlan,
+          limitBytes: limit,
+          usedBytes,
+          incomingBytes,
         });
         return;
       }

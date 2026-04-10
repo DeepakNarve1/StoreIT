@@ -5,7 +5,7 @@ import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import { sendInviteEmail, sendPasswordResetEmail } from "../services/email.service";
 import bcrypt from "bcryptjs";
-import { getPlanLimits } from "../utils/plans";
+import { getTenantPlanSnapshot } from "../services/tenant-plan-policy.service";
 import {
   getRoleProfileByIdForTenant,
   serializeRoleProfile,
@@ -132,25 +132,19 @@ router.post(
         return;
       }
 
-      // FIX #1: single query fetches both plan and name — removes duplicate const tenant declaration
       const tenant = await prisma.tenant.findUnique({
         where: { id: req.user!.tenantId },
-        select: { plan: true, name: true, planExpiresAt: true },
+        select: { name: true },
       });
 
-      // Check user limit — use effective plan (respect grace period expiry)
-      const effectivePlan =
-        tenant?.planExpiresAt && tenant.planExpiresAt < new Date()
-          ? "free"
-          : (tenant?.plan ?? "free");
-      const { maxUsers } = getPlanLimits(effectivePlan);
-      const currentUsers = await prisma.user.count({
-        where: { tenantId: req.user!.tenantId, isActive: true },
-      });
+      const snapshot = await getTenantPlanSnapshot(req.user!.tenantId);
+      const maxUsers = snapshot.limits.maxUsers;
+      const currentUsers = snapshot.activeUsers;
       if (maxUsers !== Infinity && currentUsers >= maxUsers) {
         res.status(402).json({
           error: `User limit reached for your plan (${maxUsers} users). Please upgrade.`,
           code: "USER_LIMIT_REACHED",
+          effectivePlan: snapshot.effectivePlan,
           limit: maxUsers,
           current: currentUsers,
         });
@@ -608,6 +602,22 @@ router.patch(
           }
           resolvedRoleProfileId = roleProfile.id;
           resolvedRole = roleProfile.baseRole as any;
+        }
+      }
+
+      // If reactivating a user after downgrade, enforce seat caps.
+      if (isActive === true && !user.isActive) {
+        const snapshot = await getTenantPlanSnapshot(req.user!.tenantId);
+        const maxUsers = snapshot.limits.maxUsers;
+        if (maxUsers !== Infinity && snapshot.activeUsers >= maxUsers) {
+          res.status(402).json({
+            error: `Cannot reactivate user: plan user limit (${maxUsers}) has been reached.`,
+            code: "USER_LIMIT_REACHED",
+            effectivePlan: snapshot.effectivePlan,
+            limit: maxUsers,
+            current: snapshot.activeUsers,
+          });
+          return;
         }
       }
 

@@ -16,7 +16,7 @@ import {
   getDefaultCapabilitiesForBaseRole,
   normalizeBaseRoleValue,
 } from "../services/role-profiles.service";
-import { getPlanLimits } from "../utils/plans";
+import { getTenantPlanSnapshot } from "../services/tenant-plan-policy.service";
 
 const router = Router();
 
@@ -202,23 +202,15 @@ router.post("/invite/accept", async (req: Request, res: Response) => {
       return;
     }
 
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: invite.tenantId },
-      select: { plan: true, planExpiresAt: true },
-    });
-    const effectivePlan =
-      tenant?.planExpiresAt && tenant.planExpiresAt < new Date()
-        ? "free"
-        : (tenant?.plan ?? "free");
-    const { maxUsers } = getPlanLimits(effectivePlan);
-    const currentUsers = await prisma.user.count({
-      where: { tenantId: invite.tenantId, isActive: true },
-    });
+    const snapshot = await getTenantPlanSnapshot(invite.tenantId);
+    const maxUsers = snapshot.limits.maxUsers;
+    const currentUsers = snapshot.activeUsers;
 
     if (maxUsers !== Infinity && currentUsers >= maxUsers) {
       res.status(402).json({
         error: `User limit reached for your plan (${maxUsers} users). Please ask your admin to upgrade before accepting this invite.`,
         code: "USER_LIMIT_REACHED",
+        effectivePlan: snapshot.effectivePlan,
         limit: maxUsers,
         current: currentUsers,
       });

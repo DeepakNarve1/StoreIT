@@ -10,6 +10,7 @@ import {
   Settings,
   LogOut,
   User,
+  AlertTriangle,
 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -78,6 +79,44 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
 
   const notifications = notificationsData?.items ?? [];
   const unreadCount = notificationsData?.unreadCount ?? 0;
+  const canViewBillingSignals = [
+    "SUPERADMIN",
+    "ORG_ADMIN",
+    "MANAGER",
+  ].includes(user?.role ?? "");
+  const { data: billingSignals } = useQuery({
+    queryKey: ["billing-status-banner"],
+    enabled: canViewBillingSignals,
+    queryFn: async () => {
+      try {
+        const res = await api.get("/billing/status");
+        return res.data as {
+          isOverStorageQuota?: boolean;
+          isUserLimitReached?: boolean;
+          isInGracePeriod?: boolean;
+        };
+      } catch {
+        return null;
+      }
+    },
+    refetchInterval: 60_000,
+    staleTime: 45_000,
+  });
+  const hasPolicyAlert =
+    !!billingSignals &&
+    (billingSignals.isOverStorageQuota ||
+      billingSignals.isUserLimitReached ||
+      billingSignals.isInGracePeriod);
+  const hasHardPolicyBlock =
+    !!billingSignals &&
+    (billingSignals.isOverStorageQuota || billingSignals.isUserLimitReached);
+  const policyAlertTitle = billingSignals?.isOverStorageQuota
+    ? "Storage limit reached"
+    : billingSignals?.isUserLimitReached
+      ? "User seat limit reached"
+      : billingSignals?.isInGracePeriod
+        ? "Subscription grace period active"
+        : "Billing attention needed";
 
   const handleLogout = async () => {
     logout();
@@ -152,6 +191,21 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
       </form>
 
       <div className="flex items-center gap-2 ml-auto">
+        {hasPolicyAlert ? (
+          <button
+            onClick={() => navigate("/billing")}
+            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+              hasHardPolicyBlock
+                ? "border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-200 hover:bg-red-100 dark:hover:bg-red-900/35"
+                : "border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/35"
+            }`}
+            title={policyAlertTitle}
+          >
+            <AlertTriangle size={12} />
+            Plan Alert
+          </button>
+        ) : null}
+
         {/* Upload button — navigates to /browse and opens upload zone */}
         {canWrite && (
           <button

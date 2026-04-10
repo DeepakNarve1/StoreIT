@@ -4,6 +4,7 @@ import { verifyAuth, AuthRequest, requireRole } from "../middleware/auth";
 import { prisma } from "../utils/prisma";
 import { getPlanLimits, RAZORPAY_PLAN_IDS } from "../utils/plans";
 import { sendEmail } from "../services/email.service";
+import { getTenantPlanSnapshot } from "../services/tenant-plan-policy.service";
 
 const router = Router();
 
@@ -189,15 +190,7 @@ router.get(
         return;
       }
 
-      const [storageResult, userCount] = await Promise.all([
-        prisma.file.aggregate({
-          where: { tenantId: req.user!.tenantId, isDeleted: false },
-          _sum: { size: true },
-        }),
-        prisma.user.count({
-          where: { tenantId: req.user!.tenantId, isActive: true },
-        }),
-      ]);
+      const snapshot = await getTenantPlanSnapshot(req.user!.tenantId);
 
       let subscription: RazorpaySubscription | null = null;
       if (!BILLING_MOCK_MODE && tenant.razorpaySubscriptionId) {
@@ -208,18 +201,22 @@ router.get(
         }
       }
 
-      const limits = getPlanLimits(tenant.plan);
-      const storageBytes = storageResult._sum.size ?? 0;
-      const isOverStorageQuota =
-        limits.storageBytes !== Infinity && storageBytes > limits.storageBytes;
+      const limits = snapshot.limits;
+      const storageBytes = snapshot.usedBytes;
+      const userCount = snapshot.activeUsers;
+      const isOverStorageQuota = snapshot.overStorageLimit;
+      const isUserLimitReached =
+        limits.maxUsers !== Infinity && userCount >= limits.maxUsers;
       const isInGracePeriod =
         !!tenant.planExpiresAt && tenant.planExpiresAt > new Date();
 
       res.json({
         plan: tenant.plan,
+        effectivePlan: snapshot.effectivePlan,
         planExpiresAt: tenant.planExpiresAt ?? null,
         isInGracePeriod,
         isOverStorageQuota,
+        isUserLimitReached,
         limits: {
           storageBytes:
             limits.storageBytes === Infinity ? null : limits.storageBytes,
