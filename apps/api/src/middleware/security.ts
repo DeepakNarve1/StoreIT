@@ -24,6 +24,7 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/x-epub+zip",
   // Images (no SVG — it can contain scripts)
   "image/jpeg",
+  "image/jpg", // non-standard but sent by some clients
   "image/png",
   "image/gif",
   "image/webp",

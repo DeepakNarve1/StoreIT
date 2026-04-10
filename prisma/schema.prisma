@@ -269,7 +269,11 @@ model File {
   uploadedById String?
   uploadedBy   User?     @relation("UploadedBy", fields: [uploadedById], references: [id])
 
-comments FileComment[]
+  /// Extracted plain text (PDF, Office, text files) + OCR for images — used for full-text search
+  searchText       String?   @db.Text
+  searchIndexedAt  DateTime?
+
+  comments FileComment[]
   permissions  Permission[]
   metadata     FileMetadata[]
   oneTimeLinks OneTimeLink[]

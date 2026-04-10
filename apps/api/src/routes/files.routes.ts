@@ -32,6 +32,7 @@ import {
   purgeFileRecordInTx,
   purgeAllFilesUnderFolderIdsInTx,
 } from "../services/permanent-purge.service";
+import { indexFileContent } from "../services/file-search-index.service";
 
 const router = Router();
 
@@ -749,6 +750,15 @@ router.post(
             req,
           });
 
+          void indexFileContent({
+            fileId: updated.id,
+            buffer: file.buffer,
+            mimeType: file.mimetype,
+            fileName: safeName,
+          }).catch((err) =>
+            console.error("[search-index] version:", updated.id, err),
+          );
+
           if (cancelledWorkflow) {
             await createAuditLog({
               action: "file.workflow.cancelled",
@@ -800,6 +810,15 @@ router.post(
             metadata: { size: file.size, mimeType: file.mimetype },
             req,
           });
+
+          void indexFileContent({
+            fileId: saved.id,
+            buffer: file.buffer,
+            mimeType: file.mimetype,
+            fileName: safeName,
+          }).catch((err) =>
+            console.error("[search-index] new file:", saved.id, err),
+          );
         }
       }
 

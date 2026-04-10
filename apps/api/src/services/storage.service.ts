@@ -105,3 +105,26 @@ export const deleteFile = async (key: string): Promise<void> => {
 
 // Keep this export for backwards compatibility
 export const getSignedViewUrl = getFileViewUrl;
+
+/** Load file bytes from R2 or local uploads (for search indexing, reprocessing). */
+export async function downloadFileBuffer(key: string): Promise<Buffer> {
+  if (isStorageConfigured()) {
+    const out = await getR2Client().send(
+      new GetObjectCommand({
+        Bucket: process.env.R2_BUCKET_NAME!,
+        Key: key,
+      }),
+    );
+    const body = out.Body;
+    if (!body) {
+      throw new Error(`Empty object body for key: ${key}`);
+    }
+    const bytes = await body.transformToByteArray();
+    return Buffer.from(bytes);
+  }
+  const fullPath = path.join(LOCAL_UPLOAD_DIR, key);
+  if (!fs.existsSync(fullPath)) {
+    throw new Error(`Local file not found: ${key}`);
+  }
+  return fs.readFileSync(fullPath);
+}
