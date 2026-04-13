@@ -6,12 +6,20 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import bcrypt from "bcryptjs";
+import {
+  isLocalPostgresHost,
+  normalizeDatabaseUrlForRemotePool,
+  postgresHostname,
+} from "./postgres-url";
 
-const dbUrl = process.env.DATABASE_URL || "";
-const isRemote = dbUrl.includes("render.com") || dbUrl.includes("sslmode=require");
+const dbUrl = process.env.DATABASE_URL
+  ? normalizeDatabaseUrlForRemotePool(process.env.DATABASE_URL)
+  : "";
+const host = dbUrl ? postgresHostname(dbUrl) : null;
+const isRemote = Boolean(host && !isLocalPostgresHost(host));
 
 const pool = new Pool({
-  connectionString: dbUrl,
+  connectionString: dbUrl || undefined,
   ...(isRemote ? { ssl: { rejectUnauthorized: false } } : {}),
 });
 
