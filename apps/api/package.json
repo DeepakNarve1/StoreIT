@@ -7,6 +7,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "seed": "ts-node src/utils/seed.ts",
+    "db:seed": "npm run seed",
     "prisma:migrate": "prisma migrate dev --schema ../../prisma/schema.prisma",
     "prisma:generate": "prisma generate --schema ../../prisma/schema.prisma"
   },
