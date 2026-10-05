@@ -118,6 +118,38 @@ async function main() {
   });
   console.log("✅ Superadmin created: super@platform.com / Super@123");
 
+  // Create Demo Tenant (1GB Storage Limit Free Plan)
+  const demoTenant = await prisma.tenant.upsert({
+    where: { slug: "demo-corp" },
+    update: { plan: "free" },
+    create: {
+      name: "Demo Corp (1GB)",
+      slug: "demo-corp",
+      plan: "free",
+      isActive: true,
+    },
+  });
+
+  const testAdminPassword = await bcrypt.hash("Admin@123", 12);
+  await prisma.user.upsert({
+    where: { email: "testadmin@storeit.com" },
+    update: {
+      password: testAdminPassword,
+      role: "ORG_ADMIN",
+      tenantId: demoTenant.id,
+      isActive: true,
+    },
+    create: {
+      name: "Test Admin (1GB)",
+      email: "testadmin@storeit.com",
+      password: testAdminPassword,
+      role: "ORG_ADMIN",
+      tenantId: demoTenant.id,
+      isActive: true,
+    },
+  });
+  console.log("✅ 1GB Test Admin created: testadmin@storeit.com / Admin@123");
+
   console.log("\n✅ Seeding complete!");
 }
 
