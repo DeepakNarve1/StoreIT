@@ -20,32 +20,8 @@ const DEMO_ACCOUNTS: QuickCredential[] = [
     badge: "1 GB Quota",
     email: "testadmin@storeit.com",
     pass: "Admin@123",
-    note: "Admin with 1 GB storage limit for testing & evaluation",
+    note: "Admin account with 1 GB storage limit for testing & evaluation",
     highlight: true,
-  },
-  {
-    role: "Org Admin (Pro)",
-    email: "admin@acme.com",
-    pass: "Admin@123",
-    note: "Full organization admin access",
-  },
-  {
-    role: "Super Admin",
-    email: "super@platform.com",
-    pass: "Super@123",
-    note: "Platform-level administration",
-  },
-  {
-    role: "Editor",
-    email: "editor@acme.com",
-    pass: "Editor@123",
-    note: "Upload & edit permissions",
-  },
-  {
-    role: "Viewer",
-    email: "viewer@acme.com",
-    pass: "Viewer@123",
-    note: "Read-only access",
   },
 ];
 
@@ -116,7 +92,7 @@ export default function LoginPage() {
 
           <h1 className="text-xl font-semibold text-gray-900 dark:text-white mb-1">Sign in</h1>
           <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">
-            Enter your credentials or pick a demo account on the right
+            Enter your credentials or use the test admin account
           </p>
 
           {reasonMessage && (
@@ -194,11 +170,11 @@ export default function LoginPage() {
             <div className="flex items-center gap-2 mb-3">
               <Sparkles className="w-4 h-4 text-amber-500" />
               <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
-                Demo & Evaluation Access
+                Interviewer & Demo Access
               </h2>
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-              Click any role to auto-fill credentials or sign in instantly.
+              Click below to auto-fill the test admin credentials or sign in instantly.
             </p>
 
             <div className="space-y-2.5">
